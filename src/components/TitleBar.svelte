@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
-  import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
 
   const win = getCurrentWindow();
@@ -20,10 +19,6 @@
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  <div class="brand" data-tauri-drag-region>
-    <Icon name="leaf" size={14} />
-    <span data-tauri-drag-region>Herbarium</span>
-  </div>
   <div class="controls">
     <button class="ctl" aria-label={t("window.minimize")} onclick={() => win.minimize()}>
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" /></svg>
@@ -50,28 +45,13 @@
 <style>
   .titlebar {
     flex: none;
-    height: 34px;
+    height: 30px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding-left: 12px;
+    justify-content: flex-end;
     background: var(--surface, var(--bg));
     border-bottom: 1px solid var(--border);
     user-select: none;
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 12.5px;
-    font-weight: 600;
-    color: var(--text-soft);
-    pointer-events: none;
-  }
-
-  .brand :global(svg) {
-    color: var(--accent);
   }
 
   .controls {

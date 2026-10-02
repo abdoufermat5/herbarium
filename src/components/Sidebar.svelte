@@ -9,7 +9,7 @@
   let tagsOpen = $state(true);
 
   const vaultName = $derived(
-    app.config?.vaultPath?.split(/[\\/]/).filter(Boolean).pop() ?? "Herbarium",
+    app.config?.vaultPath?.split(/[\\/]/).filter(Boolean).pop() ?? "",
   );
 
   function goAll() {
@@ -39,7 +39,9 @@
     <div class="brand-mark"><Icon name="leaf" size={19} /></div>
     <div class="brand-text">
       <strong>Herbarium</strong>
-      <span class="brand-vault ellipsis" title={app.config?.vaultPath ?? ""}>{vaultName}</span>
+      {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
+        <span class="brand-vault ellipsis" title={app.config?.vaultPath ?? ""}>{vaultName}</span>
+      {/if}
     </div>
   </div>
 

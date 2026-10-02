@@ -5,13 +5,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-### Changed
-- Replaced the default GTK header bar with a themed, draggable title bar (minimize / maximize / close) that follows the light and dark themes.
-- The window icon is now set explicitly.
-
-### Added
-- One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
-
 ## [0.1.0] - 2026-10-02
 
 First release.
@@ -24,6 +17,8 @@ First release.
 - Import dialog with a staged file list (sizes, remove, duplicate detection), drag-and-drop feedback, and paste-HTML import.
 - Content validation on import: files renamed to `.html` that are not real HTML are rejected, in both the picker and the backend.
 - Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
+- Themed, draggable title bar (minimize / maximize / close) replacing the default GTK header bar, following the light and dark themes.
+- One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
 - README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
 
 [Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...HEAD
