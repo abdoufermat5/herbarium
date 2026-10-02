@@ -5,10 +5,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-02
-
-First release.
-
 ### Added
 - Tauri 2 + Svelte 5 desktop app for keeping generated HTML pages in a plain-file vault and reviewing them at the right time.
 - Botanical design system with a command palette, toasts, an inspector panel and a review flow.
@@ -22,5 +18,15 @@ First release.
 - MIT license.
 - README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/abdoufermat5/herbarium/releases/tag/v0.1.0
+### Fixed
+- Preserve newer inspector edits when an in-flight metadata save completes.
+- Close the command palette before activating commands, exit the reader for navigation commands, and move focus to the destination.
+- Keep Tab, Shift+Tab, and Escape owned by the topmost dialog, with inactive content inert.
+- Improve light and dark theme contrast for muted text, placeholders, primary actions, filter chips, badges, and delete confirmation.
+- Apply shared text-input styling to onboarding, library search, and inspector fields.
+- Show localized review-loading errors with a retry action instead of an incorrect caught-up state.
+- Expose sidebar navigation and filter selection to assistive technology.
+- Keep delete confirmation available until explicitly confirmed or cancelled, without a time limit.
+- Use existing radius tokens for the brand mark and keyboard shortcuts.
+
+[Unreleased]: https://github.com/abdoufermat5/herbarium/commits/

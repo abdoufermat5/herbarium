@@ -101,6 +101,8 @@ export const en = {
   "list.emptyHint": "Drag an HTML file onto this window, or import one to get started.",
   "list.importPage": "Import a page",
   "list.confirm": "Confirm",
+  "list.cancel": "Cancel",
+  "list.cancelDelete": "Cancel deleting “{title}”",
   "list.delete": "Delete “{title}”",
   "list.confirmDelete": "Confirm delete “{title}”",
 
@@ -114,6 +116,9 @@ export const en = {
   "review.caughtUp": "All caught up",
   "review.caughtUpHint": "Pages you schedule for review show up here when they're due.",
   "review.browse": "Browse all pages",
+  "review.loading": "Loading pages to review…",
+  "review.loadFailed": "Couldn't load today's review",
+  "review.loadFailedHint": "Check that the vault is available, then try again.",
   "review.reschedule": "Reschedule review",
   "review.rescheduleFailed": "Couldn't reschedule the review.",
   "review.againIn": "Review again in {days}",

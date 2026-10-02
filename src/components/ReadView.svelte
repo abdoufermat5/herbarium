@@ -137,17 +137,24 @@
     const p = page;
     if (!p || saving) return;
     saving = true;
+    const sTitle = dTitle;
+    const sFolder = dFolder;
+    const sTags = dTags;
+    const sNote = dNote;
     try {
       p.meta = await api.updatePageMeta(p.meta.id, {
-        title: dTitle.trim() || p.meta.title || t("common.untitled"),
-        folder: dFolder.trim() || null,
-        tags: dTags
+        title: sTitle.trim() || p.meta.title || t("common.untitled"),
+        folder: sFolder.trim() || null,
+        tags: sTags
           .split(",")
           .map((tag) => tag.trim().replace(/^#/, ""))
           .filter(Boolean),
-        note: dNote,
+        note: sNote,
       });
-      syncDraft(p.meta);
+      if (dTitle === sTitle) dTitle = p.meta.title;
+      if (dFolder === sFolder) dFolder = p.meta.folder ?? "";
+      if (dTags === sTags) dTags = p.meta.tags.join(", ");
+      if (dNote === sNote) dNote = p.meta.note;
       toast(t("read.saved"), "success");
       void reloadPages();
     } catch {
@@ -332,15 +339,15 @@
             <h2 class="insp-title"><Icon name="file-text" size={13} />{t("read.details")}</h2>
             <div class="field">
               <label for="d-title">{t("insp.title")}</label>
-              <input id="d-title" bind:value={dTitle} />
+              <input id="d-title" type="text" bind:value={dTitle} />
             </div>
             <div class="field">
               <label for="d-folder">{t("insp.folder")}</label>
-              <input id="d-folder" bind:value={dFolder} placeholder={t("common.none")} />
+              <input id="d-folder" type="text" bind:value={dFolder} placeholder={t("common.none")} />
             </div>
             <div class="field">
               <label for="d-tags">{t("insp.tags")}</label>
-              <input id="d-tags" bind:value={dTags} placeholder={t("insp.tagsPlaceholder")} />
+              <input id="d-tags" type="text" bind:value={dTags} placeholder={t("insp.tagsPlaceholder")} />
             </div>
             <div class="field">
               <label for="d-note">{t("insp.note")}</label>

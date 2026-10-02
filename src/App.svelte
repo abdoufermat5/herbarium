@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from "svelte";
   import { app, pendingFiles, initApp, clearFilters } from "./lib/state.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
@@ -65,6 +66,8 @@
 
     if (e.key === "Escape") {
       if (app.paletteOpen) {
+        // Topmost modal consumes Escape so the dialog beneath keeps its draft.
+        e.preventDefault();
         app.paletteOpen = false;
         return;
       }
@@ -101,6 +104,28 @@
     }
   }
 
+  // When a view change or a closing modal leaves focus on a removed element,
+  // hand it to a stable control instead of dropping it on <body>.
+  let focusSeen = false;
+  $effect(() => {
+    app.readId;
+    app.view;
+    app.importOpen;
+    app.paletteOpen;
+    if (!focusSeen) {
+      focusSeen = true;
+      return;
+    }
+    void tick().then(() => {
+      if (app.importOpen || app.paletteOpen) return;
+      const a = document.activeElement;
+      if (a && a !== document.body && a.isConnected && !a.closest("[inert]")) return;
+      document
+        .querySelector<HTMLElement>(app.readId ? ".content .bar button" : "#page-search, .shell button")
+        ?.focus();
+    });
+  });
+
   async function retry() {
     retrying = true;
     await initApp();
@@ -115,7 +140,7 @@
   ondragend={() => (dragging = false)}
 />
 
-<div class="window">
+<div class="window" inert={app.importOpen || app.paletteOpen}>
 <TitleBar />
 <div class="content">
 {#if !app.initialized}
@@ -156,7 +181,9 @@
 </div>
 
 {#if app.importOpen}
-  <ImportDialog />
+  <div inert={app.paletteOpen}>
+    <ImportDialog />
+  </div>
 {/if}
 
 {#if app.paletteOpen}

@@ -10,14 +10,12 @@
   let searchInput = $state(app.search);
   let timer: ReturnType<typeof setTimeout> | undefined;
   let confirmDelId = $state<string | null>(null);
-  let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 
   const pages = $derived(visiblePages(app.pages));
   const filtersActive = $derived(!!(app.folderFilter || app.tagFilter));
 
   onDestroy(() => {
     clearTimeout(timer);
-    clearTimeout(confirmTimer);
   });
 
   function onSearch() {
@@ -38,12 +36,9 @@
   function requestDelete(p: PageMeta) {
     if (confirmDelId !== p.id) {
       confirmDelId = p.id;
-      clearTimeout(confirmTimer);
-      confirmTimer = setTimeout(() => (confirmDelId = null), 2500);
       return;
     }
     confirmDelId = null;
-    clearTimeout(confirmTimer);
     void removePage(p);
   }
 
@@ -65,6 +60,7 @@
       <Icon name="search" size={15} class="search-icon" />
       <input
         id="page-search"
+        type="text"
         bind:value={searchInput}
         oninput={onSearch}
         placeholder={t("list.searchPlaceholder")}
@@ -215,6 +211,15 @@
                 {due.label}
               </span>
             {/if}
+            {#if confirmDelId === p.id}
+              <button
+                class="btn btn-ghost btn-sm"
+                aria-label={t("list.cancelDelete", { title: p.title || t("common.untitled") })}
+                onclick={() => (confirmDelId = null)}
+              >
+                {t("list.cancel")}
+              </button>
+            {/if}
             <button
               class="btn btn-ghost btn-sm del"
               class:confirm={confirmDelId === p.id}
@@ -314,8 +319,8 @@
     border: none;
   }
   .filter-chip:hover {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--on-accent);
   }
 
   .count-bar {
@@ -432,9 +437,9 @@
     opacity: 1;
   }
   .del.confirm {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: #fff;
+    background: var(--danger-fill);
+    border-color: var(--danger-fill);
+    color: var(--on-danger);
   }
   .del-text {
     font-size: 12px;

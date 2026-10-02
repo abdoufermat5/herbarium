@@ -100,6 +100,8 @@ export const fr: Record<MessageKey, string> = {
   "list.emptyHint": "Glissez un fichier HTML sur cette fenêtre, ou importez-en un pour commencer.",
   "list.importPage": "Importer une page",
   "list.confirm": "Confirmer",
+  "list.cancel": "Annuler",
+  "list.cancelDelete": "Annuler la suppression de « {title} »",
   "list.delete": "Supprimer « {title} »",
   "list.confirmDelete": "Confirmer la suppression de « {title} »",
 
@@ -114,6 +116,9 @@ export const fr: Record<MessageKey, string> = {
   "review.caughtUp": "Tout est à jour",
   "review.caughtUpHint": "Les pages que vous planifiez apparaîtront ici lorsqu'elles seront à réviser.",
   "review.browse": "Parcourir toutes les pages",
+  "review.loading": "Chargement des pages à réviser…",
+  "review.loadFailed": "Impossible de charger la révision du jour",
+  "review.loadFailedHint": "Vérifiez que le coffre est disponible, puis réessayez.",
   "review.reschedule": "Replanifier la révision",
   "review.rescheduleFailed": "Impossible de replanifier la révision.",
   "review.againIn": "Réviser à nouveau dans {days}",

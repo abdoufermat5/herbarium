@@ -11,6 +11,7 @@
 
   let due = $state<PageMeta[]>([]);
   let loaded = $state(false);
+  let failed = $state(false);
   let busyId = $state<string | null>(null);
   let loadToken = 0;
 
@@ -22,22 +23,29 @@
     app.pages.filter((p) => p.lastReview && p.lastReview >= startOfToday()).length,
   );
 
-  $effect(() => {
-    if (app.view !== "review") return;
+  function load() {
     const token = ++loadToken;
     loaded = false;
+    failed = false;
     api
       .reviewToday()
       .then((rows) => {
         if (token !== loadToken) return;
         due = [...rows].sort((a, b) => (a.nextReview ?? 0) - (b.nextReview ?? 0));
+        loaded = true;
       })
-      .catch(() => {
-        if (token === loadToken) due = [];
-      })
-      .finally(() => {
-        if (token === loadToken) loaded = true;
+      .catch((e) => {
+        if (token !== loadToken) return;
+        console.error(e);
+        due = [];
+        failed = true;
+        loaded = true;
       });
+  }
+
+  $effect(() => {
+    if (app.view !== "review") return;
+    load();
   });
 
   async function reschedule(id: string, days: number) {
@@ -74,7 +82,7 @@
     </button>
   </header>
 
-  {#if loaded && due.length > 0}
+  {#if loaded && !failed && due.length > 0}
     <div class="stats">
       {#if overdueCount > 0}
         <span class="chip chip-warn">
@@ -96,10 +104,17 @@
   {/if}
 
   {#if !loaded}
-    <div class="list" aria-hidden="true">
+    <div class="list" role="status" aria-label={t("review.loading")}>
       {#each [0, 1, 2] as i (i)}
-        <div class="skel-row skel"></div>
+        <div class="skel-row skel" aria-hidden="true"></div>
       {/each}
+    </div>
+  {:else if failed}
+    <div class="empty" role="alert">
+      <span class="empty-icon"><Icon name="info" size={22} /></span>
+      <strong>{t("review.loadFailed")}</strong>
+      <span>{t("review.loadFailedHint")}</span>
+      <button class="btn btn-sm" onclick={load}>{t("boot.retry")}</button>
     </div>
   {:else if due.length === 0}
     <div class="empty">

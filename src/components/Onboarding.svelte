@@ -67,6 +67,7 @@
       <p>{t("onboard.createText")}</p>
       <div class="name-row">
         <input
+          type="text"
           aria-label={t("onboard.nameLabel")}
           placeholder="Herbarium"
           maxlength={60}

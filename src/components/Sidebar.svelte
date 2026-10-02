@@ -50,6 +50,7 @@
       <button
         class="nav-item"
         class:active={app.view === "list" && !app.folderFilter && !app.tagFilter}
+        aria-current={app.view === "list" && !app.folderFilter && !app.tagFilter ? "page" : undefined}
         onclick={goAll}
       >
         <span class="nav-icon"><Icon name="files" size={15} /></span>
@@ -58,6 +59,7 @@
       <button
         class="nav-item"
         class:active={app.view === "review"}
+        aria-current={app.view === "review" ? "page" : undefined}
         title={dueLabel()}
         onclick={goReview}
       >
@@ -85,6 +87,7 @@
               <button
                 class="nav-item nav-sub"
                 class:active={app.view === "list" && app.folderFilter === folder}
+                aria-pressed={app.view === "list" && app.folderFilter === folder}
                 title={folder}
                 onclick={() => filterFolder(folder)}
               >
@@ -113,6 +116,7 @@
               <button
                 class="nav-item nav-sub"
                 class:active={app.view === "list" && app.tagFilter === tg.tag}
+                aria-pressed={app.view === "list" && app.tagFilter === tg.tag}
                 title={tg.tag}
                 onclick={() => toggleTag(tg.tag)}
               >
@@ -185,7 +189,7 @@
     height: 36px;
     display: grid;
     place-items: center;
-    border-radius: 10px;
+    border-radius: var(--radius);
     background: var(--accent-soft);
     color: var(--accent-strong);
   }

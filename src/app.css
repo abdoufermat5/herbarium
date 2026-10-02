@@ -16,7 +16,7 @@
   --border: #e4e0d3;
   --border-strong: #cdc7b8;
   --border-hover: #b7b09d;
-  --placeholder: #a9a392;
+  --placeholder: #62665a;
   --scroll-thumb: #d3cdbd;
   --scroll-thumb-hover: #b9b2a0;
   --scrim: rgba(35, 40, 29, 0.32);
@@ -24,16 +24,21 @@
   /* Ink */
   --text: #23281d;
   --text-soft: #4a5041;
-  --muted: #82857a;
+  --muted: #62665a;
 
   /* Accent — botanical green */
   --accent: #2f7a4a;
+  --accent-fill: #2f7a4a;
+  --accent-fill-hover: #215c37;
+  --on-accent: #ffffff;
   --accent-strong: #215c37;
   --accent-soft: #e2efe5;
   --accent-ring: rgba(47, 122, 74, 0.22);
 
   /* Status */
   --danger: #b23c2e;
+  --danger-fill: #b23c2e;
+  --on-danger: #ffffff;
   --danger-soft: #f9e9e5;
   --danger-border: #e7c0b8;
   --danger-ring: rgba(178, 60, 46, 0.22);
@@ -87,7 +92,7 @@
   --border: #2e362c;
   --border-strong: #3d473a;
   --border-hover: #55614f;
-  --placeholder: #6b7365;
+  --placeholder: #8a9283;
   --scroll-thumb: #3a4437;
   --scroll-thumb-hover: #526050;
   --scrim: rgba(0, 0, 0, 0.5);
@@ -97,11 +102,16 @@
   --muted: #949c8a;
 
   --accent: #4fa56d;
+  --accent-fill: #2f7a4a;
+  --accent-fill-hover: #347f50;
+  --on-accent: #ffffff;
   --accent-strong: #7cc795;
   --accent-soft: #223a2a;
   --accent-ring: rgba(79, 165, 109, 0.32);
 
   --danger: #e2705f;
+  --danger-fill: #b23c2e;
+  --on-danger: #ffffff;
   --danger-soft: #3a211d;
   --danger-border: #6a352d;
   --danger-ring: rgba(226, 112, 95, 0.32);
@@ -114,16 +124,6 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
   --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.55);
-}
-
-/* Primary buttons keep white text; lift the fill so contrast holds on dark. */
-:root[data-theme="dark"] .btn-primary {
-  background: #2f7a4a;
-  border-color: #2f7a4a;
-}
-:root[data-theme="dark"] .btn-primary:hover:not(:disabled) {
-  background: #3a8d57;
-  border-color: #3a8d57;
 }
 
 /* ============ Reset ============ */
@@ -280,7 +280,7 @@ svg {
   padding: 0 5px;
   border: 1px solid var(--border-strong);
   border-bottom-width: 2px;
-  border-radius: 5px;
+  border-radius: var(--radius-xs);
   background: var(--raised);
   color: var(--muted);
   font-family: var(--mono);
@@ -328,14 +328,14 @@ svg {
 }
 
 .btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--accent-strong);
-  border-color: var(--accent-strong);
+  background: var(--accent-fill-hover);
+  border-color: var(--accent-fill-hover);
 }
 
 .btn-primary:focus-visible {
@@ -457,8 +457,8 @@ svg {
   height: 20px;
   padding: 0 6px;
   border-radius: 999px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-accent);
   font-size: 11.5px;
   font-weight: 600;
 }

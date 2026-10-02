@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { app, setLayout, toggleTheme, clearFilters, dueLabel } from "../lib/state.svelte";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import Icon from "../lib/Icon.svelte";
@@ -35,14 +35,20 @@
         label: t("palette.goReview"),
         hint: dueLabel(),
         icon: "refresh-cw",
-        run: () => (app.view = "review"),
+        run: () => {
+          app.readId = null;
+          app.view = "review";
+        },
       },
       {
         key: "all",
         group: t("palette.actions"),
         label: t("palette.goAll"),
         icon: "files",
-        run: () => (app.view = "list"),
+        run: () => {
+          app.readId = null;
+          app.view = "list";
+        },
       },
       {
         key: "lang",
@@ -74,6 +80,7 @@
         icon: "x",
         run: () => {
           clearFilters();
+          app.readId = null;
           app.view = "list";
         },
       });
@@ -128,8 +135,15 @@
     queueMicrotask(() => inputEl?.focus());
   });
 
+  function restoreFocus() {
+    if (!prevFocus || !prevFocus.isConnected) return;
+    prevFocus.focus();
+  }
+
   onDestroy(() => {
-    if (prevFocus && typeof prevFocus.focus === "function") prevFocus.focus();
+    restoreFocus();
+    // The layer beneath may still be inert until this flush completes.
+    if (prevFocus?.isConnected && document.activeElement !== prevFocus) queueMicrotask(restoreFocus);
   });
 
   function onKeydown(e: KeyboardEvent) {
@@ -141,13 +155,21 @@
       active = Math.max(active - 1, 0);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      items[active]?.run();
-    } else if (e.key === "Tab") {
+      const item = items[active];
+      if (item) void run(item);
+    } else if (e.key === "Tab" || e.code === "Tab") {
       e.preventDefault();
     }
   }
 
-  function run(item: Item) {
+  let running = false;
+
+  // Unmount the palette (restoring focus beneath) before activating the destination.
+  async function run(item: Item) {
+    if (running) return;
+    running = true;
+    app.paletteOpen = false;
+    await tick();
     item.run();
   }
 </script>

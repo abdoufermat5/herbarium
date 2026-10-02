@@ -50,16 +50,18 @@
       dialogEl.querySelectorAll<HTMLElement>(
         'button:not(:disabled), [href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
       ),
-    ).filter((el) => !el.classList.contains("sr-only"));
+    ).filter((el) => el.tabIndex >= 0 && !el.classList.contains("sr-only"));
   }
 
   function onKey(e: KeyboardEvent) {
+    // The command palette, when open, is the topmost modal and owns Escape/Tab.
+    if (app.paletteOpen || e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
       close(true);
       return;
     }
-    if (e.key !== "Tab") return;
+    if (e.key !== "Tab" && e.code !== "Tab") return;
     const els = focusables();
     if (els.length === 0) return;
     const first = els[0];
@@ -224,12 +226,15 @@
   onMount(() => {
     prevFocus = document.activeElement as HTMLElement | null;
     window.addEventListener("keydown", onKey);
-    queueMicrotask(() => dropBtn?.focus());
+    queueMicrotask(() => {
+      if (!app.paletteOpen) dropBtn?.focus();
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener("keydown", onKey);
-    prevFocus?.focus?.();
+    // A disconnected opener is skipped; App hands focus to a stable control.
+    if (prevFocus?.isConnected && !app.paletteOpen) prevFocus.focus();
   });
 </script>
 
@@ -301,6 +306,8 @@
         <input
           class="sr-only"
           type="file"
+          tabindex="-1"
+          aria-hidden="true"
           accept=".html,.htm,text/html"
           multiple
           bind:this={fileInput}
@@ -332,6 +339,7 @@
           bind:this={pasteArea}
           bind:value={pasted}
           rows={6}
+          aria-label={t("import.tabPaste")}
           placeholder={t("import.pastePlaceholder")}
           spellcheck={false}
         ></textarea>
