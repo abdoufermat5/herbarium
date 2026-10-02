@@ -5,13 +5,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
-### Fixed
-- Linux: the app icon now shows on Wayland (KDE Plasma). The desktop entry is installed as `herbarium.desktop` so it matches the window's app id.
-- Clippy warnings.
-
-### Changed
-- GitHub release descriptions are now taken from this changelog.
-
 ## [0.1.0] - 2026-10-02
 
 First release.
@@ -23,7 +16,8 @@ First release.
 - English (default) and French interface.
 - Import dialog with a staged file list (sizes, remove, duplicate detection), drag-and-drop feedback, and paste-HTML import.
 - Content validation on import: files renamed to `.html` that are not real HTML are rejected, in both the picker and the backend.
-- README, CI workflow, and a tag-driven release workflow producing `.deb` and `.AppImage` bundles.
+- Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
+- README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
 
 [Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/abdoufermat5/herbarium/releases/tag/v0.1.0
