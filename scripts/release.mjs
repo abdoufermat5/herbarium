@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: pnpm release <patch|minor|major|x.y.z[-pre]>
 // Bumps package.json + src-tauri/Cargo.toml (tauri.conf.json follows package.json),
+// rolls CHANGELOG.md [Unreleased] into the new version,
 // refreshes Cargo.lock, then commits and tags. Push with: git push --follow-tags
 import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -31,6 +32,7 @@ const next =
   : arg.replace(/^v/, "");
 if (!SEMVER.test(next)) throw new Error(`Not a valid semver version: ${next}`);
 
+const pkgPrev = pkg.version;
 pkg.version = next;
 writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
@@ -41,7 +43,23 @@ writeFileSync(
 );
 run("cargo", ["update", "--manifest-path", "src-tauri/Cargo.toml", "--workspace", "--offline"]);
 
-run("git", ["add", "package.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock"]);
+// Roll the [Unreleased] changelog section into the new version.
+const log = readFileSync("CHANGELOG.md", "utf8");
+const unreleased = log.match(/## \[Unreleased\]\n([\s\S]*?)(?=\n## \[|\n\[Unreleased\]:)/);
+if (!unreleased || !unreleased[1].trim()) {
+  throw new Error("CHANGELOG.md [Unreleased] is empty; document the changes first.");
+}
+const date = new Date().toISOString().slice(0, 10);
+const repo = "https://github.com/abdoufermat5/herbarium";
+const prev = pkgPrev;
+writeFileSync(
+  "CHANGELOG.md",
+  log
+    .replace("## [Unreleased]\n", `## [Unreleased]\n\n## [${next}] - ${date}\n`)
+    .replace(/^\[Unreleased\]: .*$/m, `[Unreleased]: ${repo}/compare/v${next}...HEAD\n[${next}]: ${repo}/compare/v${prev}...v${next}`),
+);
+
+run("git", ["add", "package.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock", "CHANGELOG.md"]);
 run("git", ["commit", "-m", `chore(release): v${next}`]);
 run("git", ["tag", "-a", `v${next}`, "-m", `v${next}`]);
 console.log(`\nTagged v${next}. Publish with: git push --follow-tags`);

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Herbarium
+Comment=Keep generated HTML pages in a vault and review them on a schedule
+Exec={{exec}}
+Icon={{icon}}
+Terminal=false
+Categories=Education;Utility;
+StartupWMClass=herbarium

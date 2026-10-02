@@ -25,6 +25,15 @@ jobs:
           fi
           case "$tag" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;; *) echo "PRERELEASE=false" >> "$GITHUB_ENV" ;; esac
 
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          {
+            echo "body<<CHANGELOG_EOF"
+            node scripts/changelog-notes.mjs "$GITHUB_REF_NAME"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - uses: pnpm/action-setup@v4
         with:
           version: 11
@@ -54,6 +63,6 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Herbarium ${{ github.ref_name }}
-          generateReleaseNotes: true
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: ${{ env.PRERELEASE == 'true' }}

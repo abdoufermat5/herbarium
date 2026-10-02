@@ -88,7 +88,7 @@ pnpm release patch   # or minor | major | 1.2.3 | 1.0.0-beta.1
 git push --follow-tags
 ```
 
-The script bumps `package.json` and `src-tauri/Cargo.toml`, then commits and tags `vX.Y.Z`. Pushing the tag triggers `.github/workflows/release.yml`, which builds the `.deb` and `.AppImage` and publishes a GitHub release with generated notes (versions with a `-suffix` are marked as pre-releases). Pull requests and `main` run `.github/workflows/ci.yml`.
+Document changes under `[Unreleased]` in `CHANGELOG.md` first. The script bumps `package.json` and `src-tauri/Cargo.toml`, moves `[Unreleased]` into the new version, then commits and tags `vX.Y.Z`. Pushing the tag triggers `.github/workflows/release.yml`, which builds the `.deb` and `.AppImage` and publishes a GitHub release whose description is the matching `CHANGELOG.md` section (versions with a `-suffix` are marked as pre-releases). Pull requests and `main` run `.github/workflows/ci.yml`.
 
 ## Project layout
 

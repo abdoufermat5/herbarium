@@ -5,6 +5,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- Linux: the app icon now shows on Wayland (KDE Plasma). The desktop entry is installed as `herbarium.desktop` so it matches the window's app id.
+- Clippy warnings.
+
+### Changed
+- GitHub release descriptions are now taken from this changelog.
+
 ## [0.1.0] - 2026-10-02
 
 First release.
