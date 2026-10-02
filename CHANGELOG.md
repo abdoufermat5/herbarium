@@ -5,6 +5,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- Replaced the default GTK header bar with a themed, draggable title bar (minimize / maximize / close) that follows the light and dark themes.
+- The window icon is now set explicitly.
+
 ### Added
 - One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
 

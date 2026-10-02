@@ -7,6 +7,7 @@
   import ImportDialog from "./components/ImportDialog.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
+  import TitleBar from "./components/TitleBar.svelte";
   import Toasts from "./components/Toasts.svelte";
   import Icon from "./lib/Icon.svelte";
   import { t } from "./lib/i18n.svelte";
@@ -114,6 +115,9 @@
   ondragend={() => (dragging = false)}
 />
 
+<div class="window">
+<TitleBar />
+<div class="content">
 {#if !app.initialized}
   <div class="boot">
     <div class="boot-mark"><Icon name="leaf" size={22} /></div>
@@ -148,6 +152,9 @@
   </div>
 {/if}
 
+</div>
+</div>
+
 {#if app.importOpen}
   <ImportDialog />
 {/if}
@@ -169,6 +176,15 @@
 <Toasts />
 
 <style>
+  .window {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+  .content {
+    flex: 1;
+    min-height: 0;
+  }
   .boot {
     height: 100%;
     display: flex;

@@ -17,6 +17,14 @@ pub fn run() {
         .manage(AppState {
             store: Mutex::new(None),
         })
+        .setup(|app| {
+            use tauri::Manager;
+            // Window icon for platforms/WMs that read it from the window itself.
+            if let Some(win) = app.get_webview_window("main") {
+                let _ = win.set_icon(tauri::include_image!("icons/128x128.png"));
+            }
+            Ok(())
+        })
         .register_uri_scheme_protocol("herbarium", protocol::handle)
         .invoke_handler(tauri::generate_handler![
             commands::get_config,

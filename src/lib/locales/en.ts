@@ -169,6 +169,11 @@ export const en = {
   "insp.irreversible": "This cannot be undone.",
   "insp.deleteHint": "Removes the HTML file and its metadata from your vault.",
 
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.restore": "Restore",
+  "window.close": "Close",
+
   "import.title": "Import pages",
   "import.method": "Import method",
   "import.tabFiles": "Files",

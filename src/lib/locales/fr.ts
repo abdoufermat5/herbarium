@@ -170,6 +170,11 @@ export const fr: Record<MessageKey, string> = {
   "insp.irreversible": "Cette action est irréversible.",
   "insp.deleteHint": "Supprime le fichier HTML et ses métadonnées de votre coffre.",
 
+  "window.minimize": "Réduire",
+  "window.maximize": "Agrandir",
+  "window.restore": "Restaurer",
+  "window.close": "Fermer",
+
   "import.title": "Importer des pages",
   "import.method": "Méthode d'import",
   "import.tabFiles": "Fichiers",
