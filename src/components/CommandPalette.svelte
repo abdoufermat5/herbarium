@@ -1,0 +1,330 @@
+<script lang="ts">
+  import { onMount, onDestroy } from "svelte";
+  import { app, setLayout, clearFilters, dueLabel } from "../lib/state.svelte";
+  import Icon from "../lib/Icon.svelte";
+  import type { IconName } from "../lib/icons";
+
+  interface Item {
+    key: string;
+    group: string;
+    label: string;
+    hint?: string;
+    icon: IconName;
+    run: () => void;
+  }
+
+  let q = $state("");
+  let active = $state(0);
+  let inputEl: HTMLInputElement | undefined;
+  let prevFocus: HTMLElement | null = null;
+
+  const actions = $derived.by<Item[]>(() => {
+    const list: Item[] = [
+      {
+        key: "import",
+        group: "Actions",
+        label: "Import pages…",
+        hint: "Drop files or paste HTML",
+        icon: "file-plus",
+        run: () => (app.importOpen = true),
+      },
+      {
+        key: "review",
+        group: "Actions",
+        label: "Go to Review today",
+        hint: dueLabel(),
+        icon: "refresh-cw",
+        run: () => (app.view = "review"),
+      },
+      {
+        key: "all",
+        group: "Actions",
+        label: "Go to All pages",
+        icon: "files",
+        run: () => (app.view = "list"),
+      },
+      {
+        key: "layout",
+        group: "Actions",
+        label: app.layout === "grid" ? "Switch to list view" : "Switch to grid view",
+        icon: app.layout === "grid" ? "rows-3" : "layout-grid",
+        run: () => setLayout(app.layout === "grid" ? "list" : "grid"),
+      },
+    ];
+    if (app.folderFilter || app.tagFilter) {
+      list.push({
+        key: "clear-filters",
+        group: "Actions",
+        label: "Clear filters",
+        icon: "x",
+        run: () => {
+          clearFilters();
+          app.view = "list";
+        },
+      });
+    }
+    return list;
+  });
+
+  const pageItems = $derived.by<Item[]>(() => {
+    const needle = q.trim().toLowerCase();
+    const base = needle
+      ? app.pages.filter(
+          (p) =>
+            (p.title || "").toLowerCase().includes(needle) ||
+            p.tags.some((t) => t.toLowerCase().includes(needle)) ||
+            (p.folder ?? "").toLowerCase().includes(needle),
+        )
+      : [...app.pages];
+    base.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
+    return base.slice(0, 8).map((p) => ({
+      key: `page-${p.id}`,
+      group: "Pages",
+      label: p.title || "Untitled page",
+      hint: [
+        p.folder ? `▸ ${p.folder}` : null,
+        p.tags.slice(0, 3).map((t) => `#${t}`).join(" ") || null,
+      ]
+        .filter(Boolean)
+        .join("   "),
+      icon: "file-text" as IconName,
+      run: () => (app.readId = p.id),
+    }));
+  });
+
+  const items = $derived.by<Item[]>(() => {
+    const needle = q.trim().toLowerCase();
+    const acts = needle ? actions.filter((a) => a.label.toLowerCase().includes(needle)) : actions;
+    return [...acts, ...pageItems];
+  });
+
+  $effect(() => {
+    const len = items.length;
+    if (active >= len) active = Math.max(0, len - 1);
+  });
+
+  $effect(() => {
+    const id = `palette-item-${active}`;
+    document.getElementById(id)?.scrollIntoView({ block: "nearest" });
+  });
+
+  onMount(() => {
+    prevFocus = document.activeElement as HTMLElement;
+    queueMicrotask(() => inputEl?.focus());
+  });
+
+  onDestroy(() => {
+    if (prevFocus && typeof prevFocus.focus === "function") prevFocus.focus();
+  });
+
+  function onKeydown(e: KeyboardEvent) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      active = Math.min(active + 1, Math.max(0, items.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = Math.max(active - 1, 0);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      items[active]?.run();
+    } else if (e.key === "Tab") {
+      e.preventDefault();
+    }
+  }
+
+  function run(item: Item) {
+    item.run();
+  }
+</script>
+
+<div
+  class="overlay"
+  role="presentation"
+  onmousedown={(e) => e.target === e.currentTarget && (app.paletteOpen = false)}
+>
+  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="p-search">
+      <Icon name="search" size={16} />
+      <input
+        bind:this={inputEl}
+        bind:value={q}
+        oninput={() => (active = 0)}
+        onkeydown={onKeydown}
+        placeholder="Search pages or run a command…"
+        aria-label="Search pages or run a command"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="palette-list"
+        aria-activedescendant={items.length ? `palette-item-${active}` : undefined}
+        aria-autocomplete="list"
+        spellcheck="false"
+        autocomplete="off"
+      />
+    </div>
+
+    <div class="p-list" id="palette-list" role="listbox" aria-label="Results">
+      {#each items as item, i (item.key)}
+        {#if i === 0 || items[i - 1].group !== item.group}
+          <div class="p-group">{item.group}</div>
+        {/if}
+        <div
+          id={`palette-item-${i}`}
+          class="p-item"
+          class:active={i === active}
+          role="option"
+          tabindex={-1}
+          aria-selected={i === active}
+          onmousemove={() => (active = i)}
+          onmousedown={(e) => {
+            e.preventDefault();
+            run(item);
+          }}
+        >
+          <span class="p-icon"><Icon name={item.icon} size={15} /></span>
+          <span class="p-label ellipsis">{item.label}</span>
+          {#if item.hint}
+            <span class="p-hint ellipsis">{item.hint}</span>
+          {/if}
+        </div>
+      {/each}
+      {#if items.length === 0}
+        <div class="p-empty">No matches for “{q}”</div>
+      {/if}
+    </div>
+
+    <div class="p-foot">
+      <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> navigate</span>
+      <span><kbd class="kbd">↵</kbd> open</span>
+      <span><kbd class="kbd">esc</kbd> close</span>
+    </div>
+  </div>
+</div>
+
+<style>
+  .overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12vh 24px 24px;
+    background: rgba(35, 40, 29, 0.32);
+    backdrop-filter: blur(2px);
+    animation: fade-in var(--t-fast) var(--ease-out);
+  }
+  .palette {
+    width: 560px;
+    max-width: 100%;
+    max-height: 460px;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    animation: pop-in var(--t-med) var(--ease-spring);
+  }
+  .p-search {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+  }
+  .p-search input {
+    flex: 1;
+    border: none;
+    background: transparent;
+    padding: 2px 0;
+    font-size: 14.5px;
+    color: var(--text);
+    outline: none;
+  }
+  .p-search input:focus-visible {
+    outline: none;
+  }
+
+  .p-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px;
+  }
+  .p-group {
+    padding: 8px 10px 4px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .p-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-soft);
+  }
+  .p-item.active {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+  .p-icon {
+    flex: none;
+    display: grid;
+    place-items: center;
+  }
+  .p-label {
+    flex: 1;
+    min-width: 0;
+    font-size: 13.5px;
+    font-weight: 500;
+  }
+  .p-hint {
+    flex: none;
+    max-width: 45%;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .p-item.active .p-hint {
+    color: var(--accent-strong);
+    opacity: 0.75;
+  }
+  .p-empty {
+    padding: 22px 12px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--muted);
+  }
+
+  .p-foot {
+    display: flex;
+    gap: 14px;
+    padding: 9px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--raised);
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .p-foot span {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(-6px);
+    }
+  }
+</style>
