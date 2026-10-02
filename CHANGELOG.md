@@ -19,6 +19,7 @@ First release.
 - Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
 - Themed, draggable title bar (minimize / maximize / close) replacing the default GTK header bar, following the light and dark themes.
 - One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
+- MIT license.
 - README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
 
 [Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...HEAD

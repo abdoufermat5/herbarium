@@ -132,4 +132,4 @@ Version 1 deliberately does one thing: save generated pages and bring them back 
 
 ## License
 
-No license has been chosen yet.
+Released under the [MIT License](LICENSE).
