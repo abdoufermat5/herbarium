@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
+
 ## [0.1.0] - 2026-10-02
 
 First release.

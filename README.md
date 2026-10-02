@@ -50,6 +50,16 @@ Pages that depend on Claude-specific APIs (`window.storage`, `window.claude`, â€
 | Frontend | Svelte 5, TypeScript, Vite                              |
 | Styling  | Hand-written CSS with design tokens, no UI framework    |
 
+## Install
+
+Linux (x86_64):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/abdoufermat5/herbarium/main/install.sh | sh
+```
+
+On Debian/Ubuntu this installs the `.deb` (needs `sudo`); elsewhere it installs the AppImage under `~/.local`. Options go after `sh -s --`, e.g. `... | sh -s -- --version 0.1.0`, `--appimage` to force the AppImage, or `--uninstall`. Prefer to inspect first? Download `install.sh` or grab the `.deb`/`.AppImage` from the [releases page](https://github.com/abdoufermat5/herbarium/releases/latest).
+
 ## Getting started
 
 ### Prerequisites
