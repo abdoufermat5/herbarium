@@ -69,6 +69,13 @@ fn open_vault(app: &AppHandle, state: &State<'_, AppState>, path: &str) -> CmdRe
     Ok(cfg)
 }
 
+fn page_meta(store: &Store, id: &str) -> CmdResult<PageMeta> {
+    store
+        .get_meta(id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "page not found".to_string())
+}
+
 fn persist_meta(store: &Store, meta: &PageMeta) -> CmdResult<()> {
     vault::write_meta(&store.vault, meta).map_err(|e| e.to_string())?;
     let text = store.text_for(&meta.id).map_err(|e| e.to_string())?.unwrap_or_default();
@@ -111,7 +118,6 @@ pub async fn import_files(
 ) -> CmdResult<ImportResult> {
     let mut g = guard(&state)?;
     let store = store(&mut g)?;
-    let vault_path = store.vault.clone();
     let mut result = ImportResult { imported: 0, errors: Vec::new() };
 
     for f in files {
@@ -124,11 +130,7 @@ pub async fn import_files(
         }
         let id = uuid::Uuid::new_v4().to_string();
         let mut meta = PageMeta::new(id.clone());
-        let html = if f.content.is_empty() {
-            "".to_string()
-        } else {
-            f.content
-        };
+        let html = f.content;
         let title = crate::content::extract_title(&html);
         meta.title = if title.is_empty() {
             f.name
@@ -141,12 +143,12 @@ pub async fn import_files(
         let text = crate::content::extract_text(&html);
         let mtime = crate::time::now_secs();
 
-        if let Err(e) = vault::write_page(&vault_path, &meta, &html) {
+        if let Err(e) = vault::write_page(&store.vault, &meta, &html) {
             result.errors.push(format!("{}: {e}", meta.id));
             continue;
         }
         if let Err(e) = store.upsert(&meta, &text, mtime) {
-            let _ = vault::delete_page_files(&vault_path, &meta);
+            let _ = vault::delete_page_files(&store.vault, &meta);
             result.errors.push(format!("{}: {e}", meta.id));
             continue;
         }
@@ -171,10 +173,7 @@ pub async fn search_pages(state: State<'_, AppState>, query: String) -> CmdResul
 pub async fn get_page(state: State<'_, AppState>, id: String) -> CmdResult<Page> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let meta = page_meta(s, &id)?;
     let html = vault::read_html(&s.vault, &id, meta.folder.as_deref()).unwrap_or_default();
     Ok(Page { meta, html })
 }
@@ -187,11 +186,7 @@ pub async fn update_page_meta(
 ) -> CmdResult<PageMeta> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let vault_path = s.vault.clone();
-    let mut meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let mut meta = page_meta(s, &id)?;
 
     let patch_title = patch.title.trim().to_string();
     if patch_title != meta.title {
@@ -201,12 +196,7 @@ pub async fn update_page_meta(
     meta.note = patch.note;
     meta.updated_at = now_ms();
 
-    let new_folder = patch.folder.as_deref().and_then(vault::safe_rel).map(|p| {
-        p.to_string_lossy().replace('\\', "/").trim_end_matches('/').to_string()
-    });
-    if new_folder != meta.folder {
-        vault::move_page(&vault_path, &mut meta, new_folder).map_err(|e| e.to_string())?;
-    }
+    vault::move_page(&s.vault, &mut meta, patch.folder)?;
 
     persist_meta(s, &meta)?;
     Ok(meta)
@@ -220,10 +210,7 @@ pub async fn schedule_review(
 ) -> CmdResult<PageMeta> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let mut meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let mut meta = page_meta(s, &id)?;
     let days = interval_days.max(1);
     let now = now_ms();
     meta.interval_days = Some(days);
@@ -238,10 +225,7 @@ pub async fn schedule_review(
 pub async fn clear_review(state: State<'_, AppState>, id: String) -> CmdResult<PageMeta> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let mut meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let mut meta = page_meta(s, &id)?;
     meta.interval_days = None;
     meta.next_review = None;
     meta.last_review = None;
@@ -258,10 +242,7 @@ pub async fn set_network(
 ) -> CmdResult<PageMeta> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let mut meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let mut meta = page_meta(s, &id)?;
     meta.allow_cdn = allow_cdn;
     meta.updated_at = now_ms();
     persist_meta(s, &meta)?;
@@ -272,13 +253,9 @@ pub async fn set_network(
 pub async fn delete_page(state: State<'_, AppState>, id: String) -> CmdResult<()> {
     let mut g = guard(&state)?;
     let s = store(&mut g)?;
-    let vault_path = s.vault.clone();
-    let meta = s
-        .get_meta(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "page not found".to_string())?;
+    let meta = page_meta(s, &id)?;
     s.delete(&id).map_err(|e| e.to_string())?;
-    vault::delete_page_files(&vault_path, &meta).map_err(|e| e.to_string())?;
+    vault::delete_page_files(&s.vault, &meta)?;
     Ok(())
 }
 

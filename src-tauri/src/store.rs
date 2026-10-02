@@ -1,10 +1,10 @@
 // SQLite index for pages. Rebuildable at any time from the vault files
 // (see `crate::vault::index_vault`). Not the source of truth, only an index.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OptionalExtension, Params, Row};
 
 use crate::models::{PageMeta, TagCount};
 use crate::time::now_secs;
@@ -67,6 +67,7 @@ impl Store {
     /// Insert or refresh one page (meta, text content and file mtime).
     pub fn upsert(&self, meta: &PageMeta, text: &str, mtime: i64) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
+        let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
         tx.execute(
             &format!(
                 "INSERT INTO pages ({COLUMNS}, text_content, mtime)
@@ -81,7 +82,7 @@ impl Store {
             params![
                 meta.id,
                 meta.title,
-                serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into()),
+                tags,
                 meta.folder,
                 meta.note,
                 meta.created_at,
@@ -103,7 +104,7 @@ impl Store {
             params![
                 meta.id,
                 meta.title,
-                serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into()),
+                tags,
                 meta.folder.as_deref().unwrap_or_default(),
                 text,
             ],
@@ -148,12 +149,16 @@ impl Store {
             .optional()
     }
 
+    fn query_metas(&self, sql: &str, params: impl Params) -> rusqlite::Result<Vec<PageMeta>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        stmt.query_map(params, row_to_meta)?.collect()
+    }
+
     pub fn all(&self) -> rusqlite::Result<Vec<PageMeta>> {
-        let mut stmt = self
-            .conn
-            .prepare(&format!("SELECT {COLUMNS} FROM pages ORDER BY title COLLATE NOCASE"))?;
-        let rows = stmt.query_map([], row_to_meta)?;
-        rows.collect()
+        self.query_metas(
+            &format!("SELECT {COLUMNS} FROM pages ORDER BY title COLLATE NOCASE"),
+            [],
+        )
     }
 
     pub fn search(&self, query: &str) -> rusqlite::Result<Vec<PageMeta>> {
@@ -165,17 +170,8 @@ impl Store {
             "SELECT p.{COLUMNS} FROM pages_fts f JOIN pages p ON p.id = f.id
              WHERE pages_fts MATCH ?1 ORDER BY bm25(pages_fts), p.title COLLATE NOCASE LIMIT 400"
         );
-        let mut stmt = match self.conn.prepare(&sql) {
-            Ok(s) => s,
-            Err(_) => return self.like_search(query),
-        };
-        match stmt.query_map(params![expr], row_to_meta) {
-            Ok(rows) => match rows.collect::<rusqlite::Result<Vec<_>>>() {
-                Ok(v) => Ok(v),
-                Err(_) => self.like_search(query),
-            },
-            Err(_) => self.like_search(query),
-        }
+        self.query_metas(&sql, params![expr])
+            .or_else(|_| self.like_search(query))
     }
 
     fn like_search(&self, query: &str) -> rusqlite::Result<Vec<PageMeta>> {
@@ -186,30 +182,31 @@ impl Store {
                 OR folder LIKE ?1 ESCAPE '\\' OR text_content LIKE ?1 ESCAPE '\\'
              ORDER BY title COLLATE NOCASE LIMIT 400"
         );
-        let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![like], row_to_meta)?;
-        rows.collect()
+        self.query_metas(&sql, params![like])
     }
 
     /// Pages due for review at or before `now_ms`, earliest first.
     pub fn due(&self, now_ms: i64) -> rusqlite::Result<Vec<PageMeta>> {
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT {COLUMNS} FROM pages WHERE next_review IS NOT NULL AND next_review <= ?1
-             ORDER BY next_review ASC"
-        ))?;
-        let rows = stmt.query_map(params![now_ms], row_to_meta)?;
-        rows.collect()
+        self.query_metas(
+            &format!(
+                "SELECT {COLUMNS} FROM pages WHERE next_review IS NOT NULL AND next_review <= ?1
+                 ORDER BY next_review ASC"
+            ),
+            params![now_ms],
+        )
     }
 
     pub fn tag_counts(&self) -> rusqlite::Result<Vec<TagCount>> {
-        let metas = self.all()?;
-        let mut map: std::collections::BTreeMap<String, usize> = Default::default();
-        for m in metas {
-            for t in m.tags {
-                *map.entry(t).or_default() += 1;
+        let mut stmt = self.conn.prepare("SELECT tags FROM pages")?;
+        let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+        let mut counts = BTreeMap::new();
+        for row in rows {
+            let tags = serde_json::from_str::<Vec<String>>(&row?).unwrap_or_default();
+            for tag in tags {
+                *counts.entry(tag).or_default() += 1;
             }
         }
-        Ok(map.into_iter().map(|(tag, count)| TagCount { tag, count }).collect())
+        Ok(counts.into_iter().map(|(tag, count)| TagCount { tag, count }).collect())
     }
 
     pub fn folders(&self) -> rusqlite::Result<Vec<String>> {
@@ -288,4 +285,57 @@ fn like_pattern(query: &str) -> String {
         })
         .collect();
     format!("%{esc}%")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn memory_store() -> Store {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        Store { vault: PathBuf::new(), conn }
+    }
+
+    #[test]
+    fn tag_counts_track_occurrences_updates_and_deletions() {
+        let store = memory_store();
+        assert!(store.tag_counts().unwrap().is_empty());
+
+        let mut first = PageMeta::new("first".into());
+        first.tags = vec!["rust".into(), "web".into(), "rust".into(), "été".into()];
+        store.upsert(&first, "", 0).unwrap();
+        let mut second = PageMeta::new("second".into());
+        second.tags = vec!["web".into(), "rust".into()];
+        store.upsert(&second, "", 0).unwrap();
+        store.upsert(&PageMeta::new("untagged".into()), "", 0).unwrap();
+        store.upsert(&PageMeta::new("corrupt".into()), "", 0).unwrap();
+        store.conn.execute("UPDATE pages SET tags = 'invalid json' WHERE id = 'corrupt'", []).unwrap();
+
+        let counts: Vec<_> = store.tag_counts().unwrap().into_iter()
+            .map(|entry| (entry.tag, entry.count)).collect();
+        assert_eq!(counts, vec![("rust".into(), 3), ("web".into(), 2), ("été".into(), 1)]);
+
+        first.tags = vec!["web".into()];
+        store.upsert(&first, "", 0).unwrap();
+        store.delete("second").unwrap();
+        let counts: Vec<_> = store.tag_counts().unwrap().into_iter()
+            .map(|entry| (entry.tag, entry.count)).collect();
+        assert_eq!(counts, vec![("web".into(), 1)]);
+    }
+
+    #[test]
+    fn search_fallback_treats_like_wildcards_as_literal_text() {
+        let store = memory_store();
+        for (id, title) in [("literal", "100%_ready\\today"), ("decoy", "100XXready\\today")] {
+            let mut meta = PageMeta::new(id.into());
+            meta.title = title.into();
+            store.upsert(&meta, "", 0).unwrap();
+        }
+        store.conn.execute_batch("DROP TABLE pages_fts").unwrap();
+
+        let ids: Vec<_> = store.search("%_ready\\").unwrap().into_iter()
+            .map(|meta| meta.id).collect();
+        assert_eq!(ids, vec!["literal"]);
+    }
 }
