@@ -45,6 +45,9 @@ export const en = {
   "toast.vaultCreated": "Vault “{name}” created.",
   "toast.vaultOpened": "Vault opened.",
 
+  "prefs.theme": "Theme",
+  "prefs.themeOptionLight": "Light",
+  "prefs.themeOptionDark": "Dark",
   "prefs.themeLight": "Switch to light theme",
   "prefs.themeDark": "Switch to dark theme",
   "prefs.language": "Language",

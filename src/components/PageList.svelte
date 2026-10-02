@@ -4,6 +4,7 @@
   import { api } from "../lib/api";
   import type { PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import Select from "./Select.svelte";
   import { dueInfo, plural } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
 
@@ -13,7 +14,11 @@
 
   const pages = $derived(visiblePages(app.pages));
   const filtersActive = $derived(!!(app.folderFilter || app.tagFilter));
-
+  const sortOptions = $derived<Array<{ value: SortKey; label: string }>>([
+    { value: "recent", label: t("list.sortRecent") },
+    { value: "title", label: t("list.sortTitle") },
+    { value: "review", label: t("list.sortReview") },
+  ]);
   onDestroy(() => {
     clearTimeout(timer);
   });
@@ -77,18 +82,16 @@
       {/if}
     </div>
 
-    <label class="sort">
-      <span class="sr-only">{t("list.sort")}</span>
-      <Icon name="arrow-up-down" size={14} />
-      <select
+    <div class="sort">
+      <Select
         value={app.sort}
-        onchange={(e) => setSort(e.currentTarget.value as SortKey)}
-      >
-        <option value="recent">{t("list.sortRecent")}</option>
-        <option value="title">{t("list.sortTitle")}</option>
-        <option value="review">{t("list.sortReview")}</option>
-      </select>
-    </label>
+        options={sortOptions}
+        icon="arrow-up-down"
+        ariaLabel={t("list.sort")}
+        onchange={(val) => setSort(val)}
+        size="sm"
+      />
+    </div>
 
     <div class="seg" role="group" aria-label={t("list.layout")}>
       <button
@@ -299,12 +302,6 @@
   .sort {
     display: flex;
     align-items: center;
-    gap: 6px;
-    color: var(--muted);
-  }
-  .sort select {
-    padding: 7px 26px 7px 9px;
-    font-size: 13px;
   }
 
   .filters {

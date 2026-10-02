@@ -44,6 +44,9 @@ export const fr: Record<MessageKey, string> = {
   "toast.vaultCreated": "Coffre « {name} » créé.",
   "toast.vaultOpened": "Coffre ouvert.",
 
+  "prefs.theme": "Thème",
+  "prefs.themeOptionLight": "Clair",
+  "prefs.themeOptionDark": "Sombre",
   "prefs.themeLight": "Passer au thème clair",
   "prefs.themeDark": "Passer au thème sombre",
   "prefs.language": "Langue",

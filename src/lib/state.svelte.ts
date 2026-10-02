@@ -103,7 +103,7 @@ export function setLayout(layout: Layout) {
   localStorage.setItem("herbarium.layout", layout);
 }
 
-function setTheme(theme: Theme) {
+export function setTheme(theme: Theme) {
   app.theme = theme;
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("herbarium.theme", theme);

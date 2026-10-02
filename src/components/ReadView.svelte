@@ -343,7 +343,22 @@
             </div>
             <div class="field">
               <label for="d-folder">{t("insp.folder")}</label>
-              <input id="d-folder" type="text" bind:value={dFolder} placeholder={t("common.none")} />
+              <div class="folder-input-wrap">
+                <input
+                  id="d-folder"
+                  type="text"
+                  bind:value={dFolder}
+                  placeholder={t("common.none")}
+                  list="folder-options"
+                />
+                {#if app.folders.length > 0}
+                  <datalist id="folder-options">
+                    {#each app.folders as folder (folder)}
+                      <option value={folder}></option>
+                    {/each}
+                  </datalist>
+                {/if}
+              </div>
             </div>
             <div class="field">
               <label for="d-tags">{t("insp.tags")}</label>
@@ -595,6 +610,7 @@
     border-left: 1px solid var(--border);
     background: var(--raised);
     overflow-y: auto;
+    overscroll-behavior: contain;
     padding: 14px;
     display: flex;
     flex-direction: column;

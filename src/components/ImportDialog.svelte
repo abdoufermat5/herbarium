@@ -391,6 +391,7 @@
     gap: 12px;
     padding: 18px 20px 16px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     animation: pop-in var(--t-med) var(--ease-spring);
   }
 
@@ -483,6 +484,7 @@
     padding: 0;
     max-height: 168px;
     overflow-y: auto;
+    overscroll-behavior: contain;
     border: 1px solid var(--border);
     border-radius: var(--radius);
   }

@@ -41,7 +41,7 @@ export function t(key: MessageKey | PluralKey, params?: Params): string {
   return msg.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
 }
 
-function setLocale(locale: Locale) {
+export function setLocale(locale: Locale) {
   i18n.locale = locale;
   document.documentElement.lang = locale;
   try {
