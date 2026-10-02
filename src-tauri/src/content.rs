@@ -39,3 +39,35 @@ pub fn extract_text(html: &str) -> String {
     let cleaned: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
     cleaned.chars().take(MAX_TEXT).collect()
 }
+
+/// Content sniff so a renamed non-HTML file (image, PDF, plain text…) is not
+/// imported just because it ends in `.html`. html5ever accepts any input, so
+/// "parses" proves nothing; instead require a real element in `<head>`/`<body>`.
+pub fn looks_like_html(content: &str) -> bool {
+    let head: String = content.chars().take(64 * 1024).collect();
+    if head.contains('\0') {
+        return false;
+    }
+    let doc = Html::parse_document(&head);
+    let sel = Selector::parse("head *, body *").expect("static selector");
+    doc.select(&sel).next().is_some()
+}
+
+#[cfg(test)]
+mod html_sniff_tests {
+    use super::looks_like_html;
+
+    #[test]
+    fn accepts_html() {
+        assert!(looks_like_html("<!DOCTYPE html><html><body><p>x</p></body></html>"));
+        assert!(looks_like_html("\u{feff}  <div class=\"a\">hi</div>"));
+    }
+
+    #[test]
+    fn rejects_non_html() {
+        assert!(!looks_like_html("just some notes"));
+        assert!(!looks_like_html("%PDF-1.7\0\0binary"));
+        assert!(!looks_like_html("a < b and c > d"));
+        assert!(!looks_like_html(""));
+    }
+}

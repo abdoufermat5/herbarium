@@ -180,10 +180,16 @@ export const fr: Record<MessageKey, string> = {
   "import.importing": "Import en cours…",
   "import.importingLabel": "Import en cours",
   "import.button": "Importer",
-  "import.needHtml": "Veuillez choisir des fichiers .html.",
+  "import.needHtml": "Veuillez choisir des fichiers HTML valides.",
   "import.partial": "Importés : {imported}. Échecs : {failed}.\n{errors}",
   "import.failed": "Échec de l'import :\n{error}",
   "import.nothing": "Rien n'a été importé.",
+  "import.release": "Relâchez pour ajouter ces fichiers",
+  "import.selected": "Fichiers sélectionnés",
+  "import.remove": "Retirer {name}",
+  "import.importN_one": "Importer {count} fichier",
+  "import.importN_other": "Importer {count} fichiers",
+  "import.skipped": "Ignoré : {skipped} — documents HTML non valides.",
 
   "onboard.welcome": "Bienvenue dans Herbarium",
   "onboard.intro":

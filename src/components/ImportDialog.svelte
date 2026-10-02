@@ -11,7 +11,9 @@
 
   let tab = $state<Tab>("files");
   let pasted = $state("");
-  let dragOver = $state(false);
+  let dragDepth = $state(0);
+  let staged = $state<File[]>([]);
+  let dragOver = $derived(dragDepth > 0);
   let busy = $state(false);
   let message = $state("");
   let messageErr = $state(false);
@@ -79,8 +81,62 @@
     if (e.target === e.currentTarget) close(true);
   }
 
+  const isHtml = (f: File) => /\.html?$/i.test(f.name);
+  const fileKey = (f: File) => `${f.name}:${f.size}:${f.lastModified}`;
+
+  function formatSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // DOMParser accepts any text, so require a real element in head/body.
+  async function sniffHtml(f: File): Promise<boolean> {
+    const head = await f.slice(0, 64 * 1024).text();
+    if (head.includes("\0")) return false;
+    const doc = new DOMParser().parseFromString(head, "text/html");
+    return doc.querySelector("head *, body *") !== null;
+  }
+
+  async function stage(files: File[]) {
+    const byExt = files.filter(isHtml);
+    const verdicts = await Promise.all(byExt.map(sniffHtml));
+    const html = byExt.filter((_, i) => verdicts[i]);
+    const known = new Set(staged.map(fileKey));
+    const fresh = html.filter((f) => {
+      const k = fileKey(f);
+      if (known.has(k)) return false;
+      known.add(k);
+      return true;
+    });
+    staged = [...staged, ...fresh];
+    const skipped = files.length - html.length;
+    messageErr = skipped > 0;
+    message =
+      skipped > 0
+        ? html.length === 0 && staged.length === 0
+          ? t("import.needHtml")
+          : t("import.skipped", { skipped: plural(skipped, "file") })
+        : "";
+  }
+
+  function unstage(file: File) {
+    staged = staged.filter((f) => f !== file);
+    message = "";
+  }
+
+  function onDragEnter(e: DragEvent) {
+    e.preventDefault();
+    dragDepth++;
+  }
+
+  function onDragOver(e: DragEvent) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+  }
+
   async function doImport(files: File[]) {
-    const htmlFiles = files.filter((f) => /\.html?$/i.test(f.name));
+    const htmlFiles = files.filter(isHtml);
     if (htmlFiles.length === 0) {
       messageErr = true;
       message = t("import.needHtml");
@@ -100,9 +156,11 @@
           failed: plural(res.errors.length, "file"),
           errors: res.errors.join("\n"),
         });
+        staged = [];
         if (res.imported > 0) void reloadPages();
       } else if (res.imported > 0) {
         toast(t("toast.imported", { count: res.imported }), "success");
+        staged = [];
         void reloadPages();
         busy = false;
         close(true);
@@ -146,14 +204,14 @@
     const input = e.currentTarget as HTMLInputElement;
     const files = Array.from(input.files ?? []);
     input.value = "";
-    if (files.length > 0) void doImport(files);
+    if (files.length > 0) void stage(files);
   }
 
   function onDrop(e: DragEvent) {
     e.preventDefault();
-    dragOver = false;
+    dragDepth = 0;
     const files = Array.from(e.dataTransfer?.files ?? []);
-    if (files.length > 0) void doImport(files);
+    if (files.length > 0) void stage(files);
   }
 
   $effect(() => {
@@ -231,15 +289,13 @@
           class:over={dragOver}
           bind:this={dropBtn}
           onclick={() => fileInput?.click()}
-          ondragover={(e) => {
-            e.preventDefault();
-            dragOver = true;
-          }}
-          ondragleave={() => (dragOver = false)}
+          ondragenter={onDragEnter}
+          ondragover={onDragOver}
+          ondragleave={() => (dragDepth = Math.max(0, dragDepth - 1))}
           ondrop={onDrop}
         >
           <Icon name="upload" size={26} />
-          <strong>{t("import.drop")}</strong>
+          <strong>{dragOver ? t("import.release") : t("import.drop")}</strong>
           <span>{t("import.browse")}</span>
         </button>
         <input
@@ -250,6 +306,25 @@
           bind:this={fileInput}
           onchange={onPick}
         />
+        {#if staged.length > 0}
+          <ul class="staged" aria-label={t("import.selected")}>
+            {#each staged as file (fileKey(file))}
+              <li>
+                <Icon name="file-text" size={14} />
+                <span class="fname" title={file.name}>{file.name}</span>
+                <span class="fsize">{formatSize(file.size)}</span>
+                <button
+                  class="btn btn-ghost btn-icon"
+                  aria-label={t("import.remove", { name: file.name })}
+                  disabled={busy}
+                  onclick={() => unstage(file)}
+                >
+                  <Icon name="x" size={14} />
+                </button>
+              </li>
+            {/each}
+          </ul>
+        {/if}
       </div>
     {:else}
       <div class="panel" role="tabpanel" id="panel-paste" aria-labelledby="tab-paste">
@@ -267,6 +342,11 @@
       <p class="message" class:err={messageErr} aria-live="polite">{message}</p>
       {#if busy}
         <span class="spinner" aria-label={t("import.importingLabel")}></span>
+      {/if}
+      {#if tab === "files" && staged.length > 0}
+        <button class="btn btn-primary" disabled={busy} onclick={() => doImport(staged)}>
+          {busy ? t("import.importing") : t("import.importN", { count: staged.length })}
+        </button>
       {/if}
       {#if tab === "paste"}
         <button
@@ -387,6 +467,42 @@
 
   .dropzone span {
     font-size: 12.5px;
+  }
+
+  .staged {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    max-height: 168px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+
+  .staged li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 6px 4px 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  .staged li + li {
+    border-top: 1px solid var(--border);
+  }
+
+  .fname {
+    flex: 1;
+    min-width: 0;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .fsize {
+    font-variant-numeric: tabular-nums;
   }
 
   textarea {

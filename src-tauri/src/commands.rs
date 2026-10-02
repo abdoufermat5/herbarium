@@ -115,6 +115,13 @@ pub async fn import_files(
     let mut result = ImportResult { imported: 0, errors: Vec::new() };
 
     for f in files {
+        if !crate::content::looks_like_html(&f.content) {
+            result.errors.push(format!(
+                "{}: not an HTML document",
+                f.name.as_deref().unwrap_or("pasted content")
+            ));
+            continue;
+        }
         let id = uuid::Uuid::new_v4().to_string();
         let mut meta = PageMeta::new(id.clone());
         let html = if f.content.is_empty() {

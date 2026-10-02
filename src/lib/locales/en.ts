@@ -179,10 +179,16 @@ export const en = {
   "import.importing": "Importing…",
   "import.importingLabel": "Importing",
   "import.button": "Import",
-  "import.needHtml": "Please choose .html files.",
+  "import.needHtml": "Please choose valid HTML files.",
   "import.partial": "Imported: {imported}. Failed: {failed}.\n{errors}",
   "import.failed": "Import failed:\n{error}",
   "import.nothing": "Nothing was imported.",
+  "import.release": "Release to add these files",
+  "import.selected": "Selected files",
+  "import.remove": "Remove {name}",
+  "import.importN_one": "Import {count} file",
+  "import.importN_other": "Import {count} files",
+  "import.skipped": "Skipped {skipped} — not valid HTML documents.",
 
   "onboard.welcome": "Welcome to Herbarium",
   "onboard.intro":
