@@ -1,0 +1,59 @@
+name: Release
+
+# Push a tag like v0.2.0 (see `pnpm release`) to build and publish a release.
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-22.04 # oldest LTS runner keeps the AppImage glibc-compatible
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify tag matches app version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          if [ "$tag" != "$pkg" ] || [ "$tag" != "$crate" ]; then
+            echo "Version mismatch: tag=$tag package.json=$pkg Cargo.toml=$crate" >&2
+            exit 1
+          fi
+          case "$tag" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;; *) echo "PRERELEASE=false" >> "$GITHUB_ENV" ;; esac
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Herbarium ${{ github.ref_name }}
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: ${{ env.PRERELEASE == 'true' }}
