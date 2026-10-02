@@ -5,6 +5,7 @@
   import type { PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { dueInfo, plural } from "../lib/format";
+  import { t } from "../lib/i18n.svelte";
 
   let searchInput = $state(app.search);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -49,16 +50,16 @@
   async function removePage(p: PageMeta) {
     try {
       await api.deletePage(p.id);
-      toast(`Deleted “${p.title || "Untitled page"}”.`);
+      toast(t("toast.deleted", { title: p.title || t("common.untitled") }));
       await reloadPages();
     } catch (e) {
       console.error(e);
-      toast("Couldn't delete the page.", "error");
+      toast(t("toast.deleteFailed"), "error");
     }
   }
 </script>
 
-<section class="pane" aria-label="Pages">
+<section class="pane" aria-label={t("list.label")}>
   <div class="toolbar">
     <div class="search">
       <Icon name="search" size={15} class="search-icon" />
@@ -66,13 +67,13 @@
         id="page-search"
         bind:value={searchInput}
         oninput={onSearch}
-        placeholder="Search titles, tags, content…"
-        aria-label="Search pages"
+        placeholder={t("list.searchPlaceholder")}
+        aria-label={t("list.searchLabel")}
         spellcheck="false"
         autocomplete="off"
       />
       {#if searchInput}
-        <button class="clear" aria-label="Clear search" onclick={clearSearch}>
+        <button class="clear" aria-label={t("list.clearSearch")} onclick={clearSearch}>
           <Icon name="x" size={12} />
         </button>
       {:else}
@@ -81,24 +82,24 @@
     </div>
 
     <label class="sort">
-      <span class="sr-only">Sort pages</span>
+      <span class="sr-only">{t("list.sort")}</span>
       <Icon name="arrow-up-down" size={14} />
       <select
         value={app.sort}
         onchange={(e) => setSort(e.currentTarget.value as SortKey)}
       >
-        <option value="recent">Recent</option>
-        <option value="title">Title</option>
-        <option value="review">Review date</option>
+        <option value="recent">{t("list.sortRecent")}</option>
+        <option value="title">{t("list.sortTitle")}</option>
+        <option value="review">{t("list.sortReview")}</option>
       </select>
     </label>
 
-    <div class="seg" role="group" aria-label="Layout">
+    <div class="seg" role="group" aria-label={t("list.layout")}>
       <button
         class="seg-btn"
         class:active={app.layout === "grid"}
         aria-pressed={app.layout === "grid"}
-        title="Grid view"
+        title={t("list.grid")}
         onclick={() => setLayout("grid")}
       >
         <Icon name="layout-grid" size={14} />
@@ -107,7 +108,7 @@
         class="seg-btn"
         class:active={app.layout === "list"}
         aria-pressed={app.layout === "list"}
-        title="List view"
+        title={t("list.list")}
         onclick={() => setLayout("list")}
       >
         <Icon name="rows-3" size={14} />
@@ -116,13 +117,13 @@
 
     <button class="btn btn-primary" onclick={() => (app.importOpen = true)}>
       <Icon name="plus" size={14} />
-      <span>Import</span>
+      <span>{t("list.import")}</span>
     </button>
   </div>
 
   {#if filtersActive}
     <div class="filters">
-      <span class="muted">Filtering:</span>
+      <span class="muted">{t("list.filtering")}</span>
       {#if app.folderFilter}
         <button class="chip filter-chip" onclick={() => (app.folderFilter = null)}>
           <Icon name="folder" size={12} />
@@ -137,7 +138,7 @@
           <Icon name="x" size={11} />
         </button>
       {/if}
-      <button class="btn btn-ghost btn-xs" onclick={clearFilters}>Clear filters</button>
+      <button class="btn btn-ghost btn-xs" onclick={clearFilters}>{t("list.clearFilters")}</button>
     </div>
   {/if}
 
@@ -154,26 +155,26 @@
       </span>
       <strong>
         {app.search
-          ? `Nothing matches “${app.search}”`
+          ? t("list.noMatch", { query: app.search })
           : filtersActive
-            ? "No pages in this view"
-            : "No pages yet"}
+            ? t("list.emptyFilter")
+            : t("list.empty")}
       </strong>
       <span>
         {app.search
-          ? "Try a different word, or clear the search."
+          ? t("list.noMatchHint")
           : filtersActive
-            ? "Clear the filters to see the rest of your library."
-            : "Drag an HTML file onto this window, or import one to get started."}
+            ? t("list.emptyFilterHint")
+            : t("list.emptyHint")}
       </span>
       {#if app.search}
-        <button class="btn btn-sm" onclick={clearSearch}>Clear search</button>
+        <button class="btn btn-sm" onclick={clearSearch}>{t("list.clearSearch")}</button>
       {:else if filtersActive}
-        <button class="btn btn-sm" onclick={clearFilters}>Clear filters</button>
+        <button class="btn btn-sm" onclick={clearFilters}>{t("list.clearFilters")}</button>
       {:else}
         <button class="btn btn-primary btn-sm" onclick={() => (app.importOpen = true)}>
           <Icon name="plus" size={13} />
-          Import a page
+          {t("list.importPage")}
         </button>
       {/if}
     </div>
@@ -191,7 +192,7 @@
           <button class="page-open" onclick={() => (app.readId = p.id)}>
             <span class="thumb"><Icon name="leaf" size={17} /></span>
             <span class="page-body">
-              <span class="page-title ellipsis">{p.title || "Untitled page"}</span>
+              <span class="page-title ellipsis">{p.title || t("common.untitled")}</span>
               <span class="meta">
                 {#if p.folder}
                   <span class="loc"><Icon name="folder" size={12} />{p.folder}</span>
@@ -218,12 +219,12 @@
               class="btn btn-ghost btn-sm del"
               class:confirm={confirmDelId === p.id}
               aria-label={confirmDelId === p.id
-                ? `Confirm delete “${p.title || "Untitled page"}”`
-                : `Delete “${p.title || "Untitled page"}”`}
+                ? t("list.confirmDelete", { title: p.title || t("common.untitled") })
+                : t("list.delete", { title: p.title || t("common.untitled") })}
               onclick={() => requestDelete(p)}
             >
               {#if confirmDelId === p.id}
-                <span class="del-text">Confirm</span>
+                <span class="del-text">{t("list.confirm")}</span>
               {:else}
                 <Icon name="trash-2" size={14} />
               {/if}

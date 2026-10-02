@@ -1,5 +1,7 @@
 // Small formatting helpers shared across views.
 
+import { i18n, t, LOCALES } from "./i18n.svelte";
+
 export const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
@@ -10,7 +12,7 @@ export function modKey(key = "K"): string {
 
 export function fmtDate(ms: number | null | undefined): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleDateString(undefined, {
+  return new Date(ms).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -20,24 +22,25 @@ export function fmtDate(ms: number | null | undefined): string {
 /** "Sep 14" — no year, for compact badges. */
 export function fmtDay(ms: number | null | undefined): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(ms).toLocaleDateString(LOCALES[i18n.locale].bcp47, { month: "short", day: "numeric" });
 }
 
 export function timeAgo(ms: number | null | undefined): string {
   if (!ms) return "";
   const diff = Date.now() - ms;
-  if (diff < 60_000) return "just now";
+  if (diff < 60_000) return t("time.justNow");
   const mins = Math.floor(diff / 60_000);
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 60) return t("time.minAgo", { n: mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} h ago`;
+  if (hours < 24) return t("time.hoursAgo", { n: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} day${days === 1 ? "" : "s"} ago`;
+  if (days < 7) return t("time.daysAgo", { count: days });
   return fmtDate(ms);
 }
 
-export function plural(n: number, word: string, pluralWord?: string): string {
-  return `${n} ${n === 1 ? word : (pluralWord ?? word + "s")}`;
+/** "3 pages" / "3 pages" in the active language. `word` is a `unit.*` key. */
+export function plural(n: number, word: "page" | "day" | "file"): string {
+  return t(`unit.${word}`, { count: n });
 }
 
 export function startOfToday(): number {
@@ -47,7 +50,7 @@ export function startOfToday(): number {
 }
 
 export interface DueInfo {
-  /** Human label, e.g. "Due today", "2 days overdue", "Due in 5 days". */
+  /** Human label, e.g. "Due today", "2 days overdue", "Due in 5 days" (localized). */
   label: string;
   /** True when the page is due now or overdue. */
   hot: boolean;
@@ -61,7 +64,10 @@ export function dueInfo(next: number | null | undefined): DueInfo | null {
   if (diff <= 0) {
     const overdueDays = Math.floor((Date.now() - next) / 86_400_000);
     return {
-      label: overdueDays >= 1 ? `${plural(overdueDays, "day")} overdue` : "Due today",
+      label:
+        overdueDays >= 1
+          ? t("due.overdue", { days: plural(overdueDays, "day") })
+          : t("due.today"),
       hot: true,
       overdue: true,
       days: 0,
@@ -69,7 +75,7 @@ export function dueInfo(next: number | null | undefined): DueInfo | null {
   }
   const days = Math.ceil(diff / 86_400_000);
   return {
-    label: days === 1 ? "Due tomorrow" : `Due in ${plural(days, "day")}`,
+    label: days === 1 ? t("due.tomorrow") : t("due.inDays", { days: plural(days, "day") }),
     hot: false,
     overdue: false,
     days,

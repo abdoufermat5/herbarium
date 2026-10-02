@@ -5,6 +5,7 @@
   import { plural } from "../lib/format";
   import type { ImportFile } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   type Tab = "files" | "paste";
 
@@ -82,7 +83,7 @@
     const htmlFiles = files.filter((f) => /\.html?$/i.test(f.name));
     if (htmlFiles.length === 0) {
       messageErr = true;
-      message = "Please choose .html files.";
+      message = t("import.needHtml");
       return;
     }
     busy = true;
@@ -94,19 +95,23 @@
       const res = await api.importFiles(payload);
       if (res.errors.length > 0) {
         messageErr = true;
-        message = `Imported ${res.imported}, ${plural(res.errors.length, "file")} failed:\n${res.errors.join("\n")}`;
+        message = t("import.partial", {
+          imported: res.imported,
+          failed: plural(res.errors.length, "file"),
+          errors: res.errors.join("\n"),
+        });
         if (res.imported > 0) void reloadPages();
       } else if (res.imported > 0) {
-        toast(`Imported ${plural(res.imported, "page")}.`, "success");
+        toast(t("toast.imported", { count: res.imported }), "success");
         void reloadPages();
         busy = false;
         close(true);
       } else {
-        message = "Nothing was imported.";
+        message = t("import.nothing");
       }
     } catch (e) {
       messageErr = true;
-      message = `Import failed:\n${String(e)}`;
+      message = t("import.failed", { error: String(e) });
     } finally {
       busy = false;
     }
@@ -122,16 +127,16 @@
       const res = await api.importFiles([{ name: null, content }]);
       if (res.errors.length > 0) {
         messageErr = true;
-        message = `Import failed:\n${res.errors.join("\n")}`;
+        message = t("import.failed", { error: res.errors.join("\n") });
       } else {
-        toast(`Imported ${plural(res.imported, "page")}.`, "success");
+        toast(t("toast.imported", { count: res.imported }), "success");
         void reloadPages();
         busy = false;
         close(true);
       }
     } catch (e) {
       messageErr = true;
-      message = `Import failed:\n${String(e)}`;
+      message = t("import.failed", { error: String(e) });
     } finally {
       busy = false;
     }
@@ -180,10 +185,10 @@
     tabindex={-1}
   >
     <header class="dlg-head">
-      <h2 id="import-title">Import pages</h2>
+      <h2 id="import-title">{t("import.title")}</h2>
       <button
         class="btn btn-ghost btn-icon"
-        aria-label="Close"
+        aria-label={t("common.close")}
         disabled={busy}
         onclick={() => close(true)}
       >
@@ -191,7 +196,7 @@
       </button>
     </header>
 
-    <div class="tabs" role="tablist" aria-label="Import method" tabindex={-1} onkeydown={onTabKeys}>
+    <div class="tabs" role="tablist" aria-label={t("import.method")} tabindex={-1} onkeydown={onTabKeys}>
       <button
         class="tab"
         class:active={tab === "files"}
@@ -202,7 +207,7 @@
         tabindex={tab === "files" ? 0 : -1}
         onclick={() => setTab("files")}
       >
-        Files
+        {t("import.tabFiles")}
       </button>
       <button
         class="tab"
@@ -214,7 +219,7 @@
         tabindex={tab === "paste" ? 0 : -1}
         onclick={() => setTab("paste")}
       >
-        Paste HTML
+        {t("import.tabPaste")}
       </button>
     </div>
 
@@ -234,8 +239,8 @@
           ondrop={onDrop}
         >
           <Icon name="upload" size={26} />
-          <strong>Drop HTML files here</strong>
-          <span>or click to browse your computer</span>
+          <strong>{t("import.drop")}</strong>
+          <span>{t("import.browse")}</span>
         </button>
         <input
           class="sr-only"
@@ -252,7 +257,7 @@
           bind:this={pasteArea}
           bind:value={pasted}
           rows={6}
-          placeholder="<html>… paste a generated page …</html>"
+          placeholder={t("import.pastePlaceholder")}
           spellcheck={false}
         ></textarea>
       </div>
@@ -261,7 +266,7 @@
     <footer class="foot">
       <p class="message" class:err={messageErr} aria-live="polite">{message}</p>
       {#if busy}
-        <span class="spinner" aria-label="Importing"></span>
+        <span class="spinner" aria-label={t("import.importingLabel")}></span>
       {/if}
       {#if tab === "paste"}
         <button
@@ -269,7 +274,7 @@
           disabled={busy || !pasted.trim()}
           onclick={pasteImport}
         >
-          {busy ? "Importing…" : "Import"}
+          {busy ? t("import.importing") : t("import.button")}
         </button>
       {/if}
     </footer>
@@ -285,7 +290,7 @@
     align-items: flex-start;
     justify-content: center;
     padding: 12vh 24px 24px;
-    background: rgba(30, 33, 26, 0.42);
+    background: var(--scrim);
     animation: fade-in var(--t-fast) var(--ease-out);
   }
 

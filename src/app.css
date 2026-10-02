@@ -1,6 +1,6 @@
 /* ============================================================
    Herbarium — design tokens & shared primitives
-   Botanical greens on warm paper. Light theme only (v1).
+   Botanical greens on warm paper. Light + dark (data-theme on <html>).
    ============================================================ */
 
 :root {
@@ -16,6 +16,10 @@
   --border: #e4e0d3;
   --border-strong: #cdc7b8;
   --border-hover: #b7b09d;
+  --placeholder: #a9a392;
+  --scroll-thumb: #d3cdbd;
+  --scroll-thumb-hover: #b9b2a0;
+  --scrim: rgba(35, 40, 29, 0.32);
 
   /* Ink */
   --text: #23281d;
@@ -68,6 +72,58 @@
   --sidebar-w: 248px;
   --inspector-w: 320px;
   --topbar-h: 54px;
+}
+
+/* ============ Dark theme ============ */
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #151a14;
+  --surface: #1d231c;
+  --raised: #232a22;
+  --sunken: #121611;
+
+  --border: #2e362c;
+  --border-strong: #3d473a;
+  --border-hover: #55614f;
+  --placeholder: #6b7365;
+  --scroll-thumb: #3a4437;
+  --scroll-thumb-hover: #526050;
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --text: #e8ebe1;
+  --text-soft: #c2c8b8;
+  --muted: #949c8a;
+
+  --accent: #4fa56d;
+  --accent-strong: #7cc795;
+  --accent-soft: #223a2a;
+  --accent-ring: rgba(79, 165, 109, 0.32);
+
+  --danger: #e2705f;
+  --danger-soft: #3a211d;
+  --danger-border: #6a352d;
+  --danger-ring: rgba(226, 112, 95, 0.32);
+  --warn: #d9a93f;
+  --warn-soft: #382d14;
+  --warn-border: #5e4b1f;
+  --ok: #4fa56d;
+  --ok-soft: #223a2a;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 16px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+/* Primary buttons keep white text; lift the fill so contrast holds on dark. */
+:root[data-theme="dark"] .btn-primary {
+  background: #2f7a4a;
+  border-color: #2f7a4a;
+}
+:root[data-theme="dark"] .btn-primary:hover:not(:disabled) {
+  background: #3a8d57;
+  border-color: #3a8d57;
 }
 
 /* ============ Reset ============ */
@@ -134,7 +190,7 @@ svg {
 }
 
 ::placeholder {
-  color: #a9a392;
+  color: var(--placeholder);
   opacity: 1;
 }
 
@@ -147,13 +203,13 @@ svg {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #d3cdbd;
+  background: var(--scroll-thumb);
   border: 3px solid transparent;
   background-clip: content-box;
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #b9b2a0;
+  background-color: var(--scroll-thumb-hover);
   background-clip: content-box;
 }
 
@@ -472,7 +528,7 @@ textarea {
 select {
   appearance: none;
   padding-right: 28px;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2382857a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238d9183' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 9px center;
 }

@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { app, reloadPages, toast } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let name = $state("Herbarium");
   let busy = $state<"create" | "open" | null>(null);
@@ -15,13 +16,13 @@
     try {
       const parent = await open({
         directory: true,
-        title: "Where should the vault live?",
+        title: t("onboard.createDialog"),
       });
       if (typeof parent !== "string") return;
       const folderName = name.trim() || "Herbarium";
       app.config = await api.createVault(parent, folderName);
       await reloadPages();
-      toast(`Vault “${folderName}” created.`, "success");
+      toast(t("toast.vaultCreated", { name: folderName }), "success");
     } catch (e) {
       error = String(e);
     } finally {
@@ -36,12 +37,12 @@
     try {
       const picked = await open({
         directory: true,
-        title: "Choose your vault folder",
+        title: t("onboard.openDialog"),
       });
       if (typeof picked !== "string") return;
       app.config = await api.setVault(picked);
       await reloadPages();
-      toast("Vault opened.", "success");
+      toast(t("toast.vaultOpened"), "success");
     } catch (e) {
       error = String(e);
     } finally {
@@ -53,21 +54,20 @@
 <div class="onboard">
   <div class="hero">
     <span class="hero-mark"><Icon name="leaf" size={30} /></span>
-    <h1>Welcome to Herbarium</h1>
+    <h1>{t("onboard.welcome")}</h1>
     <p>
-      Herbarium keeps the HTML pages you generate — as plain files in a folder you own — and brings
-      them back for review when it matters.
+      {t("onboard.intro")}
     </p>
   </div>
 
   <div class="cards">
     <section class="card option">
       <span class="option-icon"><Icon name="file-plus" size={20} /></span>
-      <h2>Create a vault</h2>
-      <p>Pick a parent folder; Herbarium creates a new folder for your pages.</p>
+      <h2>{t("onboard.createTitle")}</h2>
+      <p>{t("onboard.createText")}</p>
       <div class="name-row">
         <input
-          aria-label="Vault folder name"
+          aria-label={t("onboard.nameLabel")}
           placeholder="Herbarium"
           maxlength={60}
           bind:value={name}
@@ -79,22 +79,22 @@
           {:else}
             <Icon name="plus" size={14} />
           {/if}
-          {busy === "create" ? "Creating…" : "Create"}
+          {busy === "create" ? t("onboard.creating") : t("onboard.create")}
         </button>
       </div>
     </section>
 
     <section class="card option">
       <span class="option-icon"><Icon name="folder-open" size={20} /></span>
-      <h2>Open an existing vault</h2>
-      <p>Point Herbarium at a folder that already contains HTML pages or metadata.</p>
+      <h2>{t("onboard.openTitle")}</h2>
+      <p>{t("onboard.openText")}</p>
       <button class="btn" onclick={openExisting} disabled={busy !== null}>
         {#if busy === "open"}
           <span class="spinner"></span>
         {:else}
           <Icon name="folder" size={14} />
         {/if}
-        {busy === "open" ? "Opening…" : "Choose folder…"}
+        {busy === "open" ? t("onboard.opening") : t("onboard.choose")}
       </button>
     </section>
   </div>

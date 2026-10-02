@@ -4,6 +4,7 @@
   import { dueInfo, fmtDate, plural, startOfToday } from "../lib/format";
   import type { PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   const REVIEW_INTERVALS = [1, 3, 7, 30];
   const DAY = 86400000;
@@ -45,10 +46,10 @@
     try {
       await api.scheduleReview(id, days);
       due = due.filter((p) => p.id !== id);
-      toast(`Review scheduled in ${plural(days, "day")}.`, "success");
+      toast(t("toast.reviewScheduled", { days: plural(days, "day") }), "success");
       void refreshAll();
     } catch {
-      toast("Couldn't reschedule the review.", "error");
+      toast(t("review.rescheduleFailed"), "error");
     } finally {
       busyId = null;
     }
@@ -62,14 +63,14 @@
 <div class="pane">
   <header class="head">
     <div class="head-text">
-      <h1>Review today</h1>
+      <h1>{t("review.title")}</h1>
       <p class="sub">
-        Pages scheduled for revision. Open one, check it, then reschedule or clear its review.
+        {t("review.sub")}
       </p>
     </div>
     <button class="btn" onclick={() => (app.view = "list")}>
       <Icon name="files" size={14} />
-      All pages
+      {t("review.allPages")}
     </button>
   </header>
 
@@ -78,17 +79,17 @@
       {#if overdueCount > 0}
         <span class="chip chip-warn">
           <Icon name="calendar-clock" size={12} />
-          {plural(overdueCount, "page")} overdue
+          {t("review.overdue", { pages: plural(overdueCount, "page") })}
         </span>
       {/if}
       <span class="chip">
         <Icon name="calendar-clock" size={12} />
-        {plural(due.length, "page")} to review
+        {t("review.toReview", { pages: plural(due.length, "page") })}
       </span>
       {#if reviewedToday > 0}
         <span class="chip chip-muted">
           <Icon name="check" size={12} />
-          {plural(reviewedToday, "page")} reviewed today
+          {t("review.reviewedToday", { count: reviewedToday })}
         </span>
       {/if}
     </div>
@@ -103,9 +104,9 @@
   {:else if due.length === 0}
     <div class="empty">
       <span class="empty-icon"><Icon name="circle-check" size={22} /></span>
-      <strong>All caught up</strong>
-      <span>Pages you schedule for review show up here when they're due.</span>
-      <button class="btn btn-sm" onclick={() => (app.view = "list")}>Browse all pages</button>
+      <strong>{t("review.caughtUp")}</strong>
+      <span>{t("review.caughtUpHint")}</span>
+      <button class="btn btn-sm" onclick={() => (app.view = "list")}>{t("review.browse")}</button>
     </div>
   {:else}
     <div class="list">
@@ -115,35 +116,35 @@
           <button class="row-open" onclick={() => open(p.id)}>
             <span class="thumb"><Icon name="leaf" size={18} /></span>
             <span class="body">
-              <span class="title ellipsis">{p.title || "Untitled page"}</span>
+              <span class="title ellipsis">{p.title || t("common.untitled")}</span>
               <span class="meta">
                 {#if p.folder}
                   <span class="loc"><Icon name="folder" size={12} />{p.folder}</span>
                 {/if}
-                {#each p.tags.slice(0, 3) as t (t)}
-                  <span class="chip chip-muted">#{t}</span>
+                {#each p.tags.slice(0, 3) as tag (tag)}
+                  <span class="chip chip-muted">#{tag}</span>
                 {/each}
               </span>
             </span>
           </button>
           <span class="side">
             {#if d}
-              <span class="due" class:overdue={d.label.includes("overdue")}>{d.label}</span>
+              <span class="due" class:overdue={d.overdue}>{d.label}</span>
             {/if}
             <span class="date">{fmtDate(p.nextReview)}</span>
-            <span class="resched" role="group" aria-label="Reschedule review">
+            <span class="resched" role="group" aria-label={t("review.reschedule")}>
               {#each REVIEW_INTERVALS as days (days)}
                 <button
                   class="btn btn-xs"
-                  title={`Review again in ${plural(days, "day")}`}
+                  title={t("review.againIn", { days: plural(days, "day") })}
                   disabled={busyId === p.id}
                   onclick={() => reschedule(p.id, days)}
                 >
-                  {days}d
+                  {t("review.daysShort", { n: days })}
                 </button>
               {/each}
             </span>
-            <button class="btn btn-sm btn-primary" onclick={() => open(p.id)}>Open</button>
+            <button class="btn btn-sm btn-primary" onclick={() => open(p.id)}>{t("common.open")}</button>
           </span>
         </article>
       {/each}

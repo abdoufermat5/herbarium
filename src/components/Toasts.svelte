@@ -1,6 +1,7 @@
 <script lang="ts">
   import { app, dismissToast, type ToastKind } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
   import type { IconName } from "../lib/icons";
 
   const ICONS: Record<ToastKind, IconName> = {
@@ -11,11 +12,11 @@
 </script>
 
 <div class="toasts" role="status" aria-live="polite">
-  {#each app.toasts as t (t.id)}
-    <div class="toast {t.kind}">
-      <span class="toast-icon"><Icon name={ICONS[t.kind]} size={15} /></span>
-      <span class="toast-msg">{t.message}</span>
-      <button class="toast-x" aria-label="Dismiss notification" onclick={() => dismissToast(t.id)}>
+  {#each app.toasts as toast (toast.id)}
+    <div class="toast {toast.kind}">
+      <span class="toast-icon"><Icon name={ICONS[toast.kind]} size={15} /></span>
+      <span class="toast-msg">{toast.message}</span>
+      <button class="toast-x" aria-label={t("toast.dismiss")} onclick={() => dismissToast(toast.id)}>
         <Icon name="x" size={13} />
       </button>
     </div>

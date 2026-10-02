@@ -9,6 +9,7 @@
   import CommandPalette from "./components/CommandPalette.svelte";
   import Toasts from "./components/Toasts.svelte";
   import Icon from "./lib/Icon.svelte";
+  import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
   let dragTimer: ReturnType<typeof setTimeout> | undefined;
@@ -117,15 +118,15 @@
   <div class="boot">
     <div class="boot-mark"><Icon name="leaf" size={22} /></div>
     <span class="spinner"></span>
-    <p>Opening your vault…</p>
+    <p>{t("boot.opening")}</p>
   </div>
 {:else if app.initError}
   <div class="boot boot-error">
     <div class="boot-mark"><Icon name="leaf" size={22} /></div>
-    <h1>Herbarium couldn't start</h1>
+    <h1>{t("boot.failed")}</h1>
     <p class="error-text">{app.initError}</p>
     <button class="btn btn-primary" onclick={retry} disabled={retrying}>
-      {retrying ? "Retrying…" : "Try again"}
+      {retrying ? t("boot.retrying") : t("boot.retry")}
     </button>
   </div>
 {:else if !app.config?.vaultPath}
@@ -159,8 +160,8 @@
   <div class="drag-veil" aria-hidden="true">
     <div class="drag-card">
       <Icon name="upload" size={26} />
-      <strong>Drop HTML files to import</strong>
-      <span>They land in your vault, untouched.</span>
+      <strong>{t("drag.title")}</strong>
+      <span>{t("drag.sub")}</span>
     </div>
   </div>
 {/if}

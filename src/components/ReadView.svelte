@@ -5,6 +5,7 @@
   import { fmtDate, timeAgo, plural, dueInfo } from "../lib/format";
   import type { Page, PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   let { id }: { id: string } = $props();
 
@@ -85,14 +86,12 @@
     try {
       p.meta = await api.setNetwork(p.meta.id, !p.meta.allowCdn);
       toast(
-        p.meta.allowCdn
-          ? "Network access enabled for this page."
-          : "Network access disabled.",
+        p.meta.allowCdn ? t("read.netEnabled") : t("read.netDisabled"),
         "success",
       );
       void reloadPages();
     } catch {
-      toast("Couldn't change network access.", "error");
+      toast(t("read.netFailed"), "error");
     }
   }
 
@@ -106,10 +105,10 @@
     saving = true;
     try {
       p.meta = await api.scheduleReview(p.meta.id, days);
-      toast(`Review scheduled in ${plural(days, "day")}.`, "success");
+      toast(t("toast.reviewScheduled", { days: plural(days, "day") }), "success");
       void reloadPages();
     } catch {
-      toast("Couldn't schedule the review.", "error");
+      toast(t("read.scheduleFailed"), "error");
     } finally {
       saving = false;
     }
@@ -121,10 +120,10 @@
     saving = true;
     try {
       p.meta = await api.clearReview(p.meta.id);
-      toast("Review cleared.", "success");
+      toast(t("read.reviewCleared"), "success");
       void reloadPages();
     } catch {
-      toast("Couldn't clear the review.", "error");
+      toast(t("read.clearFailed"), "error");
     } finally {
       saving = false;
     }
@@ -140,19 +139,19 @@
     saving = true;
     try {
       p.meta = await api.updatePageMeta(p.meta.id, {
-        title: dTitle.trim() || p.meta.title || "Untitled page",
+        title: dTitle.trim() || p.meta.title || t("common.untitled"),
         folder: dFolder.trim() || null,
         tags: dTags
           .split(",")
-          .map((t) => t.trim().replace(/^#/, ""))
+          .map((tag) => tag.trim().replace(/^#/, ""))
           .filter(Boolean),
         note: dNote,
       });
       syncDraft(p.meta);
-      toast("Changes saved.", "success");
+      toast(t("read.saved"), "success");
       void reloadPages();
     } catch {
-      toast("Couldn't save changes.", "error");
+      toast(t("read.saveFailed"), "error");
     } finally {
       saving = false;
     }
@@ -174,11 +173,11 @@
     deleting = true;
     try {
       await api.deletePage(p.meta.id);
-      toast(`Deleted “${p.meta.title || "Untitled page"}”.`, "success");
+      toast(t("toast.deleted", { title: p.meta.title || t("common.untitled") }), "success");
       void reloadPages();
       back();
     } catch {
-      toast("Couldn't delete the page.", "error");
+      toast(t("toast.deleteFailed"), "error");
       deleting = false;
       confirmDelete = false;
     }
@@ -196,21 +195,23 @@
     <button
       class="btn btn-ghost btn-icon"
       onclick={back}
-      title="Back to pages (Esc)"
-      aria-label="Back to pages"
+      title={t("read.back")}
+      aria-label={t("read.backLabel")}
     >
       <Icon name="arrow-left" size={18} />
     </button>
 
     {#if page}
       <div class="identity">
-        <h1 class="title ellipsis" title={page.meta.title || "Untitled page"}>{page.meta.title || "Untitled page"}</h1>
+        <h1 class="title ellipsis" title={page.meta.title || t("common.untitled")}>
+          {page.meta.title || t("common.untitled")}
+        </h1>
         <div class="meta">
           {#if page.meta.folder}
             <span class="loc"><Icon name="folder" size={12} />{page.meta.folder}</span>
           {/if}
-          {#each page.meta.tags as t (t)}
-            <span class="chip chip-muted">#{t}</span>
+          {#each page.meta.tags as tag (tag)}
+            <span class="chip chip-muted">#{tag}</span>
           {/each}
         </div>
       </div>
@@ -221,21 +222,21 @@
           class:on={page.meta.allowCdn}
           onclick={toggleNetwork}
           title={page.meta.allowCdn
-            ? "Loading fonts and libraries from known CDNs is allowed for this page"
-            : "This page cannot load anything from the network"}
+            ? t("read.netOnHint")
+            : t("read.netOffHint")}
         >
           <Icon name={page.meta.allowCdn ? "wifi" : "wifi-off"} size={14} />
-          {page.meta.allowCdn ? "Network: CDNs" : "Network: off"}
+          {page.meta.allowCdn ? t("read.netOn") : t("read.netOff")}
         </button>
         <button
           class="btn btn-sm details-btn"
           class:active={app.inspectorOpen}
           aria-pressed={app.inspectorOpen}
           onclick={toggleInspector}
-          title="Page details (i)"
+          title={t("read.detailsHint")}
         >
           <Icon name="info" size={14} />
-          Details
+          {t("read.details")}
         </button>
       </div>
     {/if}
@@ -244,59 +245,59 @@
   {#if error}
     <div class="err-wrap">
       <div class="err card">
-        <strong>Couldn't open this page.</strong>
+        <strong>{t("read.openFailed")}</strong>
         <p class="muted">{error}</p>
         <div class="err-actions">
-          <button class="btn btn-sm" onclick={back}>Back</button>
-          <button class="btn btn-sm btn-primary" onclick={load}>Try again</button>
+          <button class="btn btn-sm" onclick={back}>{t("common.back")}</button>
+          <button class="btn btn-sm btn-primary" onclick={load}>{t("boot.retry")}</button>
         </div>
       </div>
     </div>
   {:else if page}
     <div class="review-bar">
       {#if page.meta.nextReview}
-        <span class="rb-label"><Icon name="calendar-clock" size={13} />Next review</span>
+        <span class="rb-label"><Icon name="calendar-clock" size={13} />{t("read.nextReview")}</span>
         <span class="rb-date" class:overdue={due?.overdue}>
           {fmtDate(page.meta.nextReview)}
           {#if due?.overdue}· {due.label}{/if}
         </span>
         <span class="rb-sep" aria-hidden="true"></span>
-        <span class="rb-label">Reschedule</span>
+        <span class="rb-label">{t("read.reschedule")}</span>
         <div class="rb-btns">
           {#each REVIEW_INTERVALS as days (days)}
             <button
               class="btn btn-xs"
-              title={`Review again in ${plural(days, "day")}`}
+              title={t("review.againIn", { days: plural(days, "day") })}
               onclick={() => schedule(days)}
               disabled={saving}
             >
-              {days}d
+              {t("review.daysShort", { n: days })}
             </button>
           {/each}
         </div>
         <button class="btn btn-xs btn-ghost" onclick={clearReview} disabled={saving}>
-          Clear
+          {t("common.clear")}
         </button>
       {:else}
-        <span class="rb-label"><Icon name="calendar-clock" size={13} />Review in</span>
+        <span class="rb-label"><Icon name="calendar-clock" size={13} />{t("read.reviewIn")}</span>
         <div class="rb-btns">
           {#each REVIEW_INTERVALS as days (days)}
             <button
               class="btn btn-xs"
-              title={`Review again in ${plural(days, "day")}`}
+              title={t("review.againIn", { days: plural(days, "day") })}
               onclick={() => schedule(days)}
               disabled={saving}
             >
-              {days}d
+              {t("review.daysShort", { n: days })}
             </button>
           {/each}
         </div>
       {/if}
       {#if page.meta.lastReview}
-        <span class="rb-last">Last reviewed {timeAgo(page.meta.lastReview)}</span>
+        <span class="rb-last">{t("read.lastReviewed", { when: timeAgo(page.meta.lastReview) })}</span>
       {/if}
       {#if saving}
-        <span class="spinner" aria-label="Saving"></span>
+        <span class="spinner" aria-label={t("read.saving")}></span>
       {/if}
     </div>
 
@@ -305,22 +306,19 @@
         {#if claudeDependent}
           <div class="notice">
             <Icon name="info" size={14} />
-            <span
-              >This page appears to rely on Claude-specific APIs (storage or chat). It may not
-              work outside of Claude.</span
-            >
+            <span>{t("read.claudeNotice")}</span>
           </div>
         {/if}
         <div class="frame-holder">
           {#if !frameReady}
             <div class="frame-skel">
               <span class="spinner"></span>
-              <span>Loading page…</span>
+              <span>{t("read.loadingPage")}</span>
             </div>
           {/if}
           <iframe
             class:ready={frameReady}
-            title="Page preview"
+            title={t("read.preview")}
             src={`herbarium://page/${page.meta.id}`}
             sandbox="allow-scripts"
             onload={markReady}
@@ -329,58 +327,58 @@
       </div>
 
       {#if app.inspectorOpen}
-        <aside class="inspector" aria-label="Page details">
+        <aside class="inspector" aria-label={t("insp.label")}>
           <section class="insp-section">
-            <h2 class="insp-title"><Icon name="file-text" size={13} />Details</h2>
+            <h2 class="insp-title"><Icon name="file-text" size={13} />{t("read.details")}</h2>
             <div class="field">
-              <label for="d-title">Title</label>
+              <label for="d-title">{t("insp.title")}</label>
               <input id="d-title" bind:value={dTitle} />
             </div>
             <div class="field">
-              <label for="d-folder">Folder</label>
-              <input id="d-folder" bind:value={dFolder} placeholder="None" />
+              <label for="d-folder">{t("insp.folder")}</label>
+              <input id="d-folder" bind:value={dFolder} placeholder={t("common.none")} />
             </div>
             <div class="field">
-              <label for="d-tags">Tags</label>
-              <input id="d-tags" bind:value={dTags} placeholder="comma, separated" />
+              <label for="d-tags">{t("insp.tags")}</label>
+              <input id="d-tags" bind:value={dTags} placeholder={t("insp.tagsPlaceholder")} />
             </div>
             <div class="field">
-              <label for="d-note">Note</label>
+              <label for="d-note">{t("insp.note")}</label>
               <textarea
                 id="d-note"
                 rows={3}
                 bind:value={dNote}
-                placeholder="Personal notes about this page"
+                placeholder={t("insp.notePlaceholder")}
               ></textarea>
             </div>
             <div class="insp-actions">
               <button class="btn btn-sm" onclick={discard} disabled={!dirty || saving}>
-                Discard
+                {t("insp.discard")}
               </button>
               <button class="btn btn-sm btn-primary" onclick={save} disabled={!dirty || saving}>
-                {saving ? "Saving…" : "Save"}
+                {saving ? t("insp.saving") : t("insp.save")}
               </button>
             </div>
           </section>
 
           <section class="insp-section">
-            <h2 class="insp-title"><Icon name="clock" size={13} />Activity</h2>
+            <h2 class="insp-title"><Icon name="clock" size={13} />{t("insp.activity")}</h2>
             <dl class="facts">
-              <div><dt>Created</dt><dd>{fmtDate(page.meta.createdAt)}</dd></div>
-              <div><dt>Updated</dt><dd>{timeAgo(page.meta.updatedAt)}</dd></div>
+              <div><dt>{t("insp.created")}</dt><dd>{fmtDate(page.meta.createdAt)}</dd></div>
+              <div><dt>{t("insp.updated")}</dt><dd>{timeAgo(page.meta.updatedAt)}</dd></div>
               <div>
-                <dt>Last reviewed</dt>
+                <dt>{t("insp.lastReviewed")}</dt>
                 <dd>{page.meta.lastReview ? fmtDate(page.meta.lastReview) : "—"}</dd>
               </div>
               <div>
-                <dt>Next review</dt>
+                <dt>{t("insp.nextReview")}</dt>
                 <dd>{page.meta.nextReview ? fmtDate(page.meta.nextReview) : "—"}</dd>
               </div>
             </dl>
           </section>
 
           <section class="insp-section danger-zone">
-            <h2 class="insp-title"><Icon name="trash-2" size={13} />Danger zone</h2>
+            <h2 class="insp-title"><Icon name="trash-2" size={13} />{t("insp.danger")}</h2>
             <button
               class="btn btn-sm btn-danger delete-btn"
               class:confirming={confirmDelete}
@@ -388,12 +386,16 @@
               disabled={deleting}
             >
               <Icon name="trash-2" size={13} />
-              {deleting ? "Deleting…" : confirmDelete ? "Confirm delete" : "Delete page"}
+              {deleting
+                ? t("insp.deleting")
+                : confirmDelete
+                  ? t("insp.confirmDelete")
+                  : t("insp.deletePage")}
             </button>
             <p class="hint">
               {confirmDelete
-                ? "This cannot be undone."
-                : "Removes the HTML file and its metadata from your vault."}
+                ? t("insp.irreversible")
+                : t("insp.deleteHint")}
             </p>
           </section>
         </aside>
@@ -402,7 +404,7 @@
   {:else}
     <div class="load">
       <span class="spinner"></span>
-      <span>Opening page…</span>
+      <span>{t("read.opening")}</span>
     </div>
   {/if}
 </div>

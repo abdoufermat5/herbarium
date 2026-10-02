@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
-  import { app, setLayout, clearFilters, dueLabel } from "../lib/state.svelte";
+  import { app, setLayout, toggleTheme, clearFilters, dueLabel } from "../lib/state.svelte";
+  import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import Icon from "../lib/Icon.svelte";
   import type { IconName } from "../lib/icons";
 
@@ -22,31 +23,45 @@
     const list: Item[] = [
       {
         key: "import",
-        group: "Actions",
-        label: "Import pages…",
-        hint: "Drop files or paste HTML",
+        group: t("palette.actions"),
+        label: t("palette.import"),
+        hint: t("palette.importHint"),
         icon: "file-plus",
         run: () => (app.importOpen = true),
       },
       {
         key: "review",
-        group: "Actions",
-        label: "Go to Review today",
+        group: t("palette.actions"),
+        label: t("palette.goReview"),
         hint: dueLabel(),
         icon: "refresh-cw",
         run: () => (app.view = "review"),
       },
       {
         key: "all",
-        group: "Actions",
-        label: "Go to All pages",
+        group: t("palette.actions"),
+        label: t("palette.goAll"),
         icon: "files",
         run: () => (app.view = "list"),
       },
       {
+        key: "lang",
+        group: t("palette.actions"),
+        label: t("prefs.switchLang", { language: LOCALES[otherLocale()].name }),
+        icon: "languages",
+        run: toggleLocale,
+      },
+      {
+        key: "theme",
+        group: t("palette.actions"),
+        label: app.theme === "dark" ? t("prefs.themeLight") : t("prefs.themeDark"),
+        icon: app.theme === "dark" ? "sun" : "moon",
+        run: toggleTheme,
+      },
+      {
         key: "layout",
-        group: "Actions",
-        label: app.layout === "grid" ? "Switch to list view" : "Switch to grid view",
+        group: t("palette.actions"),
+        label: app.layout === "grid" ? t("palette.toList") : t("palette.toGrid"),
         icon: app.layout === "grid" ? "rows-3" : "layout-grid",
         run: () => setLayout(app.layout === "grid" ? "list" : "grid"),
       },
@@ -54,8 +69,8 @@
     if (app.folderFilter || app.tagFilter) {
       list.push({
         key: "clear-filters",
-        group: "Actions",
-        label: "Clear filters",
+        group: t("palette.actions"),
+        label: t("palette.clearFilters"),
         icon: "x",
         run: () => {
           clearFilters();
@@ -72,18 +87,18 @@
       ? app.pages.filter(
           (p) =>
             (p.title || "").toLowerCase().includes(needle) ||
-            p.tags.some((t) => t.toLowerCase().includes(needle)) ||
+            p.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
             (p.folder ?? "").toLowerCase().includes(needle),
         )
       : [...app.pages];
     base.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     return base.slice(0, 8).map((p) => ({
       key: `page-${p.id}`,
-      group: "Pages",
-      label: p.title || "Untitled page",
+      group: t("palette.pages"),
+      label: p.title || t("common.untitled"),
       hint: [
         p.folder ? `▸ ${p.folder}` : null,
-        p.tags.slice(0, 3).map((t) => `#${t}`).join(" ") || null,
+        p.tags.slice(0, 3).map((tag) => `#${tag}`).join(" ") || null,
       ]
         .filter(Boolean)
         .join("   "),
@@ -142,7 +157,7 @@
   role="presentation"
   onmousedown={(e) => e.target === e.currentTarget && (app.paletteOpen = false)}
 >
-  <div class="palette" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette" role="dialog" aria-modal="true" aria-label={t("palette.label")}>
     <div class="p-search">
       <Icon name="search" size={16} />
       <input
@@ -150,8 +165,8 @@
         bind:value={q}
         oninput={() => (active = 0)}
         onkeydown={onKeydown}
-        placeholder="Search pages or run a command…"
-        aria-label="Search pages or run a command"
+        placeholder={t("palette.placeholder")}
+        aria-label={t("palette.placeholder")}
         role="combobox"
         aria-expanded="true"
         aria-controls="palette-list"
@@ -162,7 +177,7 @@
       />
     </div>
 
-    <div class="p-list" id="palette-list" role="listbox" aria-label="Results">
+    <div class="p-list" id="palette-list" role="listbox" aria-label={t("palette.results")}>
       {#each items as item, i (item.key)}
         {#if i === 0 || items[i - 1].group !== item.group}
           <div class="p-group">{item.group}</div>
@@ -188,14 +203,14 @@
         </div>
       {/each}
       {#if items.length === 0}
-        <div class="p-empty">No matches for “{q}”</div>
+        <div class="p-empty">{t("palette.noMatches", { query: q })}</div>
       {/if}
     </div>
 
     <div class="p-foot">
-      <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> navigate</span>
-      <span><kbd class="kbd">↵</kbd> open</span>
-      <span><kbd class="kbd">esc</kbd> close</span>
+      <span><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> {t("palette.navigate")}</span>
+      <span><kbd class="kbd">↵</kbd> {t("palette.openKey")}</span>
+      <span><kbd class="kbd">esc</kbd> {t("palette.closeKey")}</span>
     </div>
   </div>
 </div>
@@ -209,7 +224,7 @@
     align-items: flex-start;
     justify-content: center;
     padding: 12vh 24px 24px;
-    background: rgba(35, 40, 29, 0.32);
+    background: var(--scrim);
     backdrop-filter: blur(2px);
     animation: fade-in var(--t-fast) var(--ease-out);
   }

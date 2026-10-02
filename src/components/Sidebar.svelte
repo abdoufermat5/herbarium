@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { app, dueLabel, clearFilters } from "../lib/state.svelte";
+  import { app, dueLabel, clearFilters, toggleTheme } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
   import { modKey } from "../lib/format";
+  import { t, i18n, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { slide } from "svelte/transition";
 
   let foldersOpen = $state(true);
@@ -43,14 +44,14 @@
   </div>
 
   <div class="body">
-    <nav class="nav" aria-label="Library">
+    <nav class="nav" aria-label={t("sidebar.library")}>
       <button
         class="nav-item"
         class:active={app.view === "list" && !app.folderFilter && !app.tagFilter}
         onclick={goAll}
       >
         <span class="nav-icon"><Icon name="files" size={15} /></span>
-        <span class="nav-label ellipsis">All pages</span>
+        <span class="nav-label ellipsis">{t("sidebar.all")}</span>
       </button>
       <button
         class="nav-item"
@@ -59,7 +60,7 @@
         onclick={goReview}
       >
         <span class="nav-icon"><Icon name="refresh-cw" size={15} /></span>
-        <span class="nav-label ellipsis">Review today</span>
+        <span class="nav-label ellipsis">{t("sidebar.review")}</span>
         {#if app.dueCount > 0}
           <span class="badge">{app.dueCount}</span>
         {/if}
@@ -74,7 +75,7 @@
           onclick={() => (foldersOpen = !foldersOpen)}
         >
           <span class="chev" class:open={foldersOpen}><Icon name="chevron-right" size={13} /></span>
-          Folders
+          {t("sidebar.folders")}
         </button>
         {#if foldersOpen}
           <div class="list" transition:slide={{ duration: 140 }}>
@@ -102,20 +103,20 @@
           onclick={() => (tagsOpen = !tagsOpen)}
         >
           <span class="chev" class:open={tagsOpen}><Icon name="chevron-right" size={13} /></span>
-          Tags
+          {t("sidebar.tags")}
         </button>
         {#if tagsOpen}
           <div class="list" transition:slide={{ duration: 140 }}>
-            {#each app.tags as t (t.tag)}
+            {#each app.tags as tg (tg.tag)}
               <button
                 class="nav-item nav-sub"
-                class:active={app.view === "list" && app.tagFilter === t.tag}
-                title={t.tag}
-                onclick={() => toggleTag(t.tag)}
+                class:active={app.view === "list" && app.tagFilter === tg.tag}
+                title={tg.tag}
+                onclick={() => toggleTag(tg.tag)}
               >
                 <span class="nav-icon"><Icon name="hash" size={14} /></span>
-                <span class="nav-label ellipsis">{t.tag}</span>
-                <span class="count">{t.count}</span>
+                <span class="nav-label ellipsis">{tg.tag}</span>
+                <span class="count">{tg.count}</span>
               </button>
             {/each}
           </div>
@@ -126,19 +127,37 @@
     {#if app.folders.length === 0 && app.tags.length === 0}
       <div class="hint">
         <Icon name="info" size={14} />
-        <span>Folders and tags appear here as your library grows.</span>
+        <span>{t("sidebar.hint")}</span>
       </div>
     {/if}
   </div>
 
   <div class="foot">
-    <button class="search-btn" onclick={() => (app.paletteOpen = true)}>
-      <Icon name="search" size={14} />
-      <span>Search</span>
-      <kbd class="kbd">{modKey("K")}</kbd>
-    </button>
+    <div class="foot-row">
+      <button class="search-btn" onclick={() => (app.paletteOpen = true)}>
+        <Icon name="search" size={14} />
+        <span>{t("sidebar.search")}</span>
+        <kbd class="kbd">{modKey("K")}</kbd>
+      </button>
+      <button
+        class="btn btn-icon theme-btn"
+        onclick={toggleTheme}
+        aria-label={app.theme === "dark" ? t("prefs.themeLight") : t("prefs.themeDark")}
+        title={app.theme === "dark" ? t("prefs.themeLight") : t("prefs.themeDark")}
+      >
+        <Icon name={app.theme === "dark" ? "sun" : "moon"} size={15} />
+      </button>
+      <button
+        class="btn btn-icon theme-btn lang-btn"
+        onclick={toggleLocale}
+        aria-label={t("prefs.switchLang", { language: LOCALES[otherLocale()].name })}
+        title={t("prefs.switchLang", { language: LOCALES[otherLocale()].name })}
+      >
+        {LOCALES[i18n.locale].short}
+      </button>
+    </div>
     <p class="shortcut-hint">
-      Press <kbd class="kbd">/</kbd> to search, <kbd class="kbd">i</kbd> to import
+      <kbd class="kbd">/</kbd> {t("sidebar.toSearch")} · <kbd class="kbd">i</kbd> {t("sidebar.toImport")}
     </p>
   </div>
 </aside>
@@ -204,7 +223,6 @@
     display: flex;
     align-items: center;
     gap: 9px;
-    width: 100%;
     padding: 7px 10px;
     border-radius: var(--radius-sm);
     font-size: 13.5px;
@@ -300,7 +318,24 @@
     flex-direction: column;
     gap: 8px;
   }
+  .foot-row {
+    display: flex;
+    gap: 6px;
+  }
+  .theme-btn {
+    flex: none;
+    height: auto;
+    width: 34px;
+    color: var(--muted);
+  }
+  .lang-btn {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
   .search-btn {
+    flex: 1;
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 8px;

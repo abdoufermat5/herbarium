@@ -1,9 +1,11 @@
 import { api } from "./api";
+import { i18n, t, LOCALES } from "./i18n.svelte";
 import type { Config, PageMeta, TagCount } from "./types";
 
 export type View = "list" | "review";
 export type Layout = "grid" | "list";
 export type SortKey = "recent" | "title" | "review";
+export type Theme = "light" | "dark";
 export type ToastKind = "info" | "success" | "error";
 
 export interface Toast {
@@ -34,11 +36,21 @@ interface AppState {
   inspectorOpen: boolean;
   layout: Layout;
   sort: SortKey;
+  theme: Theme;
   toasts: Toast[];
 }
 
 function storedLayout(): Layout {
   return localStorage.getItem("herbarium.layout") === "list" ? "list" : "grid";
+}
+
+function systemTheme(): Theme {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function storedTheme(): Theme {
+  const v = localStorage.getItem("herbarium.theme");
+  return v === "light" || v === "dark" ? v : systemTheme();
 }
 
 function storedSort(): SortKey {
@@ -65,6 +77,7 @@ export const app: AppState = $state({
   inspectorOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
+  theme: storedTheme(),
   toasts: [],
 });
 
@@ -88,6 +101,26 @@ export function dismissToast(id: number) {
 export function setLayout(layout: Layout) {
   app.layout = layout;
   localStorage.setItem("herbarium.layout", layout);
+}
+
+export function setTheme(theme: Theme) {
+  app.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  localStorage.setItem("herbarium.theme", theme);
+}
+
+export function toggleTheme() {
+  setTheme(app.theme === "dark" ? "light" : "dark");
+}
+
+/** Apply the theme on boot and follow the OS until the user picks one. */
+export function initTheme() {
+  document.documentElement.dataset.theme = app.theme;
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", (e) => {
+    if (localStorage.getItem("herbarium.theme")) return;
+    app.theme = e.matches ? "dark" : "light";
+    document.documentElement.dataset.theme = app.theme;
+  });
 }
 
 export function setSort(sort: SortKey) {
@@ -120,7 +153,7 @@ export async function reloadPages() {
     await refreshAll();
   } catch (e) {
     console.error(e);
-    toast("Couldn't load your pages.", "error");
+    toast(t("toast.loadFailed"), "error");
   } finally {
     app.busy = false;
   }
@@ -152,7 +185,10 @@ export function visiblePages(pages: PageMeta[]): PageMeta[] {
   const sorted = [...list];
   switch (app.sort) {
     case "title":
-      sorted.sort((a, b) => (a.title || "Untitled").localeCompare(b.title || "Untitled"));
+      sorted.sort((a, b) => (a.title || t("common.untitled")).localeCompare(
+          b.title || t("common.untitled"),
+          LOCALES[i18n.locale].bcp47,
+        ));
       break;
     case "review":
       sorted.sort((a, b) => (a.nextReview ?? Infinity) - (b.nextReview ?? Infinity));
@@ -165,8 +201,8 @@ export function visiblePages(pages: PageMeta[]): PageMeta[] {
 
 export function dueLabel(): string {
   const n = app.dueCount;
-  if (n === 0) return "Review today";
-  return n === 1 ? "1 page to review" : `${n} pages to review`;
+  if (n === 0) return t("sidebar.review");
+  return t("sidebar.reviewDue", { count: n });
 }
 
 export function clearFilters() {
