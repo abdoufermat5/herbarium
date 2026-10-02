@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>semver — Semantic Versioning Reference</title>
+<style>
+  :root {
+    --bg: #f6f4ef;
+    --surface: #ffffff;
+    --ink: #26221c;
+    --muted: #867c6e;
+    --accent: #6d5bd0;
+    --accent-soft: #ece9fb;
+    --ok: #2d7d46;
+    --ok-soft: #e2f3e8;
+    --bad: #c0392b;
+    --bad-soft: #fbe4e1;
+    --border: #e3e0d9;
+    --radius: 12px;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 40px 24px 64px; }
+  header { margin-bottom: 32px; }
+  .kicker {
+    display: inline-block;
+    font: 600 11px/1 var(--mono);
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 6px 12px;
+    margin-bottom: 14px;
+  }
+  h1 { margin: 0 0 8px; font-size: 34px; letter-spacing: -.02em; }
+  .lede { color: var(--muted); margin: 0; font-size: 16px; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin: 18px 0;
+  }
+  h2 { font-size: 15px; margin: 0 0 12px; letter-spacing: .01em; }
+  code, .mono { font-family: var(--mono); }
+  pre {
+    background: #1e1b2e;
+    color: #dcd6ff;
+    border-radius: 10px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font: 13px/1.6 var(--mono);
+    margin: 12px 0 0;
+  }
+  .version { font-size: 42px; font-weight: 700; font-family: var(--mono); letter-spacing: -.03em; }
+  .ok-badge, .bad-badge {
+    display: inline-block;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font: 600 13px/1 var(--mono);
+    margin-left: 10px;
+    vertical-align: middle;
+  }
+  .ok-badge { color: var(--ok); background: var(--ok-soft); }
+  .bad-badge { color: var(--bad); background: var(--bad-soft); }
+  input[type=text] {
+    width: 100%;
+    font: 14px var(--mono);
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg);
+    color: var(--ink);
+    outline: none;
+  }
+  input[type=text]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  #out {
+    margin-top: 10px;
+    font: 13px/1.5 var(--mono);
+    min-height: 52px;
+    white-space: pre-wrap;
+  }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+  .rule {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .rule code { display: block; font-size: 17px; margin-bottom: 6px; }
+  .rule p { margin: 0; color: var(--muted); font-size: 13px; }
+  .count { font: 14px var(--mono); color: var(--accent); }
+  .count b { font-size: 26px; }
+  button {
+    font: 600 13px system-ui, sans-serif;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 8px;
+    padding: 9px 14px;
+    cursor: pointer;
+  }
+  button:hover { background: #5c4cb8; }
+  footer { margin-top: 36px; color: var(--muted); font-size: 12px; text-align: center; }
+  .tag {
+    display: inline-block;
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font: 600 11px system-ui, sans-serif;
+    margin: 0 6px 6px 0;
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <span class="kicker">Reference · Draft</span>
+    <h1>semver — Semantic Versioning</h1>
+    <p class="lede">
+      A tiny reference and validator for the <strong>semver</strong> convention
+      (<code>MAJOR.MINOR.PATCH</code>) used by hundreds of thousands of packages.
+      Fully interactive — typed straight into a sandboxed reader.
+    </p>
+  </header>
+
+  <div class="card">
+    <span class="tag">interactive</span>
+    <h2>Try it: validate any version string</h2>
+    <input type="text" id="v" placeholder="e.g. 2.4.1, 1.0.0-rc.1+build.5, or 3 (invalid)" value="2.4.1" spellcheck="false">
+    <div id="out"></div>
+  </div>
+
+  <div class="card">
+    <h2>The anatomy of a semver tag</h2>
+    <div class="version"><span style="color:var(--accent)">1</span>.<span style="color:var(--ok)">12</span>.<span style="color:var(--bad)">7</span><span style="color:var(--muted);font-size:22px">-rc.1+meta</span></div>
+    <div class="grid">
+      <div class="rule"><code>MAJOR</code><p>Breaking changes — bump when APIs are incompatible.</p></div>
+      <div class="rule"><code>MINOR</code><p>New features, added backwards-compatibly.</p></div>
+      <div class="rule"><code>PATCH</code><p>Backwards-compatible bug fixes.</p></div>
+      <div class="rule"><code>-prerelease</code><p>Unstable: <code>alpha</code>, <code>beta</code>, <code>rc.1</code>…</p></div>
+      <div class="rule"><code>+metadata</code><p>Build info, ignored for precedence.</p></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Interactive: precedence demo</h2>
+    <p id="cmp" class="mono" style="font-size:15px"></p>
+  </div>
+
+  <div class="card">
+    <h2>Why semantic versions matter</h2>
+    <p>
+      With strict <strong>semver</strong>, a project can declare
+      <code>"^1.2.0"</code> and safely accept every <code>1.x</code> release:
+      anything that landed in <code>2.0.0</code> would have been a breaking
+      change by definition. Your lockfile stays stable, CI stays green, and
+      <code>cargo update</code> stays boring.
+    </p>
+    <pre>// herculean semver ensure
+ensure!(v.major == 1, "not 1.x in this era");
+println!("semver ok: {}", v);</pre>
+    <p style="color:var(--muted)">Pages like this one — AI-generated offline references — are exactly what Herbarium was built to shelve and revisit.</p>
+  </div>
+
+  <footer>Generated by an AI · standalone &amp; offline · herbarium demo page</footer>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  function probe() { return typeof window; }
+
+  var SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
+
+  function parseParts(v) {
+    var m = SEMVER.exec(v.trim());
+    if (!m) return null;
+    return { major: +m[1], minor: +m[2], patch: +m[3], pre: m[4] || null, build: m[5] || null };
+  }
+
+  function cmp(a, b) {
+    if (a.major !== b.major) return a.major < b.major ? -1 : 1;
+    if (a.minor !== b.minor) return a.minor < b.minor ? -1 : 1;
+    if (a.patch !== b.patch) return a.patch < b.patch ? -1 : 1;
+    if (a.pre === null && b.pre === null) return 0;
+    if (a.pre === null) return 1;        // release > prerelease
+    if (b.pre === null) return -1;
+    var pa = a.pre.split("."), pb = b.pre.split(".");
+    for (var i = 0; i < Math.max(pa.length, pb.length); i++) {
+      if (i >= pa.length) return -1;
+      if (i >= pb.length) return 1;
+      if (pa[i] === pb[i]) continue;
+      var na = /^\d+$/.test(pa[i]), nb = /^\d+$/.test(pb[i]);
+      if (na && nb) return (+pa[i] < +pb[i]) ? -1 : 1;
+      if (na) return -1;                 // numeric < alphanumeric
+      if (nb) return 1;
+      return pa[i] < pb[i] ? -1 : 1;
+    }
+    return 0;
+  }
+
+  var out = document.getElementById("out");
+  var vIn = document.getElementById("v");
+  var cmpEl = document.getElementById("cmp");
+
+  function render(value) {
+    var p = parseParts(value);
+    if (!p) {
+      out.textContent = "✗ invalid semver — expected MAJOR.MINOR.PATCH (e.g. 1.12.7, 1.12.7-rc.1, 1.12.7+build.5)";
+      out.style.color = "#c0392b";
+      return;
+    }
+    var parts = [];
+    if (p.pre) parts.push("prerelease " + p.pre);
+    if (p.build) parts.push("build metadata " + p.build);
+    var label = (parts.length ? p.major + "." + p.minor + "." + p.patch + " with " + parts.join(" + ") : "valid " + p.major + "." + p.minor + "." + p.patch + " (release)");
+    if (p.major === 0) label += "\n⚠ 0.x — not subject to full semver guarantees";
+    out.textContent = "✓ " + label;
+    out.style.color = "#2d7d46";
+  }
+
+  function renderCmp() {
+    var pairs = [
+      ["1.0.0", "1.0.0"],
+      ["1.0.0", "1.0.1"],
+      ["1.0.1", "1.1.0"],
+      ["1.1.0", "2.0.0"],
+      ["2.0.0", "2.0.0-rc.1"],
+      ["2.0.0-rc.1", "2.0.0-beta.2"],
+      ["2.0.0-beta.2", "2.0.0-rc.2"],
+      ["2.0.0-rc.2", "2.0.0+build.5"]
+    ];
+    var lines = pairs.map(function (pair) {
+      var a = parseParts(pair[0]), b = parseParts(pair[1]);
+      var c = cmp(a, b);
+      var sym = c < 0 ? "<" : c > 0 ? ">" : "=";
+      return "  " + pair[0] + "  " + sym + "  " + pair[1] + (c === 0 ? "  (same precedence)" : "");
+    }).join("\n");
+    var probeOk = (function () { try { return probe() === "object"; } catch (e) { return false; } })();
+    cmpEl.textContent = "ascending precedence in semver:\n" + lines + "\n\nJS in this frame is alive → window is " + (probeOk ? "present" : "gone");
+  }
+
+  vIn.addEventListener("input", function () { render(vIn.value); });
+  render(vIn.value);
+  renderCmp();
+})();
+</script>
+</body>
+</html>
