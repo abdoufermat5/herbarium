@@ -209,6 +209,41 @@ pub fn index_vault(store: &Store) -> VaultResult<(usize, usize)> {
     Ok((imported, removed))
 }
 
+/// Recursively list `.html` files relative to `vault`, skipping hidden dirs.
+fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
+    let mut files = Vec::new();
+    let mut skipped = Vec::new();
+    fn walk(dir: &Path, base: &Path, files: &mut Vec<PathBuf>, skipped: &mut Vec<String>) -> VaultResult<()> {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                if name.starts_with('.') {
+                    skipped.push(name);
+                    continue;
+                }
+                walk(&path, base, files, skipped)?;
+            } else if name.ends_with(".html") {
+                let rel = path.strip_prefix(base).map_err(|e| e.to_string())?.to_path_buf();
+                files.push(rel);
+            }
+        }
+        Ok(())
+    }
+    walk(vault, vault, &mut files, &mut skipped)?;
+    Ok((files, skipped))
+}
+
+fn file_mtime(path: &Path) -> Option<i64> {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -287,39 +322,4 @@ mod tests {
         assert!(safe_rel("c:\\evil").is_none());
         assert_eq!(safe_rel("a/b/c"), Some(PathBuf::from("a/b/c")));
     }
-}
-
-/// Recursively list `.html` files relative to `vault`, skipping hidden dirs.
-fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
-    let mut files = Vec::new();
-    let mut skipped = Vec::new();
-    fn walk(dir: &Path, base: &Path, files: &mut Vec<PathBuf>, skipped: &mut Vec<String>) -> VaultResult<()> {
-        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
-            let entry = entry.map_err(|e| e.to_string())?;
-            let path = entry.path();
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
-            if is_dir {
-                if name.starts_with('.') {
-                    skipped.push(name);
-                    continue;
-                }
-                walk(&path, base, files, skipped)?;
-            } else if name.ends_with(".html") {
-                let rel = path.strip_prefix(base).map_err(|e| e.to_string())?.to_path_buf();
-                files.push(rel);
-            }
-        }
-        Ok(())
-    }
-    walk(vault, vault, &mut files, &mut skipped)?;
-    Ok((files, skipped))
-}
-
-fn file_mtime(path: &Path) -> Option<i64> {
-    fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_secs() as i64)
 }

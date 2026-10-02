@@ -6,22 +6,20 @@ const MAX_TEXT: usize = 1_000_000;
 /// Extract the `<title>` element; falls back to the first `<h1>`.
 pub fn extract_title(html: &str) -> String {
     let doc = Html::parse_document(html);
-    if let Ok(sel) = Selector::parse("title") {
-        if let Some(el) = doc.select(&sel).next() {
+    if let Ok(sel) = Selector::parse("title")
+        && let Some(el) = doc.select(&sel).next() {
             let t = el.text().collect::<String>().trim().to_string();
             if !t.is_empty() {
                 return t;
             }
         }
-    }
-    if let Ok(sel) = Selector::parse("h1") {
-        if let Some(el) = doc.select(&sel).next() {
+    if let Ok(sel) = Selector::parse("h1")
+        && let Some(el) = doc.select(&sel).next() {
             let t = el.text().collect::<String>().trim().to_string();
             if !t.is_empty() {
                 return t;
             }
         }
-    }
     String::new()
 }
 

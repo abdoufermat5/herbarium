@@ -269,19 +269,14 @@ impl Store {
 
 /// Turn a user query into an FTS5 expression: every token quoted and prefix-starred.
 fn fts_expr(query: &str) -> String {
-    let expr = query
+    query
         .split_whitespace()
         .map(|tok| {
             let esc = tok.replace('"', "\"\"");
             format!("\"{}\"*", esc)
         })
         .collect::<Vec<_>>()
-        .join(" ");
-    if expr.is_empty() {
-        expr
-    } else {
-        expr
-    }
+        .join(" ")
 }
 
 fn like_pattern(query: &str) -> String {

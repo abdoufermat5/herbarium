@@ -70,10 +70,10 @@ fn open_vault(app: &AppHandle, state: &State<'_, AppState>, path: &str) -> CmdRe
 }
 
 fn persist_meta(store: &Store, meta: &PageMeta) -> CmdResult<()> {
-    vault::write_meta(&store.vault, &meta).map_err(|e| e.to_string())?;
+    vault::write_meta(&store.vault, meta).map_err(|e| e.to_string())?;
     let text = store.text_for(&meta.id).map_err(|e| e.to_string())?.unwrap_or_default();
     let mtime = store.mtime_for(&meta.id).map_err(|e| e.to_string())?.unwrap_or(crate::time::now_secs());
-    store.upsert(&meta, &text, mtime).map_err(|e| e.to_string())?;
+    store.upsert(meta, &text, mtime).map_err(|e| e.to_string())?;
     Ok(())
 }
 
