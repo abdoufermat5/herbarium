@@ -2,13 +2,13 @@ import { api } from "./api";
 import { i18n, t, LOCALES } from "./i18n.svelte";
 import type { Config, PageMeta, TagCount } from "./types";
 
-export type View = "list" | "review";
+type View ="list" | "review";
 export type Layout = "grid" | "list";
 export type SortKey = "recent" | "title" | "review";
 export type Theme = "light" | "dark";
 export type ToastKind = "info" | "success" | "error";
 
-export interface Toast {
+interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
@@ -103,7 +103,7 @@ export function setLayout(layout: Layout) {
   localStorage.setItem("herbarium.layout", layout);
 }
 
-export function setTheme(theme: Theme) {
+function setTheme(theme: Theme) {
   app.theme = theme;
   document.documentElement.dataset.theme = theme;
   localStorage.setItem("herbarium.theme", theme);

@@ -2,7 +2,7 @@
 
 import { i18n, t, LOCALES } from "./i18n.svelte";
 
-export const isMac =
+const isMac =
   typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
 /** "⌘K" on macOS, "Ctrl K" elsewhere. */
@@ -17,12 +17,6 @@ export function fmtDate(ms: number | null | undefined): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-/** "Sep 14" — no year, for compact badges. */
-export function fmtDay(ms: number | null | undefined): string {
-  if (!ms) return "";
-  return new Date(ms).toLocaleDateString(LOCALES[i18n.locale].bcp47, { month: "short", day: "numeric" });
 }
 
 export function timeAgo(ms: number | null | undefined): string {
