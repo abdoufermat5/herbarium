@@ -4,8 +4,12 @@
   import Icon from "../lib/Icon.svelte";
   import { modKey } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
+  import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { slide } from "svelte/transition";
+  import { ask } from "@tauri-apps/plugin-dialog";
   import type { PageMeta } from "../lib/types";
+  import ContextMenu from "./ContextMenu.svelte";
+  import type { DropdownMenuItem } from "./DropdownMenu.svelte";
 
   interface Branch {
     name: string;
@@ -138,6 +142,108 @@
     app.readId = null;
     app.view = "review";
   }
+
+  let menu = $state<{ x: number; y: number; items: DropdownMenuItem[] } | null>(null);
+
+  /** Right click anchors at the pointer; the context-menu key (clientX/Y = 0) at the row. */
+  function anchor(e: MouseEvent): { x: number; y: number } {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof HTMLElement) {
+      const r = e.currentTarget.getBoundingClientRect();
+      return { x: r.left + 24, y: r.bottom };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function openMenu(e: MouseEvent, items: DropdownMenuItem[]) {
+    menu = { ...anchor(e), items };
+  }
+
+  function filesMenu(e: MouseEvent) {
+    // Keep the native cut/copy/paste menu inside the name input.
+    if (e.target instanceof HTMLInputElement) return;
+    openMenu(e, createItems(""));
+  }
+
+  function createItems(parent: string): DropdownMenuItem[] {
+    return [
+      { id: "new-page", label: t("sidebar.newPage"), icon: "file-plus", onclick: () => startCreate("page", parent) },
+      { id: "new-folder", label: t("sidebar.newFolder"), icon: "folder-plus", onclick: () => startCreate("folder", parent) },
+    ];
+  }
+
+  function showFolder(path: string) {
+    app.readId = null;
+    app.view = "list";
+    app.tagFilter = null;
+    app.folderFilter = path;
+  }
+
+  function folderMenu(e: MouseEvent, folder: Branch) {
+    const open = expanded.has(folder.path);
+    openMenu(e, [
+      ...createItems(folder.path),
+      { divider: true },
+      { id: "show", label: t("sidebar.showPages"), icon: "files", onclick: () => showFolder(folder.path) },
+      {
+        id: "toggle",
+        label: open ? t("sidebar.collapse") : t("sidebar.expand"),
+        icon: open ? "folder" : "folder-open",
+        onclick: () => setExpanded(folder.path, !open),
+      },
+    ]);
+  }
+
+  async function pageMenu(e: MouseEvent, page: PageMeta) {
+    const at = anchor(e);
+    // Resolve the editor first so its name is in the label.
+    await loadEditors();
+    const editor = currentEditor();
+    menu = { ...at, items: [
+      { id: "open", label: t("common.open"), icon: "file-text", onclick: () => openPage(page.id) },
+      {
+        id: "editor",
+        label: editor ? t("sidebar.openIn", { editor: editor.name }) : t("sidebar.noEditor"),
+        icon: "external-link",
+        disabled: !editor,
+        onclick: () => void openInEditor(page),
+      },
+      { divider: true },
+      { id: "delete", label: t("insp.deletePage"), icon: "trash-2", danger: true, onclick: () => void deletePage(page) },
+    ] };
+  }
+
+  async function openInEditor(page: PageMeta) {
+    const editor = currentEditor();
+    if (!editor) return;
+    try {
+      const name = await api.openInEditor(page.id, editor.id, editor.custom);
+      toast(t("edit.openedIn", { editor: name }), "success");
+    } catch (e) {
+      toast(`${t("edit.openFailed")}: ${e}`, "error");
+    }
+  }
+
+  async function deletePage(page: PageMeta) {
+    const title = page.title || t("common.untitled");
+    const confirmed = await ask(t("sidebar.confirmDelete", { title }), {
+      title: t("insp.deletePage"),
+      kind: "warning",
+      okLabel: t("insp.deletePage"),
+      cancelLabel: t("sidebar.cancel"),
+    });
+    if (!confirmed) return;
+    try {
+      await api.deletePage(page.id);
+      if (app.readId === page.id) app.readId = null;
+      toast(t("toast.deleted", { title }), "success");
+      await reloadPages();
+    } catch (e) {
+      console.error(e);
+      toast(t("toast.deleteFailed"), "error");
+    }
+  }
 </script>
 
 {#snippet creator(parent: string, depth: number)}
@@ -175,6 +281,7 @@
         aria-expanded={open}
         title={folder.path}
         onclick={() => toggleFolder(folder.path)}
+        oncontextmenu={(e) => folderMenu(e, folder)}
       >
         <span class="chev" class:open><Icon name="chevron-right" size={10} /></span>
         <span class="nav-icon"><Icon name={open ? "folder-open" : "folder"} size={14} /></span>
@@ -203,6 +310,7 @@
       aria-current={app.readId === page.id ? "page" : undefined}
       title={page.title}
       onclick={() => openPage(page.id)}
+      oncontextmenu={(e) => void pageMenu(e, page)}
     >
       <span class="nav-icon"><Icon name="file-text" size={14} /></span>
       <span class="nav-label ellipsis">{page.title}</span>
@@ -247,7 +355,7 @@
       </button>
     </nav>
 
-    <div class="group">
+    <div class="group" role="presentation" oncontextmenu={filesMenu}>
       <div class="group-head">
         <div class="group-title static">{t("sidebar.files")}</div>
         <div class="tools">
@@ -297,6 +405,10 @@
     </p>
   </div>
 </aside>
+
+{#if menu}
+  <ContextMenu x={menu.x} y={menu.y} items={menu.items} ariaLabel={t("sidebar.files")} onclose={() => (menu = null)} />
+{/if}
 
 <style>
   .sidebar {
@@ -401,6 +513,8 @@
     display: flex;
     flex-direction: column;
     gap: 1px;
+    /* Fill the rest of the body so its empty space takes the files context menu. */
+    flex: 1 0 auto;
   }
   .group-title {
     display: flex;

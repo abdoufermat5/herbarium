@@ -162,6 +162,13 @@ export const fr: Record<MessageKey, string> = {
   "sidebar.search": "Rechercher",
   "sidebar.toSearch": "pour rechercher",
   "sidebar.toImport": "pour importer",
+  "sidebar.showPages": "Afficher les pages",
+  "sidebar.expand": "Déplier",
+  "sidebar.collapse": "Replier",
+  "sidebar.openIn": "Ouvrir dans {editor}",
+  "sidebar.noEditor": "Aucun éditeur externe trouvé",
+  "sidebar.confirmDelete": "Supprimer « {title} » ? Le fichier HTML et ses métadonnées seront retirés de votre coffre. Cette action est irréversible.",
+  "sidebar.cancel": "Annuler",
 
   "palette.label": "Palette de commandes",
   "palette.placeholder": "Rechercher une page ou lancer une commande…",

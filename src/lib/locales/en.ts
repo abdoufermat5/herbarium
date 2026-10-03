@@ -163,6 +163,13 @@ export const en = {
   "sidebar.search": "Search",
   "sidebar.toSearch": "to search",
   "sidebar.toImport": "to import",
+  "sidebar.showPages": "Show pages",
+  "sidebar.expand": "Expand",
+  "sidebar.collapse": "Collapse",
+  "sidebar.openIn": "Open in {editor}",
+  "sidebar.noEditor": "No external editor found",
+  "sidebar.confirmDelete": "Delete “{title}”? This removes the HTML file and its metadata from your vault and cannot be undone.",
+  "sidebar.cancel": "Cancel",
 
   "palette.label": "Command palette",
   "palette.placeholder": "Search pages or run a command…",
