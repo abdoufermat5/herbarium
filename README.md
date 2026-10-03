@@ -70,7 +70,7 @@ claude mcp add herbarium -- herbarium mcp
 
 Then ask things like *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. The server uses `--vault <path>` if given, otherwise `HERBARIUM_VAULT`, otherwise the vault last opened in the app. The app picks up agent changes when its window regains focus.
 
-Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_clear`, `review_due`, `network_set`, `tags_list`, `folders_list`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
+Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_clear`, `review_due`, `network_set`, `tags_list`, `folders_list`, `folders_create`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
 
 ## Getting started
 

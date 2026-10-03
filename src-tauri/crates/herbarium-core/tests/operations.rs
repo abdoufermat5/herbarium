@@ -187,3 +187,22 @@ fn ui_only_operations_are_hidden_from_agents_and_duplicates_rejected() {
     ]);
     assert!(dup.is_err());
 }
+
+#[test]
+fn empty_folders_are_created_listed_and_confined_to_the_vault() {
+    let vault = temp_vault("folders");
+    let mut host = Host::new();
+    open(&mut host, &vault);
+
+    let made = host.call(Caller::Agent, "folders.create", json!({ "path": " rust//cargo/ " })).unwrap();
+    assert_eq!(made, "rust/cargo");
+    let listed = host.call(Caller::Agent, "folders.list", json!({})).unwrap();
+    assert_eq!(listed, json!(["rust", "rust/cargo"]), "empty folders and their parents are listed, .herbarium is not");
+
+    for bad in ["../x", ".hidden", "a/.git", "   "] {
+        assert!(host.call(Caller::Agent, "folders.create", json!({ "path": bad })).is_err(), "{bad}");
+    }
+    assert!(!vault.parent().unwrap().join("x").exists());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

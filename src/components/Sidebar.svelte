@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { app, dueLabel, clearFilters } from "../lib/state.svelte";
+  import { app, dueLabel, clearFilters, refreshAll, reloadPages, toast } from "../lib/state.svelte";
+  import { api } from "../lib/api";
   import Icon from "../lib/Icon.svelte";
   import { modKey } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
@@ -64,6 +65,61 @@
     app.readId = id;
   }
 
+  let creating = $state<{ kind: "page" | "folder"; parent: string } | null>(null);
+  let draftName = $state("");
+
+  function setExpanded(path: string, open: boolean) {
+    const next = new Set(expanded);
+    if (open) next.add(path);
+    else next.delete(path);
+    expanded = next;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+  }
+
+  function startCreate(kind: "page" | "folder", parent: string) {
+    if (parent) setExpanded(parent, true);
+    draftName = "";
+    creating = { kind, parent };
+  }
+
+  function cancelCreate() {
+    creating = null;
+  }
+
+  async function commitCreate() {
+    const target = creating;
+    const name = draftName.trim();
+    creating = null;
+    if (!target || !name) return;
+    const path = target.parent ? `${target.parent}/${name}` : name;
+    try {
+      if (target.kind === "folder") {
+        const made = await api.createFolder(path);
+        for (let p = made; p; p = p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "") setExpanded(p, true);
+        await refreshAll();
+        toast(t("sidebar.folderCreated", { name: made }), "success");
+      } else {
+        const page = await api.createPage(name, target.parent || null);
+        await reloadPages();
+        app.readId = page.id;
+      }
+    } catch (e) {
+      console.error(e);
+      toast(t(target.kind === "folder" ? "sidebar.folderFailed" : "sidebar.pageFailed"), "error");
+    }
+  }
+
+  function onCreateKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitCreate();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelCreate();
+    }
+  }
+
   function goAll() {
     app.readId = null;
     app.view = "list";
@@ -76,22 +132,57 @@
   }
 </script>
 
+{#snippet creator(parent: string, depth: number)}
+  {#if creating && creating.parent === parent}
+    <div class="tree-row">
+      <span class="nav-item tree-item creator" style:padding-left="{10 + depth * 14 + (creating.kind === "page" ? 16 : 0)}px">
+        {#if creating.kind === "folder"}
+          <span class="chev"><Icon name="chevron-right" size={10} /></span>
+        {/if}
+        <span class="nav-icon"><Icon name={creating.kind === "folder" ? "folder" : "file-text"} size={14} /></span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          class="create-input"
+          autofocus
+          spellcheck="false"
+          aria-label={creating.kind === "folder" ? t("sidebar.folderName") : t("sidebar.pageName")}
+          placeholder={creating.kind === "folder" ? t("sidebar.folderName") : t("sidebar.pageName")}
+          bind:value={draftName}
+          onkeydown={onCreateKey}
+          onblur={cancelCreate}
+        />
+      </span>
+    </div>
+  {/if}
+{/snippet}
+
 {#snippet branch(node: Branch, depth: number)}
+  {@render creator(node.path, depth)}
   {#each node.folders as folder (folder.path)}
     {@const open = expanded.has(folder.path)}
-    <button
-      class="nav-item tree-item"
-      style:padding-left="{10 + depth * 14}px"
-      role="treeitem"
-      aria-selected="false"
-      aria-expanded={open}
-      title={folder.path}
-      onclick={() => toggleFolder(folder.path)}
-    >
-      <span class="chev" class:open><Icon name="chevron-right" size={10} /></span>
-      <span class="nav-icon"><Icon name={open ? "folder-open" : "folder"} size={14} /></span>
-      <span class="nav-label ellipsis">{folder.name}</span>
-    </button>
+    <div class="tree-row">
+      <button
+        class="nav-item tree-item"
+        style:padding-left="{10 + depth * 14}px"
+        role="treeitem"
+        aria-selected="false"
+        aria-expanded={open}
+        title={folder.path}
+        onclick={() => toggleFolder(folder.path)}
+      >
+        <span class="chev" class:open><Icon name="chevron-right" size={10} /></span>
+        <span class="nav-icon"><Icon name={open ? "folder-open" : "folder"} size={14} /></span>
+        <span class="nav-label ellipsis">{folder.name}</span>
+      </button>
+      <span class="row-actions">
+        <button class="tool" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} onclick={() => startCreate("page", folder.path)}>
+          <Icon name="file-plus" size={13} />
+        </button>
+        <button class="tool" title={t("sidebar.newFolder")} aria-label={t("sidebar.newFolder")} onclick={() => startCreate("folder", folder.path)}>
+          <Icon name="folder-plus" size={13} />
+        </button>
+      </span>
+    </div>
     {#if open}
       <div role="group" transition:slide={{ duration: 120 }}>
         {@render branch(folder, depth + 1)}
@@ -151,19 +242,28 @@
       </button>
     </nav>
 
-    {#if app.library.length > 0}
-      <div class="group">
+    <div class="group">
+      <div class="group-head">
         <div class="group-title static">{t("sidebar.files")}</div>
-        <div class="tree" role="tree" aria-label={t("sidebar.files")}>
-          {@render branch(tree, 0)}
+        <div class="tools">
+          <button class="tool" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} onclick={() => startCreate("page", "")}>
+            <Icon name="file-plus" size={14} />
+          </button>
+          <button class="tool" title={t("sidebar.newFolder")} aria-label={t("sidebar.newFolder")} onclick={() => startCreate("folder", "")}>
+            <Icon name="folder-plus" size={14} />
+          </button>
         </div>
       </div>
-    {:else}
-      <div class="hint">
-        <Icon name="info" size={14} />
-        <span>{t("sidebar.hint")}</span>
+      <div class="tree" role="tree" aria-label={t("sidebar.files")}>
+        {@render branch(tree, 0)}
       </div>
-    {/if}
+      {#if app.library.length === 0 && app.folders.length === 0 && !creating}
+        <div class="hint">
+          <Icon name="info" size={14} />
+          <span>{t("sidebar.hint")}</span>
+        </div>
+      {/if}
+    </div>
   </div>
 
   <div class="foot">
@@ -339,6 +439,62 @@
   }
   .tree-page {
     color: var(--muted);
+  }
+  .group-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-right: 4px;
+  }
+  .tools,
+  .row-actions {
+    display: flex;
+    gap: 1px;
+  }
+  .tool {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-xs);
+    color: var(--muted);
+  }
+  .tool:hover {
+    background: var(--sunken);
+    color: var(--text);
+  }
+  .tree-row {
+    position: relative;
+  }
+  .row-actions {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    opacity: 0;
+    pointer-events: none;
+    background: var(--raised);
+    border-radius: var(--radius-xs);
+  }
+  .tree-row:hover .row-actions,
+  .tree-row:focus-within .row-actions {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .creator {
+    cursor: text;
+  }
+  .create-input {
+    flex: 1;
+    min-width: 0;
+    padding: 0 4px;
+    height: 20px;
+    font: inherit;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-hover);
+    border-radius: var(--radius-xs);
+    outline: none;
   }
 
   .hint {

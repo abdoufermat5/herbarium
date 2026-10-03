@@ -7,11 +7,17 @@ use super::object;
 use crate::extension::{events, Ctx, Extension, OpResult, Operation, Registry};
 use crate::host::reindex;
 use crate::time::now_ms;
+use crate::vault;
 
 pub(crate) struct Library;
 
 #[derive(Deserialize)]
 struct NoArgs {}
+
+#[derive(Deserialize)]
+struct CreateFolderArgs {
+    path: String,
+}
 
 impl Extension for Library {
     fn id(&self) -> &str {
@@ -28,9 +34,16 @@ impl Extension for Library {
 
         r.add(Operation::new(
             "folders.list",
-            "All folders that contain pages, as `a/b/c` paths.",
+            "All folders in the vault, including empty ones, as `a/b/c` paths.",
             object(json!({}), &[]),
-            |ctx: &mut Ctx, _: NoArgs| ctx.store.folders().map_err(|e| e.to_string()),
+            |ctx: &mut Ctx, _: NoArgs| vault::list_folders(&ctx.store.vault),
+        ))?;
+
+        r.add(Operation::new(
+            "folders.create",
+            "Create a folder (and missing parents), e.g. `rust/cargo`. Returns the normalized path.",
+            object(json!({ "path": { "type": "string" } }), &["path"]),
+            |ctx: &mut Ctx, a: CreateFolderArgs| vault::create_folder(&ctx.store.vault, &a.path),
         ))?;
 
         r.add(Operation::new(
@@ -43,7 +56,7 @@ impl Extension for Library {
                     "path": s.vault,
                     "pages": s.count().map_err(|e| e.to_string())?,
                     "dueForReview": s.due(now_ms()).map_err(|e| e.to_string())?.len(),
-                    "folders": s.folders().map_err(|e| e.to_string())?,
+                    "folders": vault::list_folders(&s.vault)?,
                     "tags": s.tag_counts().map_err(|e| e.to_string())?,
                     "lastIndexedAt": s.synced_at(),
                 }))

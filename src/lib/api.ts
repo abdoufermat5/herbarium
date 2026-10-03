@@ -76,6 +76,17 @@ export const api = {
     return op("folders.list");
   },
 
+  createFolder(path: string): Promise<string> {
+    return op("folders.create", { path });
+  },
+
+  /** A new page from a blank HTML skeleton titled `title`. */
+  createPage(title: string, folder: string | null): Promise<PageMeta> {
+    const esc = title.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const html = `<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<title>${esc}</title>\n</head>\n<body>\n<h1>${esc}</h1>\n</body>\n</html>\n`;
+    return op("pages.create", { html, title, folder });
+  },
+
   rescan(): Promise<IndexReport> {
     return op("vault.rescan");
   },

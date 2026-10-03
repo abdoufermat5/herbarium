@@ -244,6 +244,39 @@ fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
     Ok((files, skipped))
 }
 
+/// Every folder in the vault as `a/b/c` paths, including empty ones. Hidden
+/// directories (such as `.herbarium`) are skipped.
+pub fn list_folders(vault: &Path) -> VaultResult<Vec<String>> {
+    fn walk(dir: &Path, rel: &str, out: &mut Vec<String>) -> VaultResult<()> {
+        for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir || name.starts_with('.') {
+                continue;
+            }
+            let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+            walk(&entry.path(), &path, out)?;
+            out.push(path);
+        }
+        Ok(())
+    }
+    let mut out = Vec::new();
+    walk(vault, "", &mut out)?;
+    out.sort_by_key(|p| p.to_lowercase());
+    Ok(out)
+}
+
+/// Create a folder (and any missing parents) and return its normalized path.
+pub fn create_folder(vault: &Path, folder: &str) -> VaultResult<String> {
+    let clean = clean_folder(Some(folder))?.ok_or("folder name is empty")?;
+    if clean.split('/').any(|s| s.starts_with('.')) {
+        return Err("folder names cannot start with a dot".into());
+    }
+    fs::create_dir_all(vault.join(&clean)).map_err(|e| format!("cannot create folder: {e}"))?;
+    Ok(clean)
+}
+
 pub fn file_mtime(path: &Path) -> Option<i64> {
     fs::metadata(path)
         .and_then(|m| m.modified())
