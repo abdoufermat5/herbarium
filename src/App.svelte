@@ -4,6 +4,7 @@
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
+  import SettingsView from "./components/SettingsView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
   import Onboarding from "./components/Onboarding.svelte";
@@ -63,6 +64,13 @@
       app.paletteOpen = !app.paletteOpen;
       return;
     }
+    if (mod && e.key === "," && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
+      e.preventDefault();
+      app.readId = null;
+      app.view = "settings";
+      return;
+    }
+
 
     if (e.key === "Escape") {
       if (app.paletteOpen) {
@@ -74,6 +82,10 @@
       if (app.importOpen) return; // handled by the dialog
       if (app.readId) {
         app.readId = null;
+        return;
+      }
+      if (app.view === "settings") {
+        if (!e.defaultPrevented) app.view = "list";
         return;
       }
       if (app.folderFilter || app.tagFilter) {
@@ -170,6 +182,8 @@
     <main class="main">
       {#if app.view === "review"}
         <ReviewView />
+      {:else if app.view === "settings"}
+        <SettingsView />
       {:else}
         <PageList />
       {/if}

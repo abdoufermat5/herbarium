@@ -2,7 +2,7 @@ import { api } from "./api";
 import { i18n, t, LOCALES } from "./i18n.svelte";
 import type { Config, PageMeta, TagCount } from "./types";
 
-type View ="list" | "review";
+type View = "list" | "review" | "settings";
 export type Layout = "grid" | "list";
 export type SortKey = "recent" | "title" | "review";
 export type Theme = "light" | "dark";

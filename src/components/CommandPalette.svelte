@@ -51,6 +51,16 @@
         },
       },
       {
+        key: "settings",
+        group: t("palette.actions"),
+        label: t("palette.goSettings"),
+        icon: "settings",
+        run: () => {
+          app.readId = null;
+          app.view = "settings";
+        },
+      },
+      {
         key: "lang",
         group: t("palette.actions"),
         label: t("prefs.switchLang", { language: LOCALES[otherLocale()].name }),

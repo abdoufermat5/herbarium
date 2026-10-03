@@ -1,9 +1,8 @@
 <script lang="ts">
-  import { app, dueLabel, clearFilters, setTheme } from "../lib/state.svelte";
+  import { app, dueLabel, clearFilters } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
-  import DropdownMenu from "./DropdownMenu.svelte";
   import { modKey } from "../lib/format";
-  import { t, i18n, setLocale, LOCALES } from "../lib/i18n.svelte";
+  import { t } from "../lib/i18n.svelte";
   import { slide } from "svelte/transition";
 
   let foldersOpen = $state(true);
@@ -140,72 +139,23 @@
   </div>
 
   <div class="foot">
-    <div class="foot-row">
-      <button class="search-btn" onclick={() => (app.paletteOpen = true)}>
-        <Icon name="search" size={14} />
-        <span>{t("sidebar.search")}</span>
-        <kbd class="kbd">{modKey("K")}</kbd>
+    <nav class="nav" aria-label={t("settings.title")}>
+      <button
+        class="nav-item"
+        class:active={app.view === "settings"}
+        aria-current={app.view === "settings" ? "page" : undefined}
+        title={modKey(",")}
+        onclick={() => (app.view = "settings")}
+      >
+        <span class="nav-icon"><Icon name="settings" size={15} /></span>
+        <span class="nav-label ellipsis">{t("settings.title")}</span>
       </button>
-      <DropdownMenu
-        align="right"
-        ariaLabel={t("prefs.theme")}
-        items={[
-          {
-            label: t("prefs.themeOptionLight"),
-            icon: "sun",
-            checked: app.theme === "light",
-            onclick: () => setTheme("light"),
-          },
-          {
-            label: t("prefs.themeOptionDark"),
-            icon: "moon",
-            checked: app.theme === "dark",
-            onclick: () => setTheme("dark"),
-          },
-        ]}
-      >
-        {#snippet trigger({ open, toggle })}
-          <button
-            class="btn btn-icon theme-btn"
-            class:active={open}
-            onclick={toggle}
-            aria-label={app.theme === "dark" ? t("prefs.themeLight") : t("prefs.themeDark")}
-            title={app.theme === "dark" ? t("prefs.themeLight") : t("prefs.themeDark")}
-          >
-            <Icon name={app.theme === "dark" ? "sun" : "moon"} size={15} />
-          </button>
-        {/snippet}
-      </DropdownMenu>
-
-      <DropdownMenu
-        align="right"
-        ariaLabel={t("prefs.language")}
-        items={[
-          {
-            label: LOCALES.en.name,
-            checked: i18n.locale === "en",
-            onclick: () => setLocale("en"),
-          },
-          {
-            label: LOCALES.fr.name,
-            checked: i18n.locale === "fr",
-            onclick: () => setLocale("fr"),
-          },
-        ]}
-      >
-        {#snippet trigger({ open, toggle })}
-          <button
-            class="btn btn-icon theme-btn lang-btn"
-            class:active={open}
-            onclick={toggle}
-            aria-label={t("prefs.language")}
-            title={t("prefs.language")}
-          >
-            {LOCALES[i18n.locale].short}
-          </button>
-        {/snippet}
-      </DropdownMenu>
-    </div>
+    </nav>
+    <button class="search-btn" onclick={() => (app.paletteOpen = true)}>
+      <Icon name="search" size={14} />
+      <span>{t("sidebar.search")}</span>
+      <kbd class="kbd">{modKey("K")}</kbd>
+    </button>
     <p class="shortcut-hint">
       <kbd class="kbd">/</kbd> {t("sidebar.toSearch")} · <kbd class="kbd">i</kbd> {t("sidebar.toImport")}
     </p>
@@ -369,23 +319,7 @@
     flex-direction: column;
     gap: 8px;
   }
-  .foot-row {
-    display: flex;
-    gap: 6px;
-  }
-  .theme-btn {
-    flex: none;
-    height: auto;
-    width: 34px;
-    color: var(--muted);
-  }
-  .lang-btn {
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.03em;
-  }
   .search-btn {
-    flex: 1;
     min-width: 0;
     display: flex;
     align-items: center;

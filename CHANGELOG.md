@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Botanical design system with a command palette, toasts, an inspector panel and a review flow.
 - Light and dark themes.
 - English (default) and French interface.
+- Settings page for theme, interface language, library layout and sorting, with automatic preference persistence and the current vault location. Open it from the sidebar, command palette, or `Ctrl+,` / `⌘,`.
 - Import dialog with a staged file list (sizes, remove, duplicate detection), drag-and-drop feedback, and paste-HTML import.
 - Content validation on import: files renamed to `.html` that are not real HTML are rejected, in both the picker and the backend.
 - Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
@@ -17,6 +18,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
 - MIT license.
 - README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
+
+### Changed
+- Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
 
 ### Fixed
 - Preserve newer inspector edits when an in-flight metadata save completes.
