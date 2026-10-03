@@ -64,7 +64,7 @@
       app.paletteOpen = !app.paletteOpen;
       return;
     }
-    if (mod && e.key.toLowerCase() === "b" && app.config?.vaultPath && !app.readId && !app.importOpen && !app.paletteOpen) {
+    if (mod && e.key.toLowerCase() === "b" && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
       e.preventDefault();
       toggleSidebar();
       return;
@@ -138,7 +138,7 @@
       const a = document.activeElement;
       if (a && a !== document.body && a.isConnected && !a.closest("[inert]")) return;
       document
-        .querySelector<HTMLElement>(app.readId ? ".content .bar button" : "#page-search, .shell button")
+        .querySelector<HTMLElement>(app.readId ? ".main .bar button" : "#page-search, .shell button")
         ?.focus();
     });
   });
@@ -177,15 +177,15 @@
   </div>
 {:else if !app.config?.vaultPath}
   <Onboarding />
-{:else if app.readId}
-  {#key app.readId}
-    <ReadView id={app.readId} />
-  {/key}
 {:else}
   <div class="shell" class:collapsed={!app.sidebarOpen}>
     {#if app.sidebarOpen}<Sidebar />{/if}
     <main class="main">
-      {#if app.view === "review"}
+      {#if app.readId}
+        {#key app.readId}
+          <ReadView id={app.readId} />
+        {/key}
+      {:else if app.view === "review"}
         <ReviewView />
       {:else if app.view === "settings"}
         <SettingsView />

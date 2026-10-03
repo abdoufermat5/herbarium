@@ -21,7 +21,7 @@
 </script>
 
 <header class="titlebar" data-tauri-drag-region>
-  {#if app.config?.vaultPath && !app.readId}
+  {#if app.config?.vaultPath}
     <button
       class="ctl toggle"
       aria-label={app.sidebarOpen ? t("sidebar.hide") : t("sidebar.show")}

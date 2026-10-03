@@ -65,11 +65,13 @@
   }
 
   function goAll() {
+    app.readId = null;
     app.view = "list";
     clearFilters();
   }
 
   function goReview() {
+    app.readId = null;
     app.view = "review";
   }
 </script>
@@ -99,9 +101,10 @@
   {#each node.pages as page (page.id)}
     <button
       class="nav-item tree-item tree-page"
+      class:active={app.readId === page.id}
       style:padding-left="{10 + depth * 14 + 16}px"
       role="treeitem"
-      aria-selected="false"
+      aria-selected={app.readId === page.id}
       title={page.title}
       onclick={() => openPage(page.id)}
     >
@@ -126,8 +129,8 @@
     <nav class="nav" aria-label={t("sidebar.library")}>
       <button
         class="nav-item"
-        class:active={app.view === "list" && !app.folderFilter && !app.tagFilter}
-        aria-current={app.view === "list" && !app.folderFilter && !app.tagFilter ? "page" : undefined}
+        class:active={!app.readId && app.view === "list" && !app.folderFilter && !app.tagFilter}
+        aria-current={!app.readId && app.view === "list" && !app.folderFilter && !app.tagFilter ? "page" : undefined}
         onclick={goAll}
       >
         <span class="nav-icon"><Icon name="files" size={15} /></span>
@@ -135,8 +138,8 @@
       </button>
       <button
         class="nav-item"
-        class:active={app.view === "review"}
-        aria-current={app.view === "review" ? "page" : undefined}
+        class:active={!app.readId && app.view === "review"}
+        aria-current={!app.readId && app.view === "review" ? "page" : undefined}
         title={dueLabel()}
         onclick={goReview}
       >
@@ -167,10 +170,13 @@
     <nav class="nav" aria-label={t("settings.title")}>
       <button
         class="nav-item"
-        class:active={app.view === "settings"}
-        aria-current={app.view === "settings" ? "page" : undefined}
+        class:active={!app.readId && app.view === "settings"}
+        aria-current={!app.readId && app.view === "settings" ? "page" : undefined}
         title={modKey(",")}
-        onclick={() => (app.view = "settings")}
+        onclick={() => {
+          app.readId = null;
+          app.view = "settings";
+        }}
       >
         <span class="nav-icon"><Icon name="settings" size={15} /></span>
         <span class="nav-label ellipsis">{t("settings.title")}</span>
