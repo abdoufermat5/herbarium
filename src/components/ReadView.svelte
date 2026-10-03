@@ -484,7 +484,7 @@
                   class="ready"
                   title={t("edit.preview")}
                   src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
-                  sandbox="allow-scripts"
+                  sandbox="allow-scripts allow-popups"
                 ></iframe>
               </div>
             {/if}
@@ -501,7 +501,7 @@
             class:ready={frameReady}
             title={t("read.preview")}
             src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
-            sandbox="allow-scripts"
+            sandbox="allow-scripts allow-popups"
             onload={markReady}
           ></iframe>
         </div>

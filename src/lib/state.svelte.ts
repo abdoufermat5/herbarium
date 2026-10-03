@@ -14,6 +14,12 @@ interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 /** Files dropped anywhere on the window, waiting to be imported. */
@@ -108,11 +114,13 @@ export const app: AppState = $state({
 
 let toastSeq = 0;
 
-export function toast(message: string, kind: ToastKind = "info", ttl?: number) {
+/** Show a toast and return its id. `action` adds a button that runs it and dismisses the toast. */
+export function toast(message: string, kind: ToastKind = "info", ttl?: number, action?: ToastAction): number {
   const id = ++toastSeq;
-  app.toasts = [...app.toasts, { id, message, kind }].slice(-4);
+  app.toasts = [...app.toasts, { id, message, kind, action }].slice(-4);
   const life = ttl ?? (kind === "error" ? 6000 : 4200);
   setTimeout(() => dismissToast(id), life);
+  return id;
 }
 
 export function dismissToast(id: number) {

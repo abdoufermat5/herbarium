@@ -23,7 +23,11 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   it becomes the page title.
 - Inline CSS and JS. External scripts, styles and fonts may only come from \
   cdnjs.cloudflare.com, cdn.jsdelivr.net, unpkg.com, code.jquery.com and \
-  Google Fonts; anything else is blocked. Images may use https: or data: URLs.
+  Google Fonts; anything else is blocked. Images may use https: or data: URLs; \
+  prefer data: or CDN-hosted images, since any image host sees when the page is \
+  opened.
+- Links open in the user's browser only after they confirm; pages cannot \
+  navigate their own frame elsewhere.
 - Pages run in a sandbox: no fetch/XHR to arbitrary hosts, no forms, no \
   same-origin storage, no window.claude or window.storage APIs.
 - Prefer existing folders and tags (folders_list, tags_list) over new ones.";

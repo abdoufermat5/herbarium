@@ -50,6 +50,9 @@ export const en = {
   "toast.reviewed": "Reviewed. Next review in {when}.",
   "toast.vaultCreated": "Vault “{name}” created.",
   "toast.vaultOpened": "Vault opened.",
+  "link.blocked": "This page wants to open {url}",
+  "link.open": "Open in browser",
+  "link.failed": "Couldn't open the link.",
 
   "prefs.theme": "Theme",
   "prefs.themeOptionLight": "Light",

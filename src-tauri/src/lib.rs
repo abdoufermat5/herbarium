@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod editors;
+mod navigation;
 mod protocol;
 
 use std::sync::Mutex;
@@ -9,44 +10,18 @@ use herbarium_core::Host;
 
 pub use commands::AppState;
 
-/// Only app documents may load, in any frame. A page runs in an iframe and
-/// could otherwise navigate itself (`location.href`, `<meta refresh>`, a
-/// clicked link) to a remote URL, which escapes its CSP and the per-page
-/// network switch. WebKitGTK reports subframe navigations to this hook.
-fn allowed_navigation(url: &tauri::Url) -> bool {
-    match url.scheme() {
-        "tauri" | "herbarium" | "about" => true,
-        "http" | "https" => match url.host_str() {
-            Some("tauri.localhost") => true,
-            Some("localhost") => cfg!(dev), // devUrl under `tauri dev`
-            _ => false,
-        },
-        _ => false,
-    }
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let navigation_guard = tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
-        .on_navigation(|_, url| {
-            let allowed = allowed_navigation(url);
-            if !allowed {
-                eprintln!("herbarium: blocked navigation to {url}");
-            }
-            allowed
-        })
-        .build();
     tauri::Builder::default()
-        .plugin(navigation_guard)
+        .plugin(navigation::plugin())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(AppState { host: Mutex::new(Host::new()) })
         .setup(|app| {
-            use tauri::Manager;
+            let win = navigation::build_main_window(app)?;
             // Window icon for platforms/WMs that read it from the window itself.
-            if let Some(win) = app.get_webview_window("main") {
-                let _ = win.set_icon(tauri::include_image!("icons/128x128.png"));
-            }
+            let _ = win.set_icon(tauri::include_image!("icons/128x128.png"));
             Ok(())
         })
         .register_asynchronous_uri_scheme_protocol("herbarium", protocol::handle)
@@ -57,6 +32,7 @@ pub fn run() {
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,
+            commands::open_external,
         ])
         .run(tauri::generate_context!())
         .expect("error while running herbarium");
@@ -92,28 +68,4 @@ pub fn run_mcp(args: &[String]) -> Result<(), String> {
         report.total
     );
     herbarium_mcp::serve(&host, std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| e.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::allowed_navigation;
-
-    #[test]
-    fn only_app_documents_may_load() {
-        let ok = |u: &str| allowed_navigation(&u.parse().unwrap());
-        assert!(ok("tauri://localhost/"));
-        assert!(ok("herbarium://page/abc?v=1#section"));
-        assert!(ok("about:blank"));
-        assert!(ok("http://tauri.localhost/"));
-        for blocked in [
-            "https://attacker.example/?d=secret",
-            "http://cdn.jsdelivr.net/x.html",
-            "data:text/html,<script>1</script>",
-            "javascript:alert(1)",
-            "file:///etc/passwd",
-            "blob:herbarium://page/1234",
-        ] {
-            assert!(!ok(blocked), "{blocked} must be blocked");
-        }
-    }
 }

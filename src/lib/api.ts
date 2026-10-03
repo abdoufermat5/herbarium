@@ -121,4 +121,9 @@ export const api = {
   openInEditor(pageId: string, editor: string | null, custom: string | null): Promise<string> {
     return invoke("open_in_editor", { pageId, editor, custom });
   },
+
+  /** Open an http(s) link in the system browser. */
+  openExternal(url: string): Promise<void> {
+    return invoke("open_external", { url });
+  },
 };

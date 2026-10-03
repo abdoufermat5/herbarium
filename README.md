@@ -39,10 +39,13 @@ The file name is the page id: moving or renaming a page's `.html`/`.json` pair o
 
 AI-generated HTML runs code, so each page is treated as untrusted:
 
-- It is rendered in an `<iframe sandbox="allow-scripts">` without `allow-same-origin`, so it cannot reach your files or the app.
+- It is rendered in an `<iframe sandbox="allow-scripts allow-popups">` without `allow-same-origin`, so it cannot reach your files or the app. Popups are requested, never opened.
 - It is served over a custom `herbarium://` scheme with a Content-Security-Policy injected by the backend.
-- It cannot navigate away: any frame navigation outside the app (a link, `location.href`, `<meta refresh>`) is blocked, so a page cannot leave its CSP by loading a remote document.
-- **Network access is a per-page switch.** By default a page may load scripts, styles and fonts from a short list of known CDNs (cdnjs, jsDelivr, unpkg, jQuery, Google Fonts). Turn it off and the page can load nothing from the network.
+- It cannot navigate away: any frame navigation outside the app (a link, `location.href`, `<meta refresh>`, a `target="_blank"` link) is blocked, so a page cannot leave its CSP by loading a remote document. Web links are offered in a prompt instead and open in your browser only if you click **Open in browser**. The guard covers Linux and macOS through the webview's navigation hook and Windows through a WebView2 frame-navigation hook.
+- The app window itself runs under a strict Content-Security-Policy (`script-src 'self'`, no remote connections besides the app's IPC).
+- **Network access is a per-page switch.** By default a page may load scripts, styles and fonts from a short list of known CDNs (cdnjs, jsDelivr, unpkg, jQuery, Google Fonts), and images and media from any `https:` host. Turn it off and the page can load nothing from the network.
+
+> **Know what network-on means.** Because images may come from any `https:` host, a page with network on can contact a server of its author's choosing: a tracking pixel can tell it when you open the page (and your IP address), and a script can encode what you type into the page in an image URL. Pages cannot read your files, other pages or the app, so that is the extent of it. Turn network off for pages you don't trust or that ask for input you consider private.
 
 Pages that depend on Claude-specific APIs (`window.storage`, `window.claude`, …) won't work outside Claude. Herbarium detects this and shows a notice.
 

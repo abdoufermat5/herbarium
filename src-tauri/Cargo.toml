@@ -32,6 +32,11 @@ serde_json.workspace = true
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2.8.1"
 tauri-plugin-notification = "2.5.1"
+tauri-plugin-opener = "2.5.4"
+
+[target.'cfg(windows)'.dependencies]
+webview2-com = "0.39"
+windows-core = "0.62"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

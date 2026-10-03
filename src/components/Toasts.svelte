@@ -16,6 +16,16 @@
     <div class="toast {toast.kind}">
       <span class="toast-icon"><Icon name={ICONS[toast.kind]} size={15} /></span>
       <span class="toast-msg">{toast.message}</span>
+      {#if toast.action}
+        {@const action = toast.action}
+        <button
+          class="toast-action"
+          onclick={() => {
+            dismissToast(toast.id);
+            action.run();
+          }}>{action.label}</button
+        >
+      {/if}
       <button class="toast-x" aria-label={t("toast.dismiss")} onclick={() => dismissToast(toast.id)}>
         <Icon name="x" size={13} />
       </button>
@@ -64,6 +74,17 @@
     font-size: var(--fs-sm);
     color: var(--text-soft);
     overflow-wrap: anywhere;
+  }
+  .toast-action {
+    flex: none;
+    padding: 4px 9px;
+    border-radius: var(--radius-xs);
+    border: 1px solid var(--border);
+    font-size: var(--fs-sm);
+    color: var(--text);
+  }
+  .toast-action:hover {
+    background: var(--sunken);
   }
   .toast-x {
     flex: none;

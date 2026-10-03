@@ -88,3 +88,15 @@ pub async fn open_in_editor(
     }
     editors::open(&Choice { editor, custom }, &path)
 }
+
+/// Open a web link in the system browser. The UI calls this only after the
+/// user confirms a link a page tried to follow (see `navigation`).
+#[tauri::command]
+pub async fn open_external(app: tauri::AppHandle, url: String) -> CmdResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let parsed = tauri::Url::parse(&url).map_err(|e| format!("invalid URL: {e}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!("only web links can be opened: {url}"));
+    }
+    app.opener().open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())
+}

@@ -32,6 +32,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Create folders and pages from the sidebar (header buttons, or the hover buttons on a folder), with an inline name field. New pages start from a blank HTML skeleton and open straight away. Empty folders now show in the tree, and the MCP server gains `folders_create`.
 
 - HTML editor in the reader: an Edit button opens the page source beside a live preview. Save with the button or `Ctrl/⌘+S`; invalid HTML is rejected with the reason and your draft is kept.
+- README and the agent instructions spell out what network-on allows: images may come from any `https:` host, which can see when a page is opened.
 
 ### Changed
 - Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
@@ -41,7 +42,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 - Preserve newer inspector edits when an in-flight metadata save completes.
-- Pages can no longer navigate their frame to a remote URL (`location.href`, `<meta refresh>`, links), which loaded the remote document without the page's CSP and bypassed the network switch.
+- Pages can no longer navigate their frame to a remote URL (`location.href`, `<meta refresh>`, links), which loaded the remote document without the page's CSP and bypassed the network switch. This holds on Windows too, where WebView2 needs a separate frame-navigation hook.
+- Links in pages work again, safely: a web link a page tries to follow (same-frame or `target="_blank"`) shows a prompt with its URL and opens in the system browser only when you click **Open in browser**. While a prompt is shown, further attempts are ignored so the URL cannot be swapped under the cursor.
+- The app window now runs under a Content-Security-Policy (it had none), limiting scripts to the app's own and connections to its IPC.
 - Turning a page's network access on or off now reloads it under the new policy instead of waiting until it is reopened.
 - Pages whose file name contains spaces, accents or other URL-encoded characters render instead of showing "Page not found".
 - Rescanning picks up pages moved between folders on disk (same modification time) and pages renamed on disk, instead of keeping stale paths or dropping the page.

@@ -49,6 +49,9 @@ export const fr: Record<MessageKey, string> = {
   "toast.reviewed": "Révisée. Prochaine révision dans {when}.",
   "toast.vaultCreated": "Coffre « {name} » créé.",
   "toast.vaultOpened": "Coffre ouvert.",
+  "link.blocked": "Cette page veut ouvrir {url}",
+  "link.open": "Ouvrir dans le navigateur",
+  "link.failed": "Impossible d'ouvrir le lien.",
 
   "prefs.theme": "Thème",
   "prefs.themeOptionLight": "Clair",
