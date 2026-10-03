@@ -6,5 +6,5 @@ Comment=Keep generated HTML pages in a vault and review them on a schedule
 Exec={{exec}}
 Icon={{icon}}
 Terminal=false
-Categories=Education;Utility;
+Categories=Education;
 StartupWMClass=herbarium

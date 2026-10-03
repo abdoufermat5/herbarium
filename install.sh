@@ -157,7 +157,7 @@ Comment=Keep generated HTML pages in a vault and review them on a schedule
 Exec=$BIN_DIR/herbarium
 Icon=herbarium
 Terminal=false
-Categories=Education;Utility;
+Categories=Education;
 StartupWMClass=herbarium
 DESKTOP
 
