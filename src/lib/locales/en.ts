@@ -8,6 +8,7 @@ export const en = {
   "common.clear": "Clear",
   "common.open": "Open",
   "common.none": "None",
+  "common.cancel": "Cancel",
 
   "unit.page_one": "{count} page",
   "unit.page_other": "{count} pages",
@@ -168,8 +169,9 @@ export const en = {
   "sidebar.collapse": "Collapse",
   "sidebar.openIn": "Open in {editor}",
   "sidebar.noEditor": "No external editor found",
-  "sidebar.confirmDelete": "Delete “{title}”? This removes the HTML file and its metadata from your vault and cannot be undone.",
-  "sidebar.cancel": "Cancel",
+  "confirm.deleteTitle": "Delete this page?",
+  "confirm.deleteMessage": "The HTML file and its metadata will be removed from your vault, along with its review schedule. This can't be undone.",
+  "confirm.vaultRoot": "Vault root",
 
   "palette.label": "Command palette",
   "palette.placeholder": "Search pages or run a command…",

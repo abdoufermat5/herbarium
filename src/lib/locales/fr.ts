@@ -7,6 +7,7 @@ export const fr: Record<MessageKey, string> = {
   "common.clear": "Effacer",
   "common.open": "Ouvrir",
   "common.none": "Aucun",
+  "common.cancel": "Annuler",
 
   "unit.page_one": "{count} page",
   "unit.page_other": "{count} pages",
@@ -167,8 +168,9 @@ export const fr: Record<MessageKey, string> = {
   "sidebar.collapse": "Replier",
   "sidebar.openIn": "Ouvrir dans {editor}",
   "sidebar.noEditor": "Aucun éditeur externe trouvé",
-  "sidebar.confirmDelete": "Supprimer « {title} » ? Le fichier HTML et ses métadonnées seront retirés de votre coffre. Cette action est irréversible.",
-  "sidebar.cancel": "Annuler",
+  "confirm.deleteTitle": "Supprimer cette page ?",
+  "confirm.deleteMessage": "Le fichier HTML et ses métadonnées seront retirés de votre coffre, ainsi que sa planification de révision. Cette action est irréversible.",
+  "confirm.vaultRoot": "Racine du coffre",
 
   "palette.label": "Palette de commandes",
   "palette.placeholder": "Rechercher une page ou lancer une commande…",

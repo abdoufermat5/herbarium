@@ -6,7 +6,7 @@
   import { t } from "../lib/i18n.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { slide } from "svelte/transition";
-  import { ask } from "@tauri-apps/plugin-dialog";
+  import { confirmAction } from "../lib/confirm.svelte";
   import type { PageMeta } from "../lib/types";
   import ContextMenu from "./ContextMenu.svelte";
   import type { DropdownMenuItem } from "./DropdownMenu.svelte";
@@ -227,11 +227,12 @@
 
   async function deletePage(page: PageMeta) {
     const title = page.title || t("common.untitled");
-    const confirmed = await ask(t("sidebar.confirmDelete", { title }), {
-      title: t("insp.deletePage"),
-      kind: "warning",
-      okLabel: t("insp.deletePage"),
-      cancelLabel: t("sidebar.cancel"),
+    const confirmed = await confirmAction({
+      title: t("confirm.deleteTitle"),
+      message: t("confirm.deleteMessage"),
+      confirmLabel: t("insp.deletePage"),
+      danger: true,
+      subject: { icon: "file-text", label: title, meta: page.folder ?? t("confirm.vaultRoot") },
     });
     if (!confirmed) return;
     try {

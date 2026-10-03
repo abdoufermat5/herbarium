@@ -11,6 +11,8 @@
   import CommandPalette from "./components/CommandPalette.svelte";
   import TitleBar from "./components/TitleBar.svelte";
   import Toasts from "./components/Toasts.svelte";
+  import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import { t } from "./lib/i18n.svelte";
 
@@ -164,7 +166,7 @@
   ondragend={() => (dragging = false)}
 />
 
-<div class="window" inert={app.importOpen || app.paletteOpen}>
+<div class="window" inert={app.importOpen || app.paletteOpen || !!confirmState.pending}>
 <TitleBar />
 <div class="content">
 {#if !app.initialized}
@@ -207,13 +209,17 @@
 </div>
 
 {#if app.importOpen}
-  <div inert={app.paletteOpen}>
+  <div inert={app.paletteOpen || !!confirmState.pending}>
     <ImportDialog />
   </div>
 {/if}
 
 {#if app.paletteOpen}
   <CommandPalette />
+{/if}
+
+{#if confirmState.pending}
+  <ConfirmDialog options={confirmState.pending} />
 {/if}
 
 {#if dragging}
