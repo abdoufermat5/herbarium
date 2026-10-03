@@ -1,6 +1,6 @@
 import { api } from "./api";
 import { i18n, t, LOCALES } from "./i18n.svelte";
-import type { Config, PageMeta, TagCount } from "./types";
+import type { Config, PageMeta, ReviewSettings, TagCount } from "./types";
 
 type View = "list" | "review" | "settings";
 export type Layout = "grid" | "list";
@@ -41,7 +41,18 @@ interface AppState {
   sort: SortKey;
   theme: Theme;
   toasts: Toast[];
+  /** The vault's review settings (preset intervals, strategy, queue). */
+  review: ReviewSettings;
 }
+
+const DEFAULT_REVIEW: ReviewSettings = {
+  presets: [1440, 4320, 10080, 43200],
+  strategy: "ladder",
+  multiplier: 2,
+  maxIntervalMinutes: 525600,
+  importReviewMinutes: null,
+  queueLimit: null,
+};
 
 function storedLayout(): Layout {
   return localStorage.getItem("herbarium.layout") === "list" ? "list" : "grid";
@@ -88,6 +99,7 @@ export const app: AppState = $state({
   sort: storedSort(),
   theme: storedTheme(),
   toasts: [],
+  review: { ...DEFAULT_REVIEW },
 });
 
 /* ------------------------------------------------------------------ toasts */
@@ -146,19 +158,28 @@ export function toggleSidebar() {
 
 export async function refreshAll() {
   try {
-    const [tags, folders, due, library] = await Promise.all([
+    const [tags, folders, due, library, review] = await Promise.all([
       api.tags(),
       api.folders(),
       api.reviewToday(),
       api.listPages(),
+      api.reviewSettings(),
     ]);
     app.tags = tags;
     app.folders = folders;
     app.dueCount = due.length;
     app.library = library;
+    app.review = review;
   } catch (e) {
     console.error(e);
   }
+}
+
+/** Persist new review settings; on rejection the old ones stay and the error is thrown. */
+export async function saveReviewSettings(next: ReviewSettings) {
+  app.review = await api.configureReview(next);
+  const due = await api.reviewToday();
+  app.dueCount = due.length;
 }
 
 /** `quiet` skips the busy indicator, for background refreshes. */
@@ -203,6 +224,10 @@ export async function initApp() {
   } finally {
     app.initialized = true;
     window.addEventListener("focus", () => void resync());
+    // Reviews can be minutes long: keep the "due" badge current while the window sits open.
+    setInterval(() => {
+      if (app.config?.vaultPath && !app.busy) void refreshAll();
+    }, 60_000);
   }
 }
 

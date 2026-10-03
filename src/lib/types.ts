@@ -13,7 +13,8 @@ export interface PageMeta {
   note: string;
   createdAt: number; // unix ms
   updatedAt: number; // unix ms
-  intervalDays: number | null;
+  /** Current review interval, in minutes. */
+  intervalMinutes: number | null;
   nextReview: number | null; // unix ms
   lastReview: number | null; // unix ms
   allowCdn: boolean;
@@ -47,6 +48,22 @@ export interface ImportFile {
 export interface ImportResult {
   imported: number;
   errors: string[];
+}
+
+/** How completing a review picks the next interval. */
+export type ReviewStrategy = "same" | "ladder" | "multiply";
+
+/** Every duration is in minutes. */
+export interface ReviewSettings {
+  /** Preset intervals, ascending. */
+  presets: number[];
+  strategy: ReviewStrategy;
+  multiplier: number;
+  maxIntervalMinutes: number;
+  /** Schedule imports for review this many minutes out; null = don't. */
+  importReviewMinutes: number | null;
+  /** Cap on the review queue; null = show everything due. */
+  queueLimit: number | null;
 }
 
 export interface IndexReport {

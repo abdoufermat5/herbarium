@@ -6,6 +6,7 @@
   import type { ImportFile } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
+  import Select, { type SelectOption } from "./Select.svelte";
 
   type Tab = "files" | "paste";
 
@@ -17,6 +18,15 @@
   let busy = $state(false);
   let message = $state("");
   let messageErr = $state(false);
+
+  // Destination folder; "" is the vault root. Starts on the folder being browsed.
+  let destination = $state(app.folderFilter ?? "");
+  // A folder that vanished since it was chosen (e.g. deleted on disk) falls back to the root.
+  const target = $derived(app.folders.includes(destination) ? destination : "");
+  const destOptions = $derived<SelectOption<string>[]>([
+    { value: "", label: t("import.rootFolder"), icon: "folder" },
+    ...app.folders.map((f) => ({ value: f, label: f, icon: "folder" as const })),
+  ]);
 
   let dialogEl = $state<HTMLDivElement | undefined>(undefined);
   let dropBtn = $state<HTMLButtonElement | undefined>(undefined);
@@ -150,7 +160,7 @@
     try {
       const payload: ImportFile[] = [];
       for (const f of htmlFiles) payload.push({ name: f.name, content: await f.text() });
-      const res = await api.importFiles(payload);
+      const res = await api.importFiles(payload, target || null);
       if (res.errors.length > 0) {
         messageErr = true;
         message = t("import.partial", {
@@ -184,7 +194,7 @@
     message = "";
     messageErr = false;
     try {
-      const res = await api.importFiles([{ name: null, content }]);
+      const res = await api.importFiles([{ name: null, content }], target || null);
       if (res.errors.length > 0) {
         messageErr = true;
         message = t("import.failed", { error: res.errors.join("\n") });
@@ -285,6 +295,19 @@
         {t("import.tabPaste")}
       </button>
     </div>
+
+    {#if app.folders.length > 0}
+      <div class="dest">
+        <span class="dest-label">{t("import.destination")}</span>
+        <Select
+          value={target}
+          options={destOptions}
+          ariaLabel={t("import.destination")}
+          disabled={busy}
+          onchange={(v) => (destination = v)}
+        />
+      </div>
+    {/if}
 
     {#if tab === "files"}
       <div class="panel" role="tabpanel" id="panel-files" aria-labelledby="tab-files">
@@ -570,5 +593,17 @@
       opacity: 0;
       transform: translateY(8px) scale(0.98);
     }
+  }
+
+  .dest {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .dest-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--muted);
   }
 </style>

@@ -7,6 +7,7 @@ import type {
   MetaPatch,
   Page,
   PageMeta,
+  ReviewSettings,
   TagCount,
 } from "./types";
 
@@ -28,8 +29,9 @@ export const api = {
     return invoke("create_vault", { parentDir, name });
   },
 
-  importFiles(files: ImportFile[]): Promise<ImportResult> {
-    return op("pages.import", { files });
+  /** `folder` null imports to the vault root. */
+  importFiles(files: ImportFile[], folder: string | null = null): Promise<ImportResult> {
+    return op("pages.import", { files, folder });
   },
 
   listPages(): Promise<PageMeta[]> {
@@ -48,12 +50,26 @@ export const api = {
     return op("pages.update", { id, ...patch });
   },
 
-  scheduleReview(id: string, intervalDays: number): Promise<PageMeta> {
-    return op("review.schedule", { id, intervalDays });
+  scheduleReview(id: string, intervalMinutes: number): Promise<PageMeta> {
+    return op("review.schedule", { id, intervalMinutes });
   },
 
   clearReview(id: string): Promise<PageMeta> {
     return op("review.clear", { id });
+  },
+
+  /** Record a review and schedule the next one with the vault's strategy. */
+  completeReview(id: string): Promise<PageMeta> {
+    return op("review.complete", { id });
+  },
+
+  reviewSettings(): Promise<ReviewSettings> {
+    return op("review.settings");
+  },
+
+  /** Replaces all review settings; rejects out-of-range values. */
+  configureReview(settings: ReviewSettings): Promise<ReviewSettings> {
+    return op("review.configure", { ...settings });
   },
 
   setNetwork(id: string, allowCdn: boolean): Promise<PageMeta> {

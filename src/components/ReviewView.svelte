@@ -1,13 +1,14 @@
 <script lang="ts">
   import { api } from "../lib/api";
   import { app, refreshAll, toast } from "../lib/state.svelte";
-  import { dueInfo, fmtDate, plural, startOfToday } from "../lib/format";
+  import { dueInfo, fmtDate, fmtDateTime, fmtDuration, plural, startOfToday } from "../lib/format";
   import type { PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { reveal } from "../lib/reveal";
+  import PresetButtons from "./PresetButtons.svelte";
   import { t } from "../lib/i18n.svelte";
 
-  const REVIEW_INTERVALS = [1, 3, 7, 30];
+  // Preset intervals come from the vault's review settings (`app.review`).
   const DAY = 86400000;
 
   let due = $state<PageMeta[]>([]);
@@ -49,13 +50,28 @@
     load();
   });
 
-  async function reschedule(id: string, days: number) {
+  async function reschedule(id: string, minutes: number) {
     if (busyId) return;
     busyId = id;
     try {
-      await api.scheduleReview(id, days);
+      await api.scheduleReview(id, minutes);
       due = due.filter((p) => p.id !== id);
-      toast(t("toast.reviewScheduled", { days: plural(days, "day") }), "success");
+      toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
+      void refreshAll();
+    } catch {
+      toast(t("review.rescheduleFailed"), "error");
+    } finally {
+      busyId = null;
+    }
+  }
+
+  async function complete(id: string) {
+    if (busyId) return;
+    busyId = id;
+    try {
+      const next = await api.completeReview(id);
+      due = due.filter((p) => p.id !== id);
+      toast(t("toast.reviewed", { when: fmtDuration(next.intervalMinutes ?? 1) }), "success");
       void refreshAll();
     } catch {
       toast(t("review.rescheduleFailed"), "error");
@@ -137,7 +153,7 @@
                   {#each p.tags.slice(0, 3) as tag (tag)}
                     <span class="chip chip-muted">{tag}</span>
                   {/each}
-                  <span class="date">{fmtDate(p.nextReview)}</span>
+                  <span class="date">{fmtDateTime(p.nextReview)}</span>
                 </span>
               </span>
             </button>
@@ -146,17 +162,16 @@
                 <span class="chip" class:chip-danger={d.overdue} class:chip-warn={!d.overdue}>{d.label}</span>
               {/if}
               <span class="resched" role="group" aria-label={t("review.reschedule")}>
-                {#each REVIEW_INTERVALS as days (days)}
-                  <button
-                    class="btn btn-xs"
-                    title={t("review.againIn", { days: plural(days, "day") })}
-                    disabled={busyId === p.id}
-                    onclick={() => reschedule(p.id, days)}
-                  >
-                    {t("review.daysShort", { n: days })}
-                  </button>
-                {/each}
+                <PresetButtons onpick={(m) => reschedule(p.id, m)} disabled={busyId === p.id} />
               </span>
+              <button
+                class="btn btn-sm"
+                disabled={busyId === p.id}
+                title={t("review.doneHint")}
+                onclick={() => complete(p.id)}
+              >
+                <Icon name="check" size={13} />{t("review.done")}
+              </button>
               <button class="btn btn-sm btn-primary" onclick={() => open(p.id)}>{t("common.open")}</button>
             </span>
           </article>

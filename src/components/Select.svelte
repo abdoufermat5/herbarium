@@ -23,6 +23,7 @@
     size = "sm",
     align = "left",
     disabled = false,
+    fill = false,
     class: className = "",
   }: {
     value: T;
@@ -34,6 +35,8 @@
     size?: "sm" | "md";
     align?: "left" | "right";
     disabled?: boolean;
+    /** Stretch to the width of the container instead of hugging the label. */
+    fill?: boolean;
     class?: string;
   } = $props();
 
@@ -250,6 +253,7 @@
   class="select-root {className}"
   class:open
   class:disabled
+  class:fill
   bind:this={rootEl}
 >
   <button
@@ -347,6 +351,24 @@
     position: relative;
     display: inline-flex;
     vertical-align: middle;
+  }
+
+  .select-root.fill {
+    display: flex;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .fill .select-btn {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .fill .select-label {
+    flex: 1;
+    overflow: hidden;
+    text-align: left;
+    text-overflow: ellipsis;
   }
 
   .select-btn {

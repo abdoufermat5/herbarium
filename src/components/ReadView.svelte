@@ -2,14 +2,14 @@
   import { onMount, onDestroy } from "svelte";
   import { api } from "../lib/api";
   import { app, reloadPages, toast } from "../lib/state.svelte";
-  import { fmtDate, timeAgo, plural, dueInfo } from "../lib/format";
+  import { fmtDate, fmtDateTime, timeAgo, fmtDuration, dueInfo } from "../lib/format";
   import type { Page, PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
+  import PresetButtons from "./PresetButtons.svelte";
 
   let { id }: { id: string } = $props();
 
-  const REVIEW_INTERVALS = [1, 3, 7, 30];
   const CLAUDE_MARKERS = [
     "window.storage",
     "window.claude",
@@ -148,13 +148,28 @@
     }
   }
 
-  async function schedule(days: number) {
+  async function schedule(minutes: number) {
     const p = page;
     if (!p || saving) return;
     saving = true;
     try {
-      p.meta = await api.scheduleReview(p.meta.id, days);
-      toast(t("toast.reviewScheduled", { days: plural(days, "day") }), "success");
+      p.meta = await api.scheduleReview(p.meta.id, minutes);
+      toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
+      void reloadPages();
+    } catch {
+      toast(t("read.scheduleFailed"), "error");
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function completeReview() {
+    const p = page;
+    if (!p || saving) return;
+    saving = true;
+    try {
+      p.meta = await api.completeReview(p.meta.id);
+      toast(t("toast.reviewed", { when: fmtDuration(p.meta.intervalMinutes ?? 1) }), "success");
       void reloadPages();
     } catch {
       toast(t("read.scheduleFailed"), "error");
@@ -323,24 +338,18 @@
   {:else if page}
     <div class="review-bar">
       {#if page.meta.nextReview}
+        <button class="btn btn-xs btn-primary done" onclick={completeReview} disabled={saving}>
+          <Icon name="check" size={12} />{t("review.done")}
+        </button>
         <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.nextReview")}</span>
         <span class="rb-date" class:overdue={due?.overdue}>
-          {fmtDate(page.meta.nextReview)}
+          {fmtDateTime(page.meta.nextReview)}
           {#if due?.overdue}· {due.label}{/if}
         </span>
         <span class="rb-sep" aria-hidden="true"></span>
         <span class="rb-label eyebrow">{t("read.reschedule")}</span>
         <div class="rb-btns">
-          {#each REVIEW_INTERVALS as days (days)}
-            <button
-              class="btn btn-xs"
-              title={t("review.againIn", { days: plural(days, "day") })}
-              onclick={() => schedule(days)}
-              disabled={saving}
-            >
-              {t("review.daysShort", { n: days })}
-            </button>
-          {/each}
+          <PresetButtons onpick={schedule} disabled={saving} />
         </div>
         <button class="btn btn-xs btn-ghost" onclick={clearReview} disabled={saving}>
           {t("common.clear")}
@@ -348,16 +357,7 @@
       {:else}
         <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.reviewIn")}</span>
         <div class="rb-btns">
-          {#each REVIEW_INTERVALS as days (days)}
-            <button
-              class="btn btn-xs"
-              title={t("review.againIn", { days: plural(days, "day") })}
-              onclick={() => schedule(days)}
-              disabled={saving}
-            >
-              {t("review.daysShort", { n: days })}
-            </button>
-          {/each}
+          <PresetButtons onpick={schedule} disabled={saving} />
         </div>
       {/if}
       {#if page.meta.lastReview}
@@ -491,11 +491,11 @@
               <div><dt>{t("insp.updated")}</dt><dd>{timeAgo(page.meta.updatedAt)}</dd></div>
               <div>
                 <dt>{t("insp.lastReviewed")}</dt>
-                <dd>{page.meta.lastReview ? fmtDate(page.meta.lastReview) : "—"}</dd>
+                <dd>{page.meta.lastReview ? fmtDateTime(page.meta.lastReview) : "—"}</dd>
               </div>
               <div>
                 <dt>{t("insp.nextReview")}</dt>
-                <dd>{page.meta.nextReview ? fmtDate(page.meta.nextReview) : "—"}</dd>
+                <dd>{page.meta.nextReview ? fmtDateTime(page.meta.nextReview) : "—"}</dd>
               </div>
             </dl>
           </section>
