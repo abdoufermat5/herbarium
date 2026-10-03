@@ -33,13 +33,23 @@ fn tool_name(op: &str) -> String {
 }
 
 /// Serve requests from `input` until EOF, writing responses to `output`.
-pub fn serve(host: &Host, input: impl BufRead, mut output: impl Write) -> io::Result<()> {
-    for line in input.lines() {
-        let line = line?;
-        if line.trim().is_empty() {
+pub fn serve(host: &Host, mut input: impl BufRead, mut output: impl Write) -> io::Result<()> {
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        if input.read_until(b'\n', &mut line)? == 0 {
+            return Ok(());
+        }
+        if line.trim_ascii().is_empty() {
             continue;
         }
-        let reply = match serde_json::from_str::<Value>(&line) {
+        // Bytes, not `str`: a malformed (e.g. non-UTF-8) line is a parse error
+        // for that message only, never the end of the session.
+        let reply = match serde_json::from_slice::<Value>(&line) {
+            Ok(Value::Array(batch)) if !batch.is_empty() => {
+                let replies: Vec<Value> = batch.iter().filter_map(|msg| handle(host, msg)).collect();
+                (!replies.is_empty()).then_some(Value::Array(replies))
+            }
             Ok(msg) => handle(host, &msg),
             Err(e) => Some(error(Value::Null, -32700, &format!("parse error: {e}"))),
         };
@@ -49,17 +59,22 @@ pub fn serve(host: &Host, input: impl BufRead, mut output: impl Write) -> io::Re
             output.flush()?;
         }
     }
-    Ok(())
 }
 
 /// Handle one message; notifications and client responses get no reply.
 fn handle(host: &Host, msg: &Value) -> Option<Value> {
-    let id = msg.get("id")?.clone();
-    let Some(method) = msg.get("method").and_then(Value::as_str) else {
-        // A response to a server request; this server sends none.
-        return None;
+    let Some(obj) = msg.as_object() else {
+        return Some(error(Value::Null, -32600, "invalid request"));
     };
-    let params = msg.get("params").cloned().unwrap_or(Value::Null);
+    let id = obj.get("id")?.clone();
+    let Some(method) = obj.get("method").and_then(Value::as_str) else {
+        if obj.contains_key("result") || obj.contains_key("error") {
+            // A response to a server request; this server sends none.
+            return None;
+        }
+        return Some(error(id, -32600, "invalid request: method must be a string"));
+    };
+    let params = obj.get("params").cloned().unwrap_or(Value::Null);
     Some(match method {
         "initialize" => success(id, initialize(&params)),
         "ping" => success(id, json!({})),
@@ -155,5 +170,30 @@ mod tests {
         assert_eq!(replies[4]["error"]["code"], -32602);
 
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn malformed_messages_get_errors_and_the_session_continues() {
+        let host = Host::new();
+        let mut input = b"\xff\xfe not utf-8\n".to_vec();
+        input.extend_from_slice(br#"{"jsonrpc":"2.0","id":1,"method":5}"#);
+        input.extend_from_slice(b"\n");
+        input.extend_from_slice(br#"[{"jsonrpc":"2.0","id":2,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/x"},{"jsonrpc":"2.0","id":3,"method":"nope"}]"#);
+        input.extend_from_slice(b"\n");
+        input.extend_from_slice(br#"{"jsonrpc":"2.0","id":4,"method":"ping"}"#);
+        let mut out = Vec::new();
+        serve(&host, input.as_slice(), &mut out).unwrap();
+        let replies: Vec<Value> =
+            String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
+
+        assert_eq!(replies.len(), 4);
+        assert_eq!(replies[0]["error"]["code"], -32700);
+        assert_eq!(replies[1]["error"]["code"], -32600);
+        assert_eq!(replies[1]["id"], 1);
+        let batch = replies[2].as_array().expect("a batch gets an array reply");
+        assert_eq!(batch.len(), 2, "the notification inside the batch gets no reply");
+        assert_eq!(batch[0]["id"], 2);
+        assert_eq!(batch[1]["error"]["code"], -32601);
+        assert_eq!(replies[3]["id"], 4, "the last line has no trailing newline");
     }
 }

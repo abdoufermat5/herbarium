@@ -41,6 +41,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Fixed
 - Preserve newer inspector edits when an in-flight metadata save completes.
+- Pages can no longer navigate their frame to a remote URL (`location.href`, `<meta refresh>`, links), which loaded the remote document without the page's CSP and bypassed the network switch.
+- Turning a page's network access on or off now reloads it under the new policy instead of waiting until it is reopened.
+- Pages whose file name contains spaces, accents or other URL-encoded characters render instead of showing "Page not found".
+- Rescanning picks up pages moved between folders on disk (same modification time) and pages renamed on disk, instead of keeping stale paths or dropping the page.
+- A sidecar JSON that cannot be parsed is no longer overwritten with blank metadata on rescan; the page is indexed from its HTML and the file is left for repair.
+- Two files with the same name in different folders no longer fight over one id: one is indexed deterministically, and moving a page never overwrites another file.
+- Moving or deleting a page reports filesystem failures instead of claiming success; a failed move leaves the page where it was.
+- Pages can no longer be created in or moved to dot-folders (`.herbarium`, `.git`), where the next rescan made them vanish.
+- Saving and deleting pages no longer scans the whole full-text index; existing indexes are migrated once on open.
+- Serving a page no longer blocks the window while a rescan holds the vault.
+- MCP server: a non-UTF-8 line gets a parse error instead of ending the session, requests with an invalid `method` get `-32600`, and JSON-RPC batches are answered.
+- Dropping files onto the import dialog stages them for review instead of importing at once; Escape or a backdrop click no longer closes the dialog mid-import.
+- Escape in a reader field leaves the field instead of closing the page and losing the unsaved draft.
+- A slow search response can no longer replace newer results; the command palette and "reviewed today" use the whole library, not the current search.
+- Retrying after a startup error no longer stacks extra focus listeners and refresh timers.
+- CI's clippy step (`-D warnings`) passes again.
 - Close the command palette before activating commands, exit the reader for navigation commands, and move focus to the destination.
 - Keep Tab, Shift+Tab, and Escape owned by the topmost dialog, with inactive content inert.
 - Improve light and dark theme contrast for muted text, placeholders, primary actions, filter chips, badges, and delete confirmation.

@@ -101,13 +101,13 @@
   const pageItems = $derived.by<Item[]>(() => {
     const needle = q.trim().toLowerCase();
     const base = needle
-      ? app.pages.filter(
+      ? app.library.filter(
           (p) =>
             (p.title || "").toLowerCase().includes(needle) ||
             p.tags.some((tag) => tag.toLowerCase().includes(needle)) ||
             (p.folder ?? "").toLowerCase().includes(needle),
         )
-      : [...app.pages];
+      : [...app.library];
     base.sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     return base.slice(0, 8).map((p) => ({
       key: `page-${p.id}`,

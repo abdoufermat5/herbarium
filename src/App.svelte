@@ -35,6 +35,8 @@
     e.preventDefault();
     clearTimeout(dragTimer);
     dragging = false;
+    // The open import dialog stages its own drops for review.
+    if (app.importOpen) return;
     const files = Array.from(e.dataTransfer?.files ?? []).filter((f) =>
       /\.html?$/i.test(f.name),
     );
@@ -86,6 +88,11 @@
       }
       if (app.importOpen) return; // handled by the dialog
       if (app.readId) {
+        // Leaving a field keeps the inspector draft; a second Escape closes.
+        if (isTyping(e.target)) {
+          (e.target as HTMLElement).blur();
+          return;
+        }
         app.readId = null;
         return;
       }

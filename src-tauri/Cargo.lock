@@ -1482,6 +1482,7 @@ dependencies = [
  "dirs",
  "herbarium-core",
  "herbarium-mcp",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tauri",

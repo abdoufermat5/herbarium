@@ -438,7 +438,7 @@ mod tests {
         fs::write(apps.join("gone.desktop"), desktop("Uninstalled", "not-installed %F", "TextEditor;")).unwrap();
         fs::write(apps.join("firefox.desktop"), desktop("Firefox", "mycoolide %u", "Network;WebBrowser;")).unwrap();
 
-        let found = detect_with(&[bin.clone()], &[apps.clone()]);
+        let found = detect_with(std::slice::from_ref(&bin), std::slice::from_ref(&apps));
         let summary: Vec<_> = found.iter().map(|e| (e.info.id.as_str(), e.info.name.as_str())).collect();
         assert_eq!(summary, [("bin:code", "Visual Studio Code"), ("desktop:cool.desktop", "Cool IDE")]);
 

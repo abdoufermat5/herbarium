@@ -71,7 +71,7 @@
     if (app.paletteOpen || e.defaultPrevented) return;
     if (e.key === "Escape") {
       e.preventDefault();
-      close(true);
+      close();
       return;
     }
     if (e.key !== "Tab" && e.code !== "Tab") return;
@@ -93,7 +93,7 @@
   }
 
   function onBackdrop(e: MouseEvent) {
-    if (e.target === e.currentTarget) close(true);
+    if (e.target === e.currentTarget) close();
   }
 
   const isHtml = (f: File) => /\.html?$/i.test(f.name);

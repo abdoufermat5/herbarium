@@ -88,6 +88,8 @@
     if (!p) return;
     try {
       p.meta = await api.setNetwork(p.meta.id, !p.meta.allowCdn);
+      // The CSP is chosen when the page is served: reload so it applies now.
+      previewNonce++;
       toast(
         p.meta.allowCdn ? t("read.netEnabled") : t("read.netDisabled"),
         "success",
@@ -481,7 +483,7 @@
                 <iframe
                   class="ready"
                   title={t("edit.preview")}
-                  src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
+                  src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
                   sandbox="allow-scripts"
                 ></iframe>
               </div>
@@ -498,7 +500,7 @@
           <iframe
             class:ready={frameReady}
             title={t("read.preview")}
-            src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
+            src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
             sandbox="allow-scripts"
             onload={markReady}
           ></iframe>

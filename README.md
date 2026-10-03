@@ -33,12 +33,15 @@ my-vault/
 
 Metadata lives in a small JSON file next to each page. The SQLite index only speeds up search and can be rebuilt from the files at any time, so it is never the source of truth. You can back up, sync or open the folder with any other tool.
 
+The file name is the page id: moving or renaming a page's `.html`/`.json` pair on disk moves or renames the page on the next rescan. If two folders hold a file with the same name, only one is indexed (a warning names the others). A sidecar that cannot be parsed is left untouched for you to repair. Folder names starting with a dot are reserved and skipped.
+
 ### Page isolation
 
 AI-generated HTML runs code, so each page is treated as untrusted:
 
 - It is rendered in an `<iframe sandbox="allow-scripts">` without `allow-same-origin`, so it cannot reach your files or the app.
 - It is served over a custom `herbarium://` scheme with a Content-Security-Policy injected by the backend.
+- It cannot navigate away: any frame navigation outside the app (a link, `location.href`, `<meta refresh>`) is blocked, so a page cannot leave its CSP by loading a remote document.
 - **Network access is a per-page switch.** By default a page may load scripts, styles and fonts from a short list of known CDNs (cdnjs, jsDelivr, unpkg, jQuery, Google Fonts). Turn it off and the page can load nothing from the network.
 
 Pages that depend on Claude-specific APIs (`window.storage`, `window.claude`, …) won't work outside Claude. Herbarium detects this and shows a notice.

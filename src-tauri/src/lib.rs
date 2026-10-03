@@ -9,9 +9,35 @@ use herbarium_core::Host;
 
 pub use commands::AppState;
 
+/// Only app documents may load, in any frame. A page runs in an iframe and
+/// could otherwise navigate itself (`location.href`, `<meta refresh>`, a
+/// clicked link) to a remote URL, which escapes its CSP and the per-page
+/// network switch. WebKitGTK reports subframe navigations to this hook.
+fn allowed_navigation(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" | "herbarium" | "about" => true,
+        "http" | "https" => match url.host_str() {
+            Some("tauri.localhost") => true,
+            Some("localhost") => cfg!(dev), // devUrl under `tauri dev`
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let navigation_guard = tauri::plugin::Builder::<tauri::Wry>::new("navigation-guard")
+        .on_navigation(|_, url| {
+            let allowed = allowed_navigation(url);
+            if !allowed {
+                eprintln!("herbarium: blocked navigation to {url}");
+            }
+            allowed
+        })
+        .build();
     tauri::Builder::default()
+        .plugin(navigation_guard)
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .manage(AppState { host: Mutex::new(Host::new()) })
@@ -23,7 +49,7 @@ pub fn run() {
             }
             Ok(())
         })
-        .register_uri_scheme_protocol("herbarium", protocol::handle)
+        .register_asynchronous_uri_scheme_protocol("herbarium", protocol::handle)
         .invoke_handler(tauri::generate_handler![
             commands::get_config,
             commands::set_vault,
@@ -66,4 +92,28 @@ pub fn run_mcp(args: &[String]) -> Result<(), String> {
         report.total
     );
     herbarium_mcp::serve(&host, std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::allowed_navigation;
+
+    #[test]
+    fn only_app_documents_may_load() {
+        let ok = |u: &str| allowed_navigation(&u.parse().unwrap());
+        assert!(ok("tauri://localhost/"));
+        assert!(ok("herbarium://page/abc?v=1#section"));
+        assert!(ok("about:blank"));
+        assert!(ok("http://tauri.localhost/"));
+        for blocked in [
+            "https://attacker.example/?d=secret",
+            "http://cdn.jsdelivr.net/x.html",
+            "data:text/html,<script>1</script>",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "blob:herbarium://page/1234",
+        ] {
+            assert!(!ok(blocked), "{blocked} must be blocked");
+        }
+    }
 }

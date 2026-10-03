@@ -318,8 +318,8 @@ impl Extension for Pages {
             object(json!({ "id": id_prop() }), &["id"]),
             |ctx: &mut Ctx, a: IdArgs| {
                 let meta = ctx.page(&a.id)?;
-                ctx.store.delete(&a.id).map_err(|e| e.to_string())?;
                 vault::delete_page_files(&ctx.store.vault, &meta)?;
+                ctx.store.delete(&a.id).map_err(|e| e.to_string())?;
                 ctx.emit(events::PAGE_DELETED, json!({ "page": meta }));
                 Ok(json!({ "deleted": a.id }))
             },

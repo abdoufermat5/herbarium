@@ -102,12 +102,11 @@ impl Store {
                 mtime,
             ],
         )?;
+        // FTS rows share the `pages` rowid (stable across ON CONFLICT updates),
+        // so replacing one is an indexed lookup instead of a full FTS scan.
         tx.execute(
-            "DELETE FROM pages_fts WHERE id = ?1",
-            params![meta.id],
-        )?;
-        tx.execute(
-            "INSERT INTO pages_fts (id, title, tags, folder, text) VALUES (?1,?2,?3,?4,?5)",
+            "INSERT OR REPLACE INTO pages_fts (rowid, id, title, tags, folder, text)
+             SELECT rowid, ?1, ?2, ?3, ?4, ?5 FROM pages WHERE id = ?1",
             params![
                 meta.id,
                 meta.title,
@@ -121,8 +120,7 @@ impl Store {
 
     pub fn delete(&self, id: &str) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
-        tx.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
-        tx.execute("DELETE FROM pages_fts WHERE id = ?1", params![id])?;
+        delete_row(&tx, id)?;
         tx.commit()
     }
 
@@ -235,8 +233,7 @@ impl Store {
         let tx = self.conn.unchecked_transaction()?;
         for id in all {
             if !keep.contains(&id) {
-                tx.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
-                tx.execute("DELETE FROM pages_fts WHERE id = ?1", params![id])?;
+                delete_row(&tx, &id)?;
                 removed += 1;
             }
         }
@@ -271,6 +268,20 @@ impl Store {
     }
 }
 
+/// Remove one page from both tables. The FTS row goes first: it is found
+/// through the `pages` rowid.
+fn delete_row(conn: &Connection, id: &str) -> rusqlite::Result<()> {
+    conn.execute(
+        "DELETE FROM pages_fts WHERE rowid = (SELECT rowid FROM pages WHERE id = ?1)",
+        params![id],
+    )?;
+    conn.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
+    Ok(())
+}
+
+/// `PRAGMA user_version` once FTS rows are keyed by the `pages` rowid.
+const FTS_ROWID_VERSION: i64 = 1;
+
 /// Bring an index created by an older build up to the current columns.
 /// The index is rebuildable, so adding columns with defaults is enough.
 fn migrate(conn: &Connection) -> rusqlite::Result<()> {
@@ -289,6 +300,17 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             "ALTER TABLE pages RENAME COLUMN interval_days TO interval_minutes;
              UPDATE pages SET interval_minutes = interval_minutes * 1440 WHERE interval_minutes IS NOT NULL;",
         )?;
+    }
+    let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+    if version < FTS_ROWID_VERSION {
+        conn.execute_batch(&format!(
+            "BEGIN;
+             DELETE FROM pages_fts;
+             INSERT INTO pages_fts (rowid, id, title, tags, folder, text)
+               SELECT rowid, id, title, tags, COALESCE(folder, ''), text_content FROM pages;
+             PRAGMA user_version = {FTS_ROWID_VERSION};
+             COMMIT;"
+        ))?;
     }
     Ok(())
 }
@@ -356,10 +378,12 @@ mod tests {
     #[test]
     fn migrate_turns_a_day_count_column_into_minutes() {
         let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE pages (id TEXT PRIMARY KEY, interval_days INTEGER);
-             INSERT INTO pages VALUES ('a', 3), ('b', NULL);",
-        )
+        conn.execute_batch(&format!(
+            "CREATE TABLE pages (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]',
+               folder TEXT, text_content TEXT NOT NULL DEFAULT '', interval_days INTEGER);
+             INSERT INTO pages (id, interval_days) VALUES ('a', 3), ('b', NULL);
+             {SCHEMA}"
+        ))
         .unwrap();
         migrate(&conn).unwrap();
         let got: Vec<(String, Option<i64>)> = conn
@@ -370,6 +394,33 @@ mod tests {
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(got, vec![("a".into(), Some(4320)), ("b".into(), None)]);
+    }
+
+    #[test]
+    fn migrate_rekeys_legacy_fts_rows_so_deleted_pages_leave_search() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(SCHEMA).unwrap();
+        let store = Store { vault: PathBuf::new(), conn };
+        for id in ["gone", "kept"] {
+            let mut meta = PageMeta::new(id.into());
+            meta.title = format!("{id} semver");
+            store.upsert(&meta, "", 0).unwrap();
+        }
+        // Older builds inserted FTS rows with their own rowids, keyed by `id` only.
+        store.conn.execute_batch(
+            "DELETE FROM pages_fts;
+             INSERT INTO pages_fts (rowid, id, title, tags, folder, text) VALUES
+               (90, 'kept', 'kept semver', '[]', '', ''), (91, 'gone', 'gone semver', '[]', '', '');",
+        ).unwrap();
+
+        migrate(&store.conn).unwrap();
+        store.delete("gone").unwrap();
+        store.upsert(&store.get_meta("kept").unwrap().unwrap(), "", 0).unwrap();
+
+        let ids: Vec<_> = store.search("semver").unwrap().into_iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec!["kept"]);
+        let fts_rows: i64 = store.conn.query_row("SELECT COUNT(*) FROM pages_fts", [], |r| r.get(0)).unwrap();
+        assert_eq!(fts_rows, 1);
     }
 
     #[test]

@@ -22,7 +22,7 @@
     due.filter((p) => p.nextReview && now - p.nextReview >= DAY).length,
   );
   const reviewedToday = $derived(
-    app.pages.filter((p) => p.lastReview && p.lastReview >= startOfToday()).length,
+    app.library.filter((p) => p.lastReview && p.lastReview >= startOfToday()).length,
   );
 
   function load() {

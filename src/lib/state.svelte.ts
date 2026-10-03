@@ -203,12 +203,18 @@ export async function saveReviewSettings(next: ReviewSettings) {
   app.dueCount = due.length;
 }
 
+let reloadSeq = 0;
+
 /** `quiet` skips the busy indicator, for background refreshes. */
 export async function reloadPages(quiet = false) {
+  const seq = ++reloadSeq;
   if (!quiet) app.busy = true;
   try {
     const q = app.search.trim();
-    app.pages = q ? await api.searchPages(q) : await api.listPages();
+    const pages = q ? await api.searchPages(q) : await api.listPages();
+    // A newer reload (e.g. the search changed meanwhile) owns the list.
+    if (seq !== reloadSeq) return;
+    app.pages = pages;
     await refreshAll();
   } catch (e) {
     console.error(e);
@@ -238,6 +244,8 @@ export async function rescanVault() {
   return report;
 }
 
+let backgroundStarted = false;
+
 export async function initApp() {
   try {
     const cfg = await api.getConfig();
@@ -252,11 +260,15 @@ export async function initApp() {
     app.initError = String(e);
   } finally {
     app.initialized = true;
-    window.addEventListener("focus", () => void resync());
-    // Reviews can be minutes long: keep the "due" badge current while the window sits open.
-    setInterval(() => {
-      if (app.config?.vaultPath && !app.busy) void refreshAll();
-    }, POLL_MS);
+    // initApp runs again on "Retry": register background work only once.
+    if (!backgroundStarted) {
+      backgroundStarted = true;
+      window.addEventListener("focus", () => void resync());
+      // Reviews can be minutes long: keep the "due" badge current while the window sits open.
+      setInterval(() => {
+        if (app.config?.vaultPath && !app.busy) void refreshAll();
+      }, POLL_MS);
+    }
   }
 }
 
