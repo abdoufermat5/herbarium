@@ -99,6 +99,55 @@
     app.inspectorOpen = !app.inspectorOpen;
   }
 
+  let editing = $state(false);
+  let source = $state("");
+  let savingSource = $state(false);
+  let previewNonce = $state(0);
+  const sourceDirty = $derived(editing && !!page && source !== page.html);
+
+  function startEditing() {
+    if (!page) return;
+    source = page.html;
+    editing = true;
+  }
+
+  function stopEditing() {
+    if (!sourceDirty) editing = false;
+  }
+
+  function discardSource() {
+    if (page) source = page.html;
+  }
+
+  async function saveSource() {
+    const p = page;
+    if (!p || savingSource || !sourceDirty) return;
+    savingSource = true;
+    const saved = source;
+    try {
+      p.meta = await api.setPageHtml(p.meta.id, saved);
+      p.html = saved;
+      previewNonce++;
+      toast(t("edit.saved"), "success");
+      void reloadPages(true);
+    } catch (e) {
+      toast(`${t("edit.saveFailed")}: ${e}`, "error");
+    } finally {
+      savingSource = false;
+    }
+  }
+
+  function onSourceKey(e: KeyboardEvent) {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      e.preventDefault();
+      void saveSource();
+    } else if (e.key === "Escape") {
+      // Leave the field instead of closing the page and losing the draft.
+      e.stopPropagation();
+      (e.target as HTMLElement).blur();
+    }
+  }
+
   async function schedule(days: number) {
     const p = page;
     if (!p || saving) return;
@@ -225,6 +274,17 @@
 
       <div class="actions">
         <button
+          class="btn btn-sm details-btn"
+          class:active={editing}
+          aria-pressed={editing}
+          onclick={() => (editing ? stopEditing() : startEditing())}
+          disabled={editing && sourceDirty}
+          title={t("read.editHint")}
+        >
+          <Icon name="file-text" size={14} />
+          {t("read.edit")}
+        </button>
+        <button
           class="btn btn-sm net"
           class:on={page.meta.allowCdn}
           onclick={toggleNetwork}
@@ -316,6 +376,46 @@
             <span>{t("read.claudeNotice")}</span>
           </div>
         {/if}
+        {#if editing}
+          <div class="split">
+            <div class="editor">
+              <div class="editor-bar">
+                <span class="eyebrow">{t("edit.source")}</span>
+                {#if sourceDirty}<span class="unsaved">· {t("edit.unsaved")}</span>{/if}
+                <span class="grow"></span>
+                <button class="btn btn-xs" onclick={discardSource} disabled={!sourceDirty || savingSource}>
+                  {t("edit.discard")}
+                </button>
+                <button
+                  class="btn btn-xs btn-primary"
+                  onclick={saveSource}
+                  disabled={!sourceDirty || savingSource}
+                  title={t("edit.shortcut")}
+                >
+                  {t("edit.save")}
+                </button>
+                <button class="btn btn-xs btn-ghost" onclick={stopEditing} disabled={sourceDirty}>
+                  {t("edit.close")}
+                </button>
+              </div>
+              <textarea
+                class="source"
+                aria-label={t("edit.source")}
+                spellcheck="false"
+                bind:value={source}
+                onkeydown={onSourceKey}
+              ></textarea>
+            </div>
+            <div class="frame-holder">
+              <iframe
+                class="ready"
+                title={t("edit.preview")}
+                src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
+                sandbox="allow-scripts"
+              ></iframe>
+            </div>
+          </div>
+        {:else}
         <div class="frame-holder">
           {#if !frameReady}
             <div class="frame-skel">
@@ -331,6 +431,7 @@
             onload={markReady}
           ></iframe>
         </div>
+        {/if}
       </div>
 
       {#if app.inspectorOpen}
@@ -608,6 +709,54 @@
 
   iframe.ready {
     opacity: 1;
+  }
+
+  .split {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .editor {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    border-right: 1px solid var(--border);
+  }
+  .editor-bar {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--raised);
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .editor-bar .grow {
+    flex: 1;
+  }
+  .editor-bar .unsaved {
+    color: var(--warn, var(--accent-strong));
+  }
+  .source {
+    flex: 1;
+    min-height: 0;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    padding: 14px 16px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    tab-size: 2;
+    white-space: pre;
+    overflow: auto;
   }
 
   .inspector {

@@ -25,6 +25,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 - Create folders and pages from the sidebar (header buttons, or the hover buttons on a folder), with an inline name field. New pages start from a blank HTML skeleton and open straight away. Empty folders now show in the tree, and the MCP server gains `folders_create`.
 
+- HTML editor in the reader: an Edit button opens the page source beside a live preview. Save with the button or `Ctrl/⌘+S`; invalid HTML is rejected with the reason and your draft is kept.
+
 ### Changed
 - Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
 - Backend split into a Cargo workspace: `herbarium-core` (vault, index, extensions), `herbarium-mcp`, and the desktop shell.

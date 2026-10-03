@@ -76,6 +76,10 @@ export const api = {
     return op("folders.list");
   },
 
+  setPageHtml(id: string, html: string): Promise<PageMeta> {
+    return op("pages.set_html", { id, html });
+  },
+
   createFolder(path: string): Promise<string> {
     return op("folders.create", { path });
   },
