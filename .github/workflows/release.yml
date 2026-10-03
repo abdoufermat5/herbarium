@@ -9,12 +9,18 @@ permissions:
   contents: write
 
 jobs:
-  release:
-    runs-on: ubuntu-22.04 # oldest LTS runner keeps the AppImage glibc-compatible
+  gate:
+    name: Release Gate & Verification
+    runs-on: ubuntu-22.04
+    outputs:
+      release_notes: ${{ steps.notes.outputs.body }}
+      updater_enabled: ${{ steps.updater.outputs.enabled }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Verify tag matches app version
+        id: version
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
@@ -23,7 +29,43 @@ jobs:
             echo "Version mismatch: tag=$tag package.json=$pkg Cargo.toml=$crate" >&2
             exit 1
           fi
-          case "$tag" in *-*) echo "PRERELEASE=true" >> "$GITHUB_ENV" ;; *) echo "PRERELEASE=false" >> "$GITHUB_ENV" ;; esac
+          case "$tag" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *) echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      # Updater signing is all-or-nothing. A signing key without the matching public
+      # key would publish artifacts that shipped apps can never verify, so fail early.
+      # Secrets are only compared (never printed or interpolated into the script).
+      - name: Resolve updater signing configuration
+        id: updater
+        shell: bash
+        env:
+          UPDATER_PUBLIC_KEY: ${{ vars.HERBARIUM_UPDATER_PUBLIC_KEY }}
+          HAS_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+        run: |
+          if [ -n "$UPDATER_PUBLIC_KEY" ]; then has_public=true; else has_public=false; fi
+          if [ "$HAS_SIGNING_KEY" = "true" ] && [ "$has_public" = "false" ]; then
+            echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY is set but repository variable HERBARIUM_UPDATER_PUBLIC_KEY is empty. Set the variable to the matching Tauri updater public key, or remove the secret to publish unsigned bundles without updater artifacts."
+            exit 1
+          fi
+          if [ "$has_public" = "true" ] && [ "$HAS_SIGNING_KEY" != "true" ]; then
+            echo "::error::Repository variable HERBARIUM_UPDATER_PUBLIC_KEY is set but secret TAURI_SIGNING_PRIVATE_KEY is missing. Add the signing key secret, or clear the variable to publish unsigned bundles without updater artifacts."
+            exit 1
+          fi
+          case "$UPDATER_PUBLIC_KEY" in
+            *$'\n'*|*$'\r'*)
+              echo "::error::HERBARIUM_UPDATER_PUBLIC_KEY must be a single line (the base64 public key content)."
+              exit 1
+              ;;
+          esac
+          if [ "$has_public" = "true" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Updater artifacts: enabled (signed, latest.json will be published)"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Updater keys not configured; building unsigned bundles without updater artifacts or latest.json."
+          fi
 
       - name: Extract release notes from CHANGELOG.md
         id: notes
@@ -33,6 +75,7 @@ jobs:
             node scripts/changelog-notes.mjs "$GITHUB_REF_NAME"
             echo "CHANGELOG_EOF"
           } >> "$GITHUB_OUTPUT"
+          node scripts/changelog-notes.mjs "$GITHUB_REF_NAME" > release_notes.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -44,6 +87,8 @@ jobs:
           cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - uses: swatinem/rust-cache@v2
         with:
@@ -56,13 +101,190 @@ jobs:
             libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
 
       - run: pnpm install --frozen-lockfile
+      - run: pnpm check
+      - run: pnpm test
+      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+
+      - name: Create or update draft release
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          prerelease_opt=""
+          if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
+            prerelease_opt="--prerelease"
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --draft --title "Herbarium $tag" --notes-file release_notes.txt $prerelease_opt
+          else
+            gh release create "$tag" --draft --title "Herbarium $tag" --notes-file release_notes.txt $prerelease_opt
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build (${{ matrix.platform }})
+    needs: [gate]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x86_64
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: ""
+          - platform: linux-arm64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            args: ""
+          - platform: macos-x86_64
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            args: "--target x86_64-apple-darwin"
+          - platform: macos-arm64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            args: "--target aarch64-apple-darwin"
+          - platform: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      # Only when both updater keys are configured (validated in the gate job):
+      # embed the public key at compile time and turn on signed updater artifacts.
+      # The bundler reads `createUpdaterArtifacts`/`plugins.updater` from the CLI
+      # config it is given, not from TAURI_CONFIG (which only reaches the build
+      # script), so the merged config is written to a file and passed with
+      # `--config`. Only the public variable is written; no secret is read here.
+      - name: Configure updater artifacts
+        shell: bash
+        env:
+          UPDATER_PUBLIC_KEY: ${{ vars.HERBARIUM_UPDATER_PUBLIC_KEY }}
+          UPDATER_ENABLED: ${{ needs.gate.outputs.updater_enabled }}
+          UPDATER_CONFIG: ${{ runner.temp }}/tauri.updater.conf.json
+        run: |
+          node -e '
+            const fs = require("fs");
+            const enabled = process.env.UPDATER_ENABLED === "true";
+            if (enabled) {
+              fs.appendFileSync(
+                process.env.GITHUB_ENV,
+                `HERBARIUM_UPDATER_PUBLIC_KEY=${process.env.UPDATER_PUBLIC_KEY}\n`,
+              );
+            }
+            const config = enabled
+              ? {
+                  bundle: { createUpdaterArtifacts: true },
+                  plugins: {
+                    updater: {
+                      pubkey: process.env.UPDATER_PUBLIC_KEY,
+                      endpoints: ["https://github.com/abdoufermat5/herbarium/releases/latest/download/latest.json"],
+                    },
+                  },
+                }
+              : {};
+            fs.writeFileSync(process.env.UPDATER_CONFIG, JSON.stringify(config, null, 2) + "\n");
+            console.log("updater artifacts:", enabled, "->", process.env.UPDATER_CONFIG);
+          '
 
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Herbarium ${{ github.ref_name }}
-          releaseBody: ${{ steps.notes.outputs.body }}
-          releaseDraft: false
-          prerelease: ${{ env.PRERELEASE == 'true' }}
+          releaseBody: ${{ needs.gate.outputs.release_notes }}
+          releaseDraft: true
+          prerelease: ${{ needs.gate.outputs.prerelease == 'true' }}
+          includeUpdaterJson: ${{ needs.gate.outputs.updater_enabled == 'true' }}
+          args: ${{ matrix.args }} --config ${{ runner.temp }}/tauri.updater.conf.json
+
+  publish:
+    name: Publish Release & SHA256SUMS
+    needs: [gate, build]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all release assets
+        run: |
+          mkdir -p assets
+          gh release download "${{ github.ref_name }}" --dir assets
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Updater manifest must exist exactly when updater signing is configured.
+      - name: Verify updater artifacts
+        shell: bash
+        env:
+          UPDATER_ENABLED: ${{ needs.gate.outputs.updater_enabled }}
+        run: |
+          cd assets
+          if [ "$UPDATER_ENABLED" = "true" ]; then
+            [ -f latest.json ] || { echo "::error::latest.json missing although updater signing is configured"; exit 1; }
+            sigs="$(find . -maxdepth 1 -name '*.sig' | wc -l)"
+            if [ "$sigs" -lt 1 ]; then
+              echo "::error::No .sig updater signatures found in release assets"
+              exit 1
+            fi
+          elif [ -f latest.json ]; then
+            echo "::error::latest.json present but updater signing is not configured; delete it from the draft release"
+            exit 1
+          fi
+
+      - name: Generate SHA256SUMS
+        run: |
+          cd assets
+          rm -f SHA256SUMS
+          sha256sum * > SHA256SUMS
+          cat SHA256SUMS
+        shell: bash
+
+      - name: Upload SHA256SUMS to release
+        run: |
+          gh release upload "${{ github.ref_name }}" assets/SHA256SUMS --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish release
+        run: |
+          gh release edit "${{ github.ref_name }}" --draft=false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
