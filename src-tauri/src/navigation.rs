@@ -55,6 +55,11 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// Build the main window from its config (`"create": false` there) with the
 /// guards that only a builder can install. Pages may request popups
 /// (`target="_blank"` links): none opens, web links are offered instead.
+///
+/// The config creates it hidden and it is shown here: on Wayland, tao gives an
+/// undecorated window a client-side titlebar, and doing that after the window
+/// is already shown makes GTK warn (`gtk_window_set_titlebar() called on a
+/// realized window`).
 pub fn build_main_window<R: Runtime>(
     app: &tauri::App<R>,
 ) -> tauri::Result<tauri::WebviewWindow<R>> {
@@ -76,6 +81,7 @@ pub fn build_main_window<R: Runtime>(
         .build()?;
     #[cfg(windows)]
     guard_frames(&window)?;
+    window.show()?;
     Ok(window)
 }
 
