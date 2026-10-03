@@ -32,16 +32,16 @@ pub fn handle<R: tauri::Runtime>(
     }
 
     let state = ctx.app_handle().state::<AppState>();
-    let Ok(guard) = state.store.lock() else {
+    let Ok(host) = state.host.lock() else {
         return not_found();
     };
-    let Some(store) = guard.as_ref() else {
+    let Some(store) = host.store() else {
         return not_found();
     };
     let Ok(Some(meta)) = store.get_meta(id) else {
         return not_found();
     };
-    let html = crate::vault::read_html(&store.vault, id, meta.folder.as_deref())
+    let html = herbarium_core::vault::read_html(&store.vault, id, meta.folder.as_deref())
         .unwrap_or("<p>Page file missing on disk.</p>".to_string());
     let csp = if meta.allow_cdn { CSP_ALLOW } else { CSP_BLOCK };
 

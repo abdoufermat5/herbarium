@@ -1,0 +1,10 @@
+[package]
+name = "herbarium-mcp"
+description = "Model Context Protocol (stdio) adapter exposing Herbarium operations to AI agents."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+herbarium-core.workspace = true
+serde_json.workspace = true

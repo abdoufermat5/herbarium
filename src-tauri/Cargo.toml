@@ -1,22 +1,35 @@
-[package]
-name = "herbarium"
+[workspace]
+members = ["crates/herbarium-core", "crates/herbarium-mcp"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+
+[workspace.dependencies]
+herbarium-core = { path = "crates/herbarium-core" }
+herbarium-mcp = { path = "crates/herbarium-mcp" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[package]
+name = "herbarium"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 
 [lib]
 name = "herbarium_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
-chrono = { version = "0.4.45", features = ["serde"] }
-rusqlite = { version = "0.40.2", features = ["bundled"] }
-scraper = "0.27.0"
-serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0.151"
+dirs = "7.0.0"
+herbarium-core.workspace = true
+herbarium-mcp.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-dialog = "2.8.1"
-uuid = { version = "1.26.1", features = ["v4"] }
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

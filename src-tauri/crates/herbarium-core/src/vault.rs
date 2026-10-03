@@ -44,6 +44,19 @@ pub fn safe_rel(folder: &str) -> Option<PathBuf> {
     }
 }
 
+/// Normalize a user-supplied folder into the stored `a/b/c` form. Blank means
+/// the vault root (`None`); a path escaping the vault is an error.
+pub fn clean_folder(folder: Option<&str>) -> VaultResult<Option<String>> {
+    let Some(raw) = folder.filter(|f| !f.trim().is_empty()) else {
+        return Ok(None);
+    };
+    match safe_rel(raw) {
+        Some(rel) => Ok(Some(rel.to_string_lossy().replace('\\', "/"))),
+        None if raw.split(['/', '\\']).all(|s| s.trim().is_empty() || s == ".") => Ok(None),
+        None => Err(format!("invalid folder: {raw}")),
+    }
+}
+
 fn dir_for(vault: &Path, folder: Option<&str>) -> PathBuf {
     match folder.and_then(safe_rel) {
         Some(rel) => vault.join(rel),
@@ -112,13 +125,8 @@ pub fn delete_page_files(vault: &Path, meta: &PageMeta) -> VaultResult<()> {
 
 /// Move a page (html + meta) from `meta.folder` to `new_folder` and update
 /// `meta.folder` in place. Missing old files are tolerated.
-pub fn move_page(vault: &Path, meta: &mut PageMeta, new_folder: Option<String>) -> VaultResult<()> {
-    let new_folder_clean = new_folder.as_deref().and_then(safe_rel).map(|p| {
-        p.to_string_lossy()
-            .replace('\\', "/")
-            .trim_end_matches('/')
-            .to_string()
-    });
+pub fn move_page(vault: &Path, meta: &mut PageMeta, new_folder: Option<&str>) -> VaultResult<()> {
+    let new_folder_clean = clean_folder(new_folder)?;
     if new_folder_clean == meta.folder {
         return Ok(());
     }
@@ -236,7 +244,7 @@ fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
     Ok((files, skipped))
 }
 
-fn file_mtime(path: &Path) -> Option<i64> {
+pub fn file_mtime(path: &Path) -> Option<i64> {
     fs::metadata(path)
         .and_then(|m| m.modified())
         .ok()
@@ -269,8 +277,8 @@ mod tests {
         let store = Store::open(vault.clone()).unwrap();
 
         // Stage 1 — import: copy examples/semver.html into the vault as-is.
-        let demo =
-            fs::read_to_string("../examples/semver.html").expect("examples/semver.html present");
+        let demo = fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../examples/semver.html"))
+            .expect("examples/semver.html present");
         let mut meta = PageMeta::new("semver-demo".into());
         meta.title = "semver — Semantic Versioning Reference".into();
         write_page(&vault, &meta, &demo).expect("write_page ok");

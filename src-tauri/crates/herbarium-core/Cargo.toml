@@ -1,0 +1,14 @@
+[package]
+name = "herbarium-core"
+description = "Vault kernel, operation registry and built-in extensions of Herbarium, independent of any front end."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono = { version = "0.4.45", features = ["serde"] }
+rusqlite = { version = "0.40.2", features = ["bundled"] }
+scraper = "0.27.0"
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1.26.1", features = ["v4"] }

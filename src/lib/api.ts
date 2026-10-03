@@ -3,11 +3,17 @@ import type {
   Config,
   ImportFile,
   ImportResult,
+  IndexReport,
   MetaPatch,
   Page,
   PageMeta,
   TagCount,
 } from "./types";
+
+/** Run an operation registered by a backend extension (`area.verb`). */
+export function op<T>(name: string, args: Record<string, unknown> = {}): Promise<T> {
+  return invoke<T>("invoke_op", { name, args });
+}
 
 export const api = {
   getConfig(): Promise<Config> {
@@ -23,50 +29,54 @@ export const api = {
   },
 
   importFiles(files: ImportFile[]): Promise<ImportResult> {
-    return invoke("import_files", { files });
+    return op("pages.import", { files });
   },
 
   listPages(): Promise<PageMeta[]> {
-    return invoke("list_pages");
+    return op("pages.list");
   },
 
   searchPages(query: string): Promise<PageMeta[]> {
-    return invoke("search_pages", { query });
+    return op("pages.search", { query });
   },
 
   getPage(id: string): Promise<Page> {
-    return invoke("get_page", { id });
+    return op("pages.get", { id, format: "html" });
   },
 
   updatePageMeta(id: string, patch: MetaPatch): Promise<PageMeta> {
-    return invoke("update_page_meta", { id, patch });
+    return op("pages.update", { id, ...patch });
   },
 
   scheduleReview(id: string, intervalDays: number): Promise<PageMeta> {
-    return invoke("schedule_review", { id, intervalDays });
+    return op("review.schedule", { id, intervalDays });
   },
 
   clearReview(id: string): Promise<PageMeta> {
-    return invoke("clear_review", { id });
+    return op("review.clear", { id });
   },
 
   setNetwork(id: string, allowCdn: boolean): Promise<PageMeta> {
-    return invoke("set_network", { id, allowCdn });
+    return op("network.set", { id, allowCdn });
   },
 
   deletePage(id: string): Promise<void> {
-    return invoke("delete_page", { id });
+    return op("pages.delete", { id });
   },
 
   reviewToday(): Promise<PageMeta[]> {
-    return invoke("review_today");
+    return op("review.due");
   },
 
   tags(): Promise<TagCount[]> {
-    return invoke("tags");
+    return op("tags.list");
   },
 
   folders(): Promise<string[]> {
-    return invoke("folders");
+    return op("folders.list");
+  },
+
+  rescan(): Promise<IndexReport> {
+    return op("vault.rescan");
   },
 };

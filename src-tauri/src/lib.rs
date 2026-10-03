@@ -1,12 +1,10 @@
 mod commands;
-mod content;
-mod models;
+mod config;
 mod protocol;
-mod store;
-mod time;
-mod vault;
 
 use std::sync::Mutex;
+
+use herbarium_core::Host;
 
 pub use commands::AppState;
 
@@ -14,9 +12,7 @@ pub use commands::AppState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState {
-            store: Mutex::new(None),
-        })
+        .manage(AppState { host: Mutex::new(Host::new()) })
         .setup(|app| {
             use tauri::Manager;
             // Window icon for platforms/WMs that read it from the window itself.
@@ -30,19 +26,40 @@ pub fn run() {
             commands::get_config,
             commands::set_vault,
             commands::create_vault,
-            commands::import_files,
-            commands::list_pages,
-            commands::search_pages,
-            commands::get_page,
-            commands::update_page_meta,
-            commands::schedule_review,
-            commands::clear_review,
-            commands::set_network,
-            commands::delete_page,
-            commands::review_today,
-            commands::tags,
-            commands::folders,
+            commands::invoke_op,
         ])
         .run(tauri::generate_context!())
         .expect("error while running herbarium");
+}
+
+const MCP_USAGE: &str = "usage: herbarium mcp [--vault <path>]
+
+Serve the Model Context Protocol on stdin/stdout. The vault is, in order:
+--vault, the HERBARIUM_VAULT environment variable, or the vault last
+opened in the Herbarium app.";
+
+/// `herbarium mcp [--vault <path>]`: run the MCP server without a window.
+pub fn run_mcp(args: &[String]) -> Result<(), String> {
+    let vault = match args {
+        [] => None,
+        [flag, path] if flag == "--vault" => Some(path.clone()),
+        [flag] if flag == "--help" || flag == "-h" => {
+            println!("{MCP_USAGE}");
+            return Ok(());
+        }
+        _ => return Err(MCP_USAGE.into()),
+    };
+    let vault = vault
+        .or_else(|| std::env::var("HERBARIUM_VAULT").ok().filter(|v| !v.is_empty()))
+        .or(config::load()?.vault_path)
+        .ok_or("no vault: pass --vault <path>, set HERBARIUM_VAULT, or open a vault in the Herbarium app first")?;
+
+    let mut host = Host::new();
+    let report = host.open_vault(&vault)?;
+    eprintln!(
+        "herbarium mcp: serving vault {} ({} pages)",
+        host.vault_path().map(|p| p.display().to_string()).unwrap_or_default(),
+        report.total
+    );
+    herbarium_mcp::serve(&host, std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| e.to_string())
 }

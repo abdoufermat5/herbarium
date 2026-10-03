@@ -5,6 +5,7 @@ export interface Config {
 }
 
 export interface PageMeta {
+  schemaVersion: number;
   id: string;
   title: string;
   tags: string[];
@@ -16,6 +17,8 @@ export interface PageMeta {
   nextReview: number | null; // unix ms
   lastReview: number | null; // unix ms
   allowCdn: boolean;
+  /** Extension-owned data keyed by extension id; absent when empty. */
+  ext?: Record<string, unknown>;
 }
 
 export interface Page {
@@ -28,11 +31,12 @@ export interface TagCount {
   count: number;
 }
 
+/** Fields left out stay unchanged; `folder: null` moves to the vault root. */
 export interface MetaPatch {
-  title: string;
-  tags: string[];
-  folder: string | null;
-  note: string;
+  title?: string;
+  tags?: string[];
+  folder?: string | null;
+  note?: string;
 }
 
 export interface ImportFile {
@@ -43,4 +47,10 @@ export interface ImportFile {
 export interface ImportResult {
   imported: number;
   errors: string[];
+}
+
+export interface IndexReport {
+  indexed: number;
+  removed: number;
+  total: number;
 }

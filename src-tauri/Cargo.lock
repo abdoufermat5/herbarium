@@ -1256,15 +1256,34 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 name = "herbarium"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "rusqlite",
- "scraper",
+ "dirs",
+ "herbarium-core",
+ "herbarium-mcp",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
+]
+
+[[package]]
+name = "herbarium-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "scraper",
+ "serde",
+ "serde_json",
  "uuid",
+]
+
+[[package]]
+name = "herbarium-mcp"
+version = "0.1.0"
+dependencies = [
+ "herbarium-core",
+ "serde_json",
 ]
 
 [[package]]

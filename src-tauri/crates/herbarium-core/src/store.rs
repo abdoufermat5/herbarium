@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension, Params, Row};
 
-use crate::models::{PageMeta, TagCount};
+use crate::models::{PageMeta, TagCount, SCHEMA_VERSION};
 use crate::time::now_secs;
 
-const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_days,next_review,last_review,allow_cdn";
+const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_days,next_review,last_review,allow_cdn,ext";
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS pages (
@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS pages (
   last_review   INTEGER,
   allow_cdn     INTEGER NOT NULL DEFAULT 1,
   text_content  TEXT NOT NULL DEFAULT '',
-  mtime         INTEGER NOT NULL DEFAULT 0
+  mtime         INTEGER NOT NULL DEFAULT 0,
+  ext           TEXT NOT NULL DEFAULT '{}'
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
   id UNINDEXED, title, tags, folder, text, tokenize='porter'
@@ -39,6 +40,7 @@ pub struct Store {
 
 fn row_to_meta(row: &Row) -> rusqlite::Result<PageMeta> {
     Ok(PageMeta {
+        schema_version: SCHEMA_VERSION,
         id: row.get(0)?,
         title: row.get(1)?,
         tags: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(2)?).unwrap_or_default(),
@@ -50,6 +52,7 @@ fn row_to_meta(row: &Row) -> rusqlite::Result<PageMeta> {
         next_review: row.get(8)?,
         last_review: row.get(9)?,
         allow_cdn: row.get::<_, i64>(10)? != 0,
+        ext: serde_json::from_str(&row.get::<_, String>(11)?).unwrap_or_default(),
     })
 }
 
@@ -61,6 +64,7 @@ impl Store {
         conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "busy_timeout", 5000).ok();
         conn.execute_batch(SCHEMA)?;
+        migrate(&conn)?;
         Ok(Store { vault, conn })
     }
 
@@ -68,16 +72,17 @@ impl Store {
     pub fn upsert(&self, meta: &PageMeta, text: &str, mtime: i64) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
+        let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
         tx.execute(
             &format!(
                 "INSERT INTO pages ({COLUMNS}, text_content, mtime)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)
+                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
                  ON CONFLICT(id) DO UPDATE SET
                    title=excluded.title, tags=excluded.tags, folder=excluded.folder,
                    note=excluded.note, updated_at=excluded.updated_at,
                    interval_days=excluded.interval_days, next_review=excluded.next_review,
                    last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
-                   text_content=excluded.text_content, mtime=excluded.mtime"
+                   ext=excluded.ext, text_content=excluded.text_content, mtime=excluded.mtime"
             ),
             params![
                 meta.id,
@@ -91,6 +96,7 @@ impl Store {
                 meta.next_review,
                 meta.last_review,
                 if meta.allow_cdn { 1 } else { 0 },
+                ext,
                 text,
                 mtime,
             ],
@@ -262,6 +268,18 @@ impl Store {
             .ok()
             .flatten()
     }
+}
+
+/// Bring an index created by an older build up to the current columns.
+/// The index is rebuildable, so adding columns with defaults is enough.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    let has_ext = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'ext'")?
+        .exists([])?;
+    if !has_ext {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN ext TEXT NOT NULL DEFAULT '{}'")?;
+    }
+    Ok(())
 }
 
 /// Turn a user query into an FTS5 expression: every token quoted and prefix-starred.
