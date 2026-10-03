@@ -6,15 +6,18 @@ Your pages stay plain `.html` files in a folder you own, in the spirit of an vau
 
 ## Features
 
-- **Import** by drag and drop, file picker, or pasting HTML. Pages are copied into the vault unmodified.
-- **Search** across titles, tags, folders and page text, backed by a SQLite full-text index.
-- **Organize** with folders, tags and a personal note per page. Titles are filled in from `<title>` (falling back to the first `<h1>`).
+- **Import** by drag and drop, file picker, or pasting HTML. Pages are copied into the vault unmodified. A dropped folder tree stages every HTML file it finds, and the import dialog can override the vault's CDN default for that batch.
+- **Search** across titles, tags, folders, notes and page text, backed by a SQLite full-text index. Hits keep the backend's ranking, and the matched term is highlighted in the excerpt (never rendered as HTML).
+- **Organize** with folders, tags and a personal note per page. Titles are filled in from `<title>` (falling back to the first `<h1>`); renaming a page in the app keeps your title even when the file's `<title>` changes. Tag chips on each page and in the palette filter the library, and agents can rename (merging into an existing tag) or delete a tag through MCP; folders can be renamed, moved, or deleted with their pages.
+- **Select** pages with checkboxes, `Ctrl/⌘`-click or `Shift`-click to move, tag, reschedule or trash them in one go, with per-page errors reported. Drag a page onto a folder (or the Files header) to move it.
+- **Trash** keeps deleted pages restorable: the Trash view lists each entry with its original folder, restores it, purges it, or empties the trash behind a confirmation. Deleting shows one in-app confirmation and an Undo toast.
 - **Edit** a page's HTML in the app, or open its file in an editor installed on your system (VS Code, Zed, Kate… detected automatically, or a custom command).
 - **Read** each page in a sandboxed viewer with scripts running.
-- **Review** pages on a schedule you configure: preset intervals in any mix of minutes, hours and days (1, 3, 7, 30 days by default), a "Done" button that picks the next date (step up the presets, multiply the interval, or repeat it), optional automatic scheduling of imports, and a cap on the "Review today" queue. A desktop notification tells you when a page comes due while the app is running (switch it off in Settings → Review). Review settings live in the vault (`.herbarium/review.json`).
-- **Command palette** (`Ctrl/⌘ K`) and keyboard shortcuts (`/` to search, `i` to import, `Esc` to go back).
-- **Settings** for the editor (font, size, wrapping, indentation, preview position), startup screen, import destination, review and more.
-- **Light and dark themes**, and an **English / French** interface (English by default).
+- **Review** pages on a schedule you configure: preset intervals in any mix of minutes, hours and days (1, 3, 7, 30 days by default), a "Done" button that picks the next date (step up the presets, multiply the interval, or repeat it), optional automatic scheduling of imports, and a cap on the "Review today" queue. A session walks the due queue with `1` Again, `2` Good, `S` Skip and `Esc` to leave, and the Review view shows real totals, the 14-day forecast and each page's review history. A desktop notification tells you when a page comes due while the app is running (switch it off in Settings → Review). Review settings live in the vault (`.herbarium/review.json`).
+- **Command palette** (`Ctrl/⌘ K`) and keyboard shortcuts (`/` to search, `i` to import, `?` for the shortcut reference, `Esc` to go back) with a searchable command list for pages, folders, tags and review.
+- **Settings** for vaults (open, create, recent, reveal, export a copy), updates, editor, network, startup screen, import destination, review and more.
+- **Light and dark themes** following the operating system by default, and an **English / French** interface that starts from the OS language.
+
 
 ## How it works
 
@@ -26,9 +29,11 @@ A vault is an ordinary folder:
 my-vault/
 ├── {id}.html            # the page, exactly as imported
 ├── {id}.json            # sidecar metadata: title, tags, folder, note, review dates
-└── rust/                # folders are real directories
-    ├── {id}.html
-    └── {id}.json
+├── rust/                # folders are real directories
+│   ├── {id}.html
+│   └── {id}.json
+└── .herbarium/          # app state: the search index, review/network settings
+    └── trash/{id}/      # deleted pages, restorable until you empty the trash
 ```
 
 Metadata lives in a small JSON file next to each page. The SQLite index only speeds up search and can be rebuilt from the files at any time, so it is never the source of truth. You can back up, sync or open the folder with any other tool.
@@ -78,7 +83,7 @@ claude mcp add herbarium -- herbarium mcp
 
 Then ask things like *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. The server uses `--vault <path>` if given, otherwise `HERBARIUM_VAULT`, otherwise the vault last opened in the app. The app picks up agent changes when its window regains focus.
 
-Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_complete`, `review_clear`, `review_due`, `review_settings`, `network_set`, `tags_list`, `folders_list`, `folders_create`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
+Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_duplicate`, `pages_bulk_update`, `pages_bulk_delete`, `pages_delete`, `pages_trash`, `pages_restore`, `review_schedule`, `review_complete`, `review_clear`, `review_due`, `review_stats`, `review_settings`, `network_set`, `network_settings`, `tags_list`, `tags_rename`, `tags_delete`, `folders_list`, `folders_create`, `folders_rename`, `folders_delete`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
 
 ## Getting started
 
@@ -121,6 +126,36 @@ git push --follow-tags
 ```
 
 Document changes under `[Unreleased]` in `CHANGELOG.md` first. The script bumps `package.json` and `src-tauri/Cargo.toml`, moves `[Unreleased]` into the new version, then commits and tags `vX.Y.Z`. Pushing the tag triggers `.github/workflows/release.yml`, which builds the `.deb` and `.AppImage` and publishes a GitHub release whose description is the matching `CHANGELOG.md` section (versions with a `-suffix` are marked as pre-releases). Pull requests and `main` run `.github/workflows/ci.yml`.
+
+### In-app updates
+
+Settings → Updates checks GitHub for a newer signed release and installs it with `tauri-plugin-updater` after an explicit confirmation (it also runs the unsaved-work guards first). The plugin is only enabled when the minisign public key is present at compile time as `HERBARIUM_UPDATER_PUBLIC_KEY`; `src-tauri/src/updater.rs` bakes it in and refuses to check or install without it, with a message that names the missing variable — there is no unsigned or default-key path.
+
+CI reads the public key from the repository variable `HERBARIUM_UPDATER_PUBLIC_KEY` and the private key from the secret `TAURI_SIGNING_PRIVATE_KEY` (plus `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`), and `release.yml` fails the release when only one of the two is configured. Until both are set, releases are published without updater artifacts and new versions are installed from the releases page.
+
+Create the pair once, with `pnpm tauri signer generate`:
+
+```bash
+pnpm tauri signer generate -w ~/.tauri/herbarium-updater.key   # keep this file secret
+gh variable set HERBARIUM_UPDATER_PUBLIC_KEY --body "$(cat ~/.tauri/herbarium-updater.key.pub)"
+gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/herbarium-updater.key
+```
+
+The private key never belongs in the repository or in a build log; only the `.pub` content is shared.
+
+To build signed updater artifacts locally (and reproduce what CI does), turn the setting on with a CLI config file — the bundler reads `bundle.createUpdaterArtifacts` and `plugins.updater` from the config it is passed, so `TAURI_CONFIG` alone is not enough:
+
+```bash
+PUB="$(tr -d '\n' < ~/.tauri/herbarium-updater.key.pub)"
+printf '{"bundle":{"createUpdaterArtifacts":true},"plugins":{"updater":{"pubkey":"%s"}}}\n' "$PUB" > /tmp/updater.conf.json
+HERBARIUM_UPDATER_PUBLIC_KEY="$PUB" TAURI_SIGNING_PRIVATE_KEY="$(tr -d '\n' < ~/.tauri/herbarium-updater.key)" \
+  pnpm tauri build --bundles appimage --config /tmp/updater.conf.json
+ls src-tauri/target/release/bundle/appimage/*.sig   # the signed updater artifact
+```
+
+Rotating the key means publishing a release signed with the new one, because a build only trusts the key it was compiled with.
+
+Two consequences worth knowing: in-app updates only begin with the first release published *after* the keys are configured (that release also uploads `latest.json`, which earlier releases do not have), and a build compiled without a key cannot self-update at all — its `Check for updates` answer names the missing public key and points the user at the releases page.
 
 ## Architecture
 
@@ -180,7 +215,7 @@ TypeScript fails if a locale is missing a key that English defines.
 
 ## Scope
 
-Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included yet: sync, mobile, Markdown notes, page linking, a plugin loader (the extension API is in place; a WASM runtime will come later). Desktop only (Linux bundles for now).
+Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included yet: sync, mobile, Markdown notes, page linking, a plugin loader (the extension API is in place; a WASM runtime will come later). Desktop only: the release workflow builds Linux (`.deb`, `.rpm`, AppImage), macOS and Windows bundles.
 
 ## License
 

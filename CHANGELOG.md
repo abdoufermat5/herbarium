@@ -6,75 +6,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
-- Tauri 2 + Svelte 5 desktop app for keeping generated HTML pages in a plain-file vault and reviewing them at the right time.
-- Minimal editorial design system: warm monochrome palette with pastel status colors, bundled Geist / Geist Mono / Newsreader fonts, Phosphor icons, hairline borders, and quiet scroll-entry motion. Includes a command palette, toasts, an inspector panel and a review flow.
-- Light and dark themes.
-- English (default) and French interface.
-- Settings page for theme, interface language, library layout and sorting, with automatic preference persistence and the current vault location. Open it from the sidebar, command palette, or `Ctrl+,` / `⌘,`.
-- Import dialog with a staged file list (sizes, remove, duplicate detection), drag-and-drop feedback, and paste-HTML import.
-- Import dialog lets you choose the destination folder when the vault has folders; it starts on the folder you are browsing. `pages.import` takes an optional `folder`.
-- Configurable review system (Settings → Review): editable preset intervals in minutes, hours or days (a review can come back in 30 minutes), a "Done" action that schedules the next review by strategy (next preset, multiply by a factor, or repeat), a longest-interval cap, automatic review of imported pages, and a limit on the review queue size. Stored in `.herbarium/review.json`. New operations `review.complete`, `review.settings` (agents) and `review.configure` (UI only). Review durations are in minutes everywhere: `review.schedule` takes `intervalMinutes`, `pages.create` takes `reviewInMinutes`, and pages carry `intervalMinutes` (sidecars and indexes written with whole `intervalDays` are upgraded automatically; sidecar `schemaVersion` is now 2).
-- The "due" badge refreshes every minute, and review times show the time of day.
-- Desktop notification when a page becomes due for review while Herbarium is running (including when the window is minimized or in the background). Pages already overdue at launch are announced together; each scheduled time is announced once. A review due within the minute triggers its own refresh instead of waiting for the next poll. Toggle in Settings → Review (stored on the device).
-- More settings: editor (font, font size, line spacing, line wrapping, indent width, Tab-key indenting with Shift+Tab outdent, spell check, preview beside/below/hidden, with a live sample), startup screen, default import folder (browsing / last used / vault root), details panel at startup, refresh-on-focus toggle and a "Rescan vault" button. Stored on the device.
-- "Open in editor" button in the HTML editor: Herbarium detects the text editors installed on the system (well-known ones on `PATH` such as VS Code, Cursor, Zed, Sublime Text and Kate, plus any graphical editor or IDE declared in `.desktop` entries, including Flatpak and Snap) and opens the page's file in the one you pick in Settings, or in a custom command (`code --goto {file}`). Changes saved in the other editor are reloaded when you return to the window.
-- Right-click menu in the sidebar file tree: on a folder (new page, new folder, show its pages, expand/collapse), on a page (open, open in the external editor, delete), and on the empty Files area (new page, new folder at the vault root). Keyboard navigable; the context-menu key opens it on the focused row. Deleting asks first in an in-app dialog that names the page and its folder; Cancel is focused by default, and Escape or a click outside cancels.
-- Content validation on import: files renamed to `.html` that are not real HTML are rejected, in both the picker and the backend.
-- Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
-- Themed, draggable title bar (minimize / maximize / close) replacing the default GTK header bar, following the light and dark themes.
-- One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
-- MIT license.
-- README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
-- MCP server (`herbarium mcp`) so AI agents can create, read, search, edit, rewrite, delete and schedule review of pages in the vault, with built-in guidance for writing Herbarium-compatible HTML.
-- Extension API: features register named JSON operations and subscribe to vault events; the desktop UI and the MCP server both run through the same operation registry. Built-in features are implemented as extensions.
-- Sidecar metadata gains `schemaVersion` and an `ext` namespace for extension data, preserved across edits and re-indexing.
-- The app re-syncs with the vault folder when its window regains focus, picking up pages added by agents or other tools.
-
-- Create folders and pages from the sidebar (header buttons, or the hover buttons on a folder), with an inline name field. New pages start from a blank HTML skeleton and open straight away. Empty folders now show in the tree, and the MCP server gains `folders_create`.
-
-- HTML editor in the reader: an Edit button opens the page source beside a live preview. Save with the button or `Ctrl/⌘+S`; invalid HTML is rejected with the reason and your draft is kept.
-- README and the agent instructions spell out what network-on allows: images may come from any `https:` host, which can see when a page is opened.
+- First release: a desktop reader for the HTML pages AI tools generate. Pages stay plain `.html` files plus a JSON sidecar in a folder you own; a SQLite index speeds up search and is rebuilt from the files at any time.
+- Import by drag and drop, file picker, or pasting HTML. A dropped folder tree stages every HTML file with its destination folder, files that are not real HTML are rejected with the reason, and an import can override the vault's CDN default for that batch.
+- Library with a searchable page list: grid or list layout, sorting by relevance, recency, title or next review, bookmarks-free folder and tag chips, and per-page checkboxes for bulk move, tagging, rescheduling and trashing with per-page errors.
+- Full-text search over titles, tags, folders, notes and page text, ranked with BM25 (title strongest) and returned with the matched excerpt highlighted as text — never as raw HTML.
+- Sidebar file tree with inline creation, keyboard navigation (one tab stop, arrows, `Home`/`End`, `Enter`, `F2`, `Delete`), drag a page onto a folder to move it, and folder filtering that includes subfolders.
+- Trash: deleting a page moves it to `.herbarium/trash/<id>/` instead of removing it. Restore puts it back in its original folder (or the root when that folder is gone), purge deletes one entry, and emptying the trash asks first. Deleting in the library always shows one confirmation with an Undo action.
+- HTML editor in the reader: source beside a live preview of the draft in the same sandboxed frame, CodeMirror editing with native undo and find, and `Ctrl/⌘+S` to save.
+- Unsaved-work protection: navigating away, closing the window and the tray's Quit all ask first (Cancel keeps the draft); saving sends the timestamp the page was loaded with and a stale save offers Reload, Keep editing, or an explicitly confirmed Overwrite.
+- External-edit awareness: pages changed on disk by another tool or an agent are picked up when the window regains focus, keeping any draft, and the reader offers the version on disk when a save conflicts.
+- Review system: editable preset intervals in minutes, hours or days, a strategy for the next interval (next preset, multiply, or repeat), a longest-interval cap, automatic review of imported pages, and a queue cap. The Review view shows real totals (due, overdue, reviewed today, all-time), a 14-day forecast and each page's history, and a session walks the due queue with `1` Again, `2` Good, `S` Skip and `Esc` to leave.
+- Desktop notification when a page becomes due while the app is running, with the permission state shown in Settings.
+- Command palette (`Ctrl/⌘ K`) covering the whole app: create pages and folders, import, rescan, open Review, Trash or Settings, toggle the sidebar and details panel, switch language, theme or layout, and act on the open page, plus full-text page search.
+- Settings for vaults (open, create, recent, remove, reveal, rescan, export a copy, close to tray), in-app updates, page isolation (network default), reader appearance and editor, review, startup screen, import destination, and a `?` shortcut reference.
+- Page isolation: every page renders in an `<iframe sandbox="allow-scripts allow-popups">` on a custom `herbarium://` scheme with a backend-injected CSP, cannot navigate away or open remote documents, and its network access is a per-page switch (allowlisted CDNs, or nothing). Web links a page tries to follow are offered for confirmation instead.
+- Light and dark themes that can follow the operating system, and an English / French interface that starts from the OS language.
+- MCP server (`herbarium mcp`) exposing 29 operations to agents — pages (create, read, list, search, update, set HTML, duplicate, bulk update, bulk delete, delete, trash, restore), review (schedule, complete, clear, due, stats, settings), library (folders, tags), network and vault introspection — with structured results, tool annotations and an agent-specific result limit.
+- Extension API: features register JSON operations and subscribe to vault events; the desktop UI and the MCP server both run through the same registry.
+- In-app updates from signed GitHub releases (`tauri-plugin-updater`), with an explicit confirmation and the unsaved-work guards, refusing to check or install in builds compiled without a signing public key.
+- Linux `.deb`, `.rpm` and AppImage bundles, a one-line installer (`install.sh`), GitHub Actions CI on every pull request, and a tag-driven release workflow that runs the checks, builds every platform, verifies the updater manifest and publishes `SHA256SUMS`.
 
 ### Changed
-- Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
-- Backend split into a Cargo workspace: `herbarium-core` (vault, index, extensions), `herbarium-mcp`, and the desktop shell.
-- Folder paths that escape the vault are now rejected instead of silently falling back to the vault root.
-- Type scale (`--fs-*`) and stacking (`--z-*`) tokens replace raw font sizes and z-index values across the UI; the custom Select reuses the shared dropdown styles, and unused native-`select` styles are removed.
+- Sidecar metadata carries `schemaVersion` plus the sidecar `ext` namespace, and review durations are minutes everywhere (`intervalMinutes`); sidecars written by earlier builds with `intervalDays` are upgraded automatically.
+- Agent-visible operations are limited to the ones an agent can use safely: enabling a page's network access, importing, changing review or network settings, and purging the trash are UI-only, while listing and searching default to 50 results for agents.
 
 ### Fixed
-- Preserve newer inspector edits when an in-flight metadata save completes.
-- Pages can no longer navigate their frame to a remote URL (`location.href`, `<meta refresh>`, links), which loaded the remote document without the page's CSP and bypassed the network switch. This holds on Windows too, where WebView2 needs a separate frame-navigation hook.
-- Links in pages work again, safely: a web link a page tries to follow (same-frame or `target="_blank"`) shows a prompt with its URL and opens in the system browser only when you click **Open in browser**. While a prompt is shown, further attempts are ignored so the URL cannot be swapped under the cursor.
-- The app window now runs under a Content-Security-Policy (it had none), limiting scripts to the app's own and connections to its IPC.
-- Turning a page's network access on or off now reloads it under the new policy instead of waiting until it is reopened.
-- Pages whose file name contains spaces, accents or other URL-encoded characters render instead of showing "Page not found".
-- Rescanning picks up pages moved between folders on disk (same modification time) and pages renamed on disk, instead of keeping stale paths or dropping the page.
-- A sidecar JSON that cannot be parsed is no longer overwritten with blank metadata on rescan; the page is indexed from its HTML and the file is left for repair.
-- Two files with the same name in different folders no longer fight over one id: one is indexed deterministically, and moving a page never overwrites another file.
-- Moving or deleting a page reports filesystem failures instead of claiming success; a failed move leaves the page where it was.
-- Pages can no longer be created in or moved to dot-folders (`.herbarium`, `.git`), where the next rescan made them vanish.
-- Saving and deleting pages no longer scans the whole full-text index; existing indexes are migrated once on open.
-- Serving a page no longer blocks the window while a rescan holds the vault.
-- MCP server: a non-UTF-8 line gets a parse error instead of ending the session, requests with an invalid `method` get `-32600`, and JSON-RPC batches are answered.
-- Dropping files onto the import dialog stages them for review instead of importing at once; Escape or a backdrop click no longer closes the dialog mid-import.
-- Escape in a reader field leaves the field instead of closing the page and losing the unsaved draft.
-- A slow search response can no longer replace newer results; the command palette and "reviewed today" use the whole library, not the current search.
-- Retrying after a startup error no longer stacks extra focus listeners and refresh timers.
-- CI's clippy step (`-D warnings`) passes again.
-- Close the command palette before activating commands, exit the reader for navigation commands, and move focus to the destination.
-- Keep Tab, Shift+Tab, and Escape owned by the topmost dialog, with inactive content inert.
-- Improve light and dark theme contrast for muted text, placeholders, primary actions, filter chips, badges, and delete confirmation.
-- Apply shared text-input styling to onboarding, library search, and inspector fields.
-- Show localized review-loading errors with a retry action instead of an incorrect caught-up state.
-- Expose sidebar navigation and filter selection to assistive technology.
-- Keep delete confirmation available until explicitly confirmed or cancelled, without a time limit.
-- Use existing radius tokens for the brand mark and keyboard shortcuts.
-- Visible keyboard focus on settings switches and on highlighted menu and select options.
-- Muted text and placeholders now meet 4.5:1 contrast on tinted surfaces; text fields and selects have borders with at least 3:1 contrast.
-- Sidebar file tree no longer claims ARIA tree semantics it didn't implement; the current page is announced, and the folder animation respects reduced-motion.
-- Small controls (sidebar tools, search clear, interval removers, toast dismiss, extra-small buttons) are at least 24×24px.
-- Sidebar folder actions no longer cover the folder name or show a mismatched background on hover.
-- Card delete confirmation hides the due chip so the buttons fit next to the thumbnail (including in French).
-- The reader announces its saving state, and the network toggle exposes its on/off state.
+- Pages that a rescan finds without a sidecar are treated as untrusted: their network access starts off.
+- A page file moved or renamed on disk is re-indexed instead of keeping a stale path or losing the page, and a sidecar that cannot be parsed is left alone for repair rather than overwritten with blank metadata.
+- Writes to page files, sidecars, review settings and the app config are atomic, so an interrupted save cannot leave a half-written file.
+- Trash entry ids are validated as single path components before any path is joined, recursive scans and folder listings skip directory symlinks, and a page folder that resolves outside the vault cannot serve assets — a vault cannot be escaped through a crafted id or a symlink.
+- Exporting a vault or page writes a temporary archive and replaces the chosen file only after it succeeds, so a failed export no longer truncates the previous archive.
+- `updatedAt` never lags the HTML file it was written from, so saving twice with the value you were handed no longer conflicts with itself, and reading a page that another tool changed returns the timestamp the files actually have.
+- `reviewedToday` stays exact beyond 100 reviews of the same page in one day; scheduling a page does not count as reviewing it, and clearing a schedule keeps the last review.
+- Closing to the tray prompts for unsaved work instead of hiding the window first, and a slow search response can no longer replace newer results.
+
+### Known limitations
+- Desktop only: the release workflow builds Linux (`.deb`, `.rpm`, AppImage), macOS and Windows bundles, but there is no mobile or web build.
+- In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
+- No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
 [Unreleased]: https://github.com/abdoufermat5/herbarium/commits/
