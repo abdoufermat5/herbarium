@@ -6,7 +6,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 /// Version of the sidecar `{id}.json` format written by this build.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 fn schema_version_default() -> u32 {
     SCHEMA_VERSION
@@ -24,7 +24,12 @@ pub struct PageMeta {
     pub note: String,
     pub created_at: i64,
     pub updated_at: i64,
-    pub interval_days: Option<i64>,
+    /// Length of the current review interval, in minutes.
+    pub interval_minutes: Option<i64>,
+    /// Schema 1 sidecars stored `intervalDays`. Read-only; `upgrade` folds it
+    /// into `interval_minutes`, and it is never written back.
+    #[serde(default, rename = "intervalDays", skip_serializing)]
+    pub(crate) legacy_interval_days: Option<i64>,
     pub next_review: Option<i64>,
     pub last_review: Option<i64>,
     pub allow_cdn: bool,
@@ -46,12 +51,23 @@ impl PageMeta {
             note: String::new(),
             created_at: now,
             updated_at: now,
-            interval_days: None,
+            interval_minutes: None,
+            legacy_interval_days: None,
             next_review: None,
             last_review: None,
             allow_cdn: true,
             ext: BTreeMap::new(),
         }
+    }
+}
+
+impl PageMeta {
+    /// Bring metadata read from an older sidecar up to the current schema.
+    pub(crate) fn upgrade(&mut self) {
+        if let Some(days) = self.legacy_interval_days.take() {
+            self.interval_minutes.get_or_insert(days.saturating_mul(1440));
+        }
+        self.schema_version = SCHEMA_VERSION;
     }
 }
 

@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension, Params, Row};
 use crate::models::{PageMeta, TagCount, SCHEMA_VERSION};
 use crate::time::now_secs;
 
-const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_days,next_review,last_review,allow_cdn,ext";
+const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_minutes,next_review,last_review,allow_cdn,ext";
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS pages (
@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS pages (
   note          TEXT NOT NULL DEFAULT '',
   created_at    INTEGER NOT NULL,
   updated_at    INTEGER NOT NULL,
-  interval_days INTEGER,
+  interval_minutes INTEGER,
   next_review   INTEGER,
   last_review   INTEGER,
   allow_cdn     INTEGER NOT NULL DEFAULT 1,
@@ -48,7 +48,8 @@ fn row_to_meta(row: &Row) -> rusqlite::Result<PageMeta> {
         note: row.get(4)?,
         created_at: row.get(5)?,
         updated_at: row.get(6)?,
-        interval_days: row.get(7)?,
+        interval_minutes: row.get(7)?,
+        legacy_interval_days: None,
         next_review: row.get(8)?,
         last_review: row.get(9)?,
         allow_cdn: row.get::<_, i64>(10)? != 0,
@@ -80,7 +81,7 @@ impl Store {
                  ON CONFLICT(id) DO UPDATE SET
                    title=excluded.title, tags=excluded.tags, folder=excluded.folder,
                    note=excluded.note, updated_at=excluded.updated_at,
-                   interval_days=excluded.interval_days, next_review=excluded.next_review,
+                   interval_minutes=excluded.interval_minutes, next_review=excluded.next_review,
                    last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
                    ext=excluded.ext, text_content=excluded.text_content, mtime=excluded.mtime"
             ),
@@ -92,7 +93,7 @@ impl Store {
                 meta.note,
                 meta.created_at,
                 meta.updated_at,
-                meta.interval_days,
+                meta.interval_minutes,
                 meta.next_review,
                 meta.last_review,
                 if meta.allow_cdn { 1 } else { 0 },
@@ -279,6 +280,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_ext {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN ext TEXT NOT NULL DEFAULT '{}'")?;
     }
+    // Schema 1 counted whole days.
+    let has_days = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'interval_days'")?
+        .exists([])?;
+    if has_days {
+        conn.execute_batch(
+            "ALTER TABLE pages RENAME COLUMN interval_days TO interval_minutes;
+             UPDATE pages SET interval_minutes = interval_minutes * 1440 WHERE interval_minutes IS NOT NULL;",
+        )?;
+    }
     Ok(())
 }
 
@@ -340,6 +351,25 @@ mod tests {
         let counts: Vec<_> = store.tag_counts().unwrap().into_iter()
             .map(|entry| (entry.tag, entry.count)).collect();
         assert_eq!(counts, vec![("web".into(), 1)]);
+    }
+
+    #[test]
+    fn migrate_turns_a_day_count_column_into_minutes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE pages (id TEXT PRIMARY KEY, interval_days INTEGER);
+             INSERT INTO pages VALUES ('a', 3), ('b', NULL);",
+        )
+        .unwrap();
+        migrate(&conn).unwrap();
+        let got: Vec<(String, Option<i64>)> = conn
+            .prepare("SELECT id, interval_minutes FROM pages ORDER BY id")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(got, vec![("a".into(), Some(4320)), ("b".into(), None)]);
     }
 
     #[test]

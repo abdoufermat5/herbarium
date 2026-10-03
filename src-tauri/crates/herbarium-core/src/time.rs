@@ -7,3 +7,4 @@ pub fn now_secs() -> i64 {
 }
 
 pub const DAY_MS: i64 = 86_400_000;
+pub const MINUTE_MS: i64 = 60_000;

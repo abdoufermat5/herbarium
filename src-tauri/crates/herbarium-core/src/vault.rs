@@ -98,7 +98,9 @@ pub fn read_html(vault: &Path, id: &str, folder: Option<&str>) -> VaultResult<St
 
 fn read_meta(vault: &Path, id: &str, folder: Option<&str>) -> Option<PageMeta> {
     let raw = fs::read_to_string(meta_path(vault, id, folder)).ok()?;
-    serde_json::from_str(&raw).ok()
+    let mut meta: PageMeta = serde_json::from_str(&raw).ok()?;
+    meta.upgrade();
+    Some(meta)
 }
 
 /// Delete both files, then prune empty folders up the tree (best effort).
@@ -335,7 +337,7 @@ mod tests {
         // Stage 5 — "Review in 3 days".
         let future = now_ms() + 3 * DAY_MS;
         let mut due_meta = found.clone();
-        due_meta.interval_days = Some(3);
+        due_meta.interval_minutes = Some(3 * 1440);
         due_meta.next_review = Some(future);
         due_meta.last_review = Some(now_ms());
         due_meta.updated_at = now_ms();

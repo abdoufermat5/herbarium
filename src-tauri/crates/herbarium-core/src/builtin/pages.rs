@@ -3,7 +3,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
-use super::review::apply_schedule;
+use super::review::{apply_schedule, load_settings};
 use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{events, Ctx, Extension, OpResult, Operation, Registry};
@@ -21,13 +21,15 @@ struct CreateArgs {
     folder: Option<String>,
     tags: Option<Vec<String>>,
     note: Option<String>,
-    review_in_days: Option<i64>,
+    review_in_minutes: Option<i64>,
     allow_cdn: Option<bool>,
 }
 
 #[derive(Deserialize)]
 struct ImportArgs {
     files: Vec<ImportFile>,
+    /// Destination folder for every file; omitted or blank is the vault root.
+    folder: Option<String>,
 }
 
 #[derive(Deserialize, Default, Clone, Copy)]
@@ -109,8 +111,8 @@ fn create(ctx: &mut Ctx, args: CreateArgs, fallback_title: Option<&str>) -> OpRe
     meta.tags = clean_tags(args.tags.unwrap_or_default());
     meta.note = args.note.unwrap_or_default();
     meta.allow_cdn = args.allow_cdn.unwrap_or(true);
-    if let Some(days) = args.review_in_days {
-        apply_schedule(&mut meta, days);
+    if let Some(minutes) = args.review_in_minutes {
+        apply_schedule(&mut meta, minutes);
     }
 
     let store = ctx.store;
@@ -141,7 +143,7 @@ impl Extension for Pages {
                     "folder": { "type": "string", "description": "Folder path such as `rust/cargo`; created if missing. Omit for the vault root." },
                     "tags": { "type": "array", "items": { "type": "string" } },
                     "note": { "type": "string", "description": "Personal note shown next to the page." },
-                    "reviewInDays": { "type": "integer", "minimum": 1, "description": "Schedule a review this many days from now." },
+                    "reviewInMinutes": { "type": "integer", "minimum": 1, "description": "Schedule a review this many minutes from now (1 day = 1440)." },
                     "allowCdn": { "type": "boolean", "description": "Allow known CDNs (default true). False blocks all network access." }
                 }),
                 &["html"],
@@ -152,7 +154,7 @@ impl Extension for Pages {
         r.add(
             Operation::new(
                 "pages.import",
-                "Import several HTML files at once; invalid files are reported, not fatal.",
+                "Import several HTML files at once into one folder; invalid files are reported, not fatal. Pages are scheduled for review if the vault's review settings say so.",
                 object(
                     json!({
                         "files": {
@@ -161,16 +163,19 @@ impl Extension for Pages {
                                 "name": { "type": ["string", "null"] },
                                 "content": { "type": "string" }
                             }), &["content"])
-                        }
+                        },
+                        "folder": { "type": ["string", "null"], "description": "Destination folder such as `rust/cargo`; created if missing. Omit for the vault root." }
                     }),
                     &["files"],
                 ),
                 |ctx: &mut Ctx, a: ImportArgs| {
+                    let folder = vault::clean_folder(a.folder.as_deref())?;
+                    let review_in_minutes = load_settings(&ctx.store.vault).import_review_minutes;
                     let mut result = ImportResult { imported: 0, errors: Vec::new() };
                     for f in a.files {
                         let label = f.name.clone().unwrap_or_else(|| "pasted content".into());
                         let stem = f.name.as_deref().map(|n| n.rsplit_once('.').map_or(n, |(s, _)| s).to_string());
-                        let args = CreateArgs { html: f.content, ..Default::default() };
+                        let args = CreateArgs { html: f.content, folder: folder.clone(), review_in_minutes, ..Default::default() };
                         match create(ctx, args, stem.as_deref()) {
                             Ok(_) => result.imported += 1,
                             Err(e) => result.errors.push(format!("{label}: {e}")),

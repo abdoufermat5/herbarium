@@ -34,11 +34,11 @@ fn create_stores_files_indexes_text_and_schedules_review() {
     let mut host = Host::new();
     open(&mut host, &vault);
 
-    let page = create(&host, json!({ "html": DOC, "folder": "rust/cargo", "tags": [" rust ", "rust", ""], "reviewInDays": 3 }));
+    let page = create(&host, json!({ "html": DOC, "folder": "rust/cargo", "tags": [" rust ", "rust", ""], "reviewInMinutes": 4320 }));
     let id = page["id"].as_str().unwrap();
     assert_eq!(page["title"], "Cargo features");
     assert_eq!(page["tags"], json!(["rust"]));
-    assert_eq!(page["intervalDays"], 3);
+    assert_eq!(page["intervalMinutes"], 4320);
     assert!(vault.join(format!("rust/cargo/{id}.html")).is_file());
     assert!(vault.join(format!("rust/cargo/{id}.json")).is_file());
 
@@ -153,7 +153,7 @@ fn extension_data_survives_core_edits_and_reindexing() {
     host.call(Caller::Agent, "stars.add", json!({ "id": id })).unwrap();
     for (op, args) in [
         ("pages.update", json!({ "id": id, "note": "n", "folder": "x" })),
-        ("review.schedule", json!({ "id": id, "intervalDays": 7 })),
+        ("review.schedule", json!({ "id": id, "intervalMinutes": 10080 })),
         ("network.set", json!({ "id": id, "allowCdn": false })),
         ("pages.set_html", json!({ "id": id, "html": DOC })),
     ] {
@@ -168,7 +168,7 @@ fn extension_data_survives_core_edits_and_reindexing() {
     open(&mut fresh, &vault);
     let got = fresh.call(Caller::Agent, "pages.get", json!({ "id": id })).unwrap();
     assert_eq!(got["meta"]["ext"]["stars"]["starred"], true);
-    assert_eq!(got["meta"]["schemaVersion"], 1);
+    assert_eq!(got["meta"]["schemaVersion"], 2);
 
     let _ = std::fs::remove_dir_all(&vault);
 }
@@ -203,6 +203,128 @@ fn empty_folders_are_created_listed_and_confined_to_the_vault() {
         assert!(host.call(Caller::Agent, "folders.create", json!({ "path": bad })).is_err(), "{bad}");
     }
     assert!(!vault.parent().unwrap().join("x").exists());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn import_lands_in_the_chosen_folder_and_applies_import_scheduling() {
+    let vault = temp_vault("import");
+    let mut host = Host::new();
+    open(&mut host, &vault);
+    host.call(Caller::Ui, "folders.create", json!({ "path": "rust" })).unwrap();
+
+    let files = json!([{ "name": "a.html", "content": DOC }, { "name": "bad.html", "content": "plain text" }]);
+    let res = host.call(Caller::Ui, "pages.import", json!({ "files": files, "folder": "rust" })).unwrap();
+    assert_eq!(res["imported"], 1);
+    assert_eq!(res["errors"].as_array().unwrap().len(), 1);
+    let listed = host.call(Caller::Ui, "pages.list", json!({})).unwrap();
+    assert_eq!(listed[0]["folder"], "rust");
+    assert_eq!(listed[0]["intervalMinutes"], Value::Null, "imports are not scheduled by default");
+
+    let root = host.call(Caller::Ui, "pages.import", json!({ "files": [{ "content": DOC }], "folder": null })).unwrap();
+    assert_eq!(root["imported"], 1);
+    let all = host.call(Caller::Ui, "pages.list", json!({})).unwrap();
+    assert_eq!(all.as_array().unwrap().iter().filter(|p| p["folder"].is_null()).count(), 1);
+
+    assert!(host.call(Caller::Ui, "pages.import", json!({ "files": [], "folder": "../x" })).is_err());
+
+    host.call(Caller::Ui, "review.configure", json!({ "importReviewMinutes": 30 })).unwrap();
+    host.call(Caller::Ui, "pages.import", json!({ "files": [{ "content": DOC }], "folder": "rust" })).unwrap();
+    let scheduled = host.call(Caller::Ui, "pages.list", json!({ "folder": "rust" })).unwrap();
+    assert!(scheduled.as_array().unwrap().iter().any(|p| p["intervalMinutes"] == 30));
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn review_settings_persist_validate_and_drive_completion_and_the_queue() {
+    let vault = temp_vault("review");
+    let mut host = Host::new();
+    open(&mut host, &vault);
+
+    let defaults = host.call(Caller::Agent, "review.settings", json!({})).unwrap();
+    assert_eq!(defaults["presets"], json!([1440, 4320, 10080, 43200]));
+    assert_eq!(defaults["strategy"], "ladder");
+    assert!(!host.operations(Caller::Agent).any(|op| op.name == "review.configure"), "agents read, the user writes");
+
+    assert!(host.call(Caller::Ui, "review.configure", json!({ "presets": [] })).is_err());
+    assert!(host.call(Caller::Ui, "review.configure", json!({ "queueLimit": 0 })).is_err());
+    let unchanged = host.call(Caller::Agent, "review.settings", json!({})).unwrap();
+    assert_eq!(unchanged, defaults, "a rejected update changes nothing");
+
+    host.call(Caller::Ui, "review.configure", json!({ "presets": [5, 2, 2, 10], "queueLimit": 1 })).unwrap();
+    let page = create(&host, json!({ "html": DOC }));
+    let id = page["id"].as_str().unwrap().to_string();
+    let steps: Vec<Value> = (0..4)
+        .map(|_| host.call(Caller::Agent, "review.complete", json!({ "id": id })).unwrap()["intervalMinutes"].clone())
+        .collect();
+    assert_eq!(steps, vec![json!(2), json!(5), json!(10), json!(10)], "ladder over the sorted presets, then stays on top");
+    assert!(host.call(Caller::Agent, "review.complete", json!({ "id": "missing" })).is_err());
+
+    // Settings live in the vault, so a freshly opened host sees them.
+    let mut fresh = Host::new();
+    open(&mut fresh, &vault);
+    let saved = fresh.call(Caller::Agent, "review.settings", json!({})).unwrap();
+    assert_eq!(saved["presets"], json!([2, 5, 10]));
+    assert_eq!(saved["queueLimit"], 1);
+
+    // The queue is capped, and `review.due` only lists pages that are due.
+    let other = create(&host, json!({ "html": DOC }));
+    for p in [&page, &other] {
+        let mut meta = host.call(Caller::Agent, "pages.get", json!({ "id": p["id"] })).unwrap()["meta"].clone();
+        meta["nextReview"] = json!(1);
+        let store = host.store().unwrap();
+        let parsed: herbarium_core::models::PageMeta = serde_json::from_value(meta).unwrap();
+        store.upsert(&parsed, "x", 0).unwrap();
+    }
+    let due = host.call(Caller::Agent, "review.due", json!({})).unwrap();
+    assert_eq!(due.as_array().unwrap().len(), 1, "queueLimit caps the queue");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn reviews_can_be_scheduled_in_minutes() {
+    let vault = temp_vault("minutes");
+    let mut host = Host::new();
+    open(&mut host, &vault);
+
+    let page = create(&host, json!({ "html": DOC }));
+    let meta = host.call(Caller::Agent, "review.schedule", json!({ "id": page["id"], "intervalMinutes": 30 })).unwrap();
+    assert_eq!(meta["intervalMinutes"], 30);
+    let wait = meta["nextReview"].as_i64().unwrap() - meta["lastReview"].as_i64().unwrap();
+    assert_eq!(wait, 30 * 60_000, "due in exactly 30 minutes");
+    let due = host.call(Caller::Agent, "review.due", json!({})).unwrap();
+    assert!(due.as_array().unwrap().is_empty(), "not due yet");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn sidecars_and_indexes_written_with_whole_days_are_upgraded() {
+    let vault = temp_vault("legacy");
+    let mut host = Host::new();
+    open(&mut host, &vault);
+    let page = create(&host, json!({ "html": DOC, "reviewInMinutes": 1440 }));
+    let id = page["id"].as_str().unwrap().to_string();
+
+    // Rewrite the sidecar the way a schema-1 build stored it.
+    let sidecar = vault.join(format!("{id}.json"));
+    let mut raw: Value = serde_json::from_str(&std::fs::read_to_string(&sidecar).unwrap()).unwrap();
+    let obj = raw.as_object_mut().unwrap();
+    obj.remove("intervalMinutes");
+    obj.insert("intervalDays".into(), json!(3));
+    obj.insert("schemaVersion".into(), json!(1));
+    std::fs::write(&sidecar, raw.to_string()).unwrap();
+
+    std::fs::remove_dir_all(vault.join(".herbarium")).unwrap();
+    let mut fresh = Host::new();
+    open(&mut fresh, &vault);
+    let got = fresh.call(Caller::Agent, "pages.get", json!({ "id": id })).unwrap();
+    assert_eq!(got["meta"]["intervalMinutes"], 3 * 1440);
+    assert_eq!(got["meta"]["schemaVersion"], 2);
+    assert!(got["meta"].get("intervalDays").is_none());
 
     let _ = std::fs::remove_dir_all(&vault);
 }
