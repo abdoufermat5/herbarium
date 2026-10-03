@@ -145,18 +145,32 @@ export async function refreshAll() {
   }
 }
 
-export async function reloadPages() {
-  app.busy = true;
+/** `quiet` skips the busy indicator, for background refreshes. */
+export async function reloadPages(quiet = false) {
+  if (!quiet) app.busy = true;
   try {
     const q = app.search.trim();
     app.pages = q ? await api.searchPages(q) : await api.listPages();
     await refreshAll();
   } catch (e) {
     console.error(e);
-    toast(t("toast.loadFailed"), "error");
+    if (!quiet) toast(t("toast.loadFailed"), "error");
   } finally {
-    app.busy = false;
+    if (!quiet) app.busy = false;
   }
+}
+
+/** Pick up changes made while the window was in the background (agents over
+ *  MCP, edits or sync tools touching the vault folder). */
+async function resync() {
+  if (!app.config?.vaultPath || app.busy) return;
+  try {
+    await api.rescan();
+  } catch (e) {
+    console.error(e);
+    return;
+  }
+  await reloadPages(true);
 }
 
 export async function initApp() {
@@ -172,6 +186,7 @@ export async function initApp() {
     app.initError = String(e);
   } finally {
     app.initialized = true;
+    window.addEventListener("focus", () => void resync());
   }
 }
 
