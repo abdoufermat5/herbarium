@@ -37,6 +37,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
 - Backend split into a Cargo workspace: `herbarium-core` (vault, index, extensions), `herbarium-mcp`, and the desktop shell.
 - Folder paths that escape the vault are now rejected instead of silently falling back to the vault root.
+- Type scale (`--fs-*`) and stacking (`--z-*`) tokens replace raw font sizes and z-index values across the UI; the custom Select reuses the shared dropdown styles, and unused native-`select` styles are removed.
 
 ### Fixed
 - Preserve newer inspector edits when an in-flight metadata save completes.
@@ -48,5 +49,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Expose sidebar navigation and filter selection to assistive technology.
 - Keep delete confirmation available until explicitly confirmed or cancelled, without a time limit.
 - Use existing radius tokens for the brand mark and keyboard shortcuts.
+- Visible keyboard focus on settings switches and on highlighted menu and select options.
+- Muted text and placeholders now meet 4.5:1 contrast on tinted surfaces; text fields and selects have borders with at least 3:1 contrast.
+- Sidebar file tree no longer claims ARIA tree semantics it didn't implement; the current page is announced, and the folder animation respects reduced-motion.
+- Small controls (sidebar tools, search clear, interval removers, toast dismiss, extra-small buttons) are at least 24×24px.
+- Sidebar folder actions no longer cover the folder name or show a mismatched background on hover.
+- Card delete confirmation hides the due chip so the buttons fit next to the thumbnail (including in French).
+- The reader announces its saving state, and the network toggle exposes its on/off state.
 
 [Unreleased]: https://github.com/abdoufermat5/herbarium/commits/

@@ -32,6 +32,6 @@
   .note {
     margin-top: 10px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 </style>

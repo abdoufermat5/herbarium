@@ -147,12 +147,12 @@
   }
 
   h1 {
-    font-size: 52px;
+    font-size: var(--fs-5xl);
     letter-spacing: -0.035em;
   }
 
   .hero p {
-    font-size: 15px;
+    font-size: var(--fs-md);
     color: var(--muted);
     max-width: 460px;
   }
@@ -186,7 +186,7 @@
 
   h2 {
     font-family: var(--font-display);
-    font-size: 22px;
+    font-size: var(--fs-xl);
     font-weight: 500;
     letter-spacing: -0.02em;
     line-height: 1.2;
@@ -194,7 +194,7 @@
 
   .option p {
     flex: 1;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
 
@@ -214,7 +214,7 @@
     border-radius: var(--radius-sm);
     background: var(--danger-soft);
     color: var(--danger);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     max-width: 480px;
   }
 

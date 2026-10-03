@@ -352,6 +352,7 @@
         <button
           class="btn btn-sm net"
           class:on={page.meta.allowCdn}
+          aria-pressed={page.meta.allowCdn}
           onclick={toggleNetwork}
           title={page.meta.allowCdn
             ? t("read.netOnHint")
@@ -414,7 +415,7 @@
         <span class="rb-last">{t("read.lastReviewed", { when: timeAgo(page.meta.lastReview) })}</span>
       {/if}
       {#if saving}
-        <span class="spinner" aria-label={t("read.saving")}></span>
+        <span class="spinner" role="status" aria-label={t("read.saving")}></span>
       {/if}
     </div>
 
@@ -633,7 +634,7 @@
 
   .title {
     font-family: var(--font-display);
-    font-size: 20px;
+    font-size: var(--fs-lg);
     font-weight: 500;
     line-height: 1.2;
     letter-spacing: -0.02em;
@@ -651,7 +652,7 @@
     align-items: center;
     gap: 4px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .actions {
@@ -681,7 +682,7 @@
     padding: 8px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--raised);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--muted);
     flex: none;
   }
@@ -698,7 +699,7 @@
     gap: 5px;
     color: var(--text);
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .rb-date.overdue {
@@ -719,7 +720,7 @@
 
   .rb-last {
     margin-left: auto;
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
 
   .content {
@@ -742,7 +743,7 @@
     padding: 8px 16px;
     background: var(--warn-soft);
     color: var(--warn);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     border-bottom: 1px solid var(--warn-border);
     flex: none;
   }
@@ -762,7 +763,7 @@
     justify-content: center;
     gap: 10px;
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     background: var(--surface);
     z-index: 1;
   }
@@ -772,7 +773,7 @@
     width: 100%;
     height: 100%;
     border: none;
-    background: #ffffff;
+    background: var(--page-canvas);
     opacity: 0;
     transition: opacity var(--t-slow) var(--ease-out);
     display: block;
@@ -818,7 +819,7 @@
     padding: 6px 12px;
     border-bottom: 1px solid var(--border);
     background: var(--raised);
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
   .editor-bar .grow {
@@ -890,7 +891,7 @@
     justify-content: space-between;
     gap: 10px;
     padding: 8px 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     border-bottom: 1px solid var(--border);
   }
 
@@ -906,7 +907,7 @@
     margin: 0;
     color: var(--text);
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     text-align: right;
   }
 
@@ -921,7 +922,7 @@
   }
 
   .hint {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
 
@@ -946,7 +947,7 @@
 
   .err strong {
     font-family: var(--font-display);
-    font-size: 22px;
+    font-size: var(--fs-xl);
     font-weight: 500;
     letter-spacing: -0.02em;
   }

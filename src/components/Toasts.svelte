@@ -28,7 +28,7 @@
     position: fixed;
     right: 14px;
     bottom: 14px;
-    z-index: 70;
+    z-index: var(--z-toast);
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -61,7 +61,7 @@
   }
   .toast-msg {
     flex: 1;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-soft);
     overflow-wrap: anywhere;
   }
@@ -69,8 +69,8 @@
     flex: none;
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-xs);
     color: var(--muted);
   }

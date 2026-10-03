@@ -209,10 +209,10 @@
     min-width: 0;
   }
   h1 {
-    font-size: 40px;
+    font-size: var(--fs-4xl);
   }
   .sub {
-    font-size: 14px;
+    font-size: var(--fs-base);
     color: var(--muted);
     max-width: 560px;
   }
@@ -272,7 +272,7 @@
     gap: 4px;
   }
   .title {
-    font-size: 14px;
+    font-size: var(--fs-base);
     font-weight: 500;
     color: var(--text);
   }
@@ -287,11 +287,11 @@
     align-items: center;
     gap: 4px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
   .date {
     font-family: var(--mono);
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
   }
 

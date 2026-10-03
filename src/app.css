@@ -17,14 +17,15 @@
   --border: #eaeaea;
   --border-strong: #e2e1dd;
   --border-hover: #cfcdc8;
-  --placeholder: #737270;
+  /* Form-field edges need ≥3:1 against the surface (WCAG 1.4.11) */
+  --border-input: #8f8e89;
+  --border-input-hover: #6b6a68;
+  --placeholder: #6b6a68;
   --scroll-thumb: #dddcd8;
   --scroll-thumb-hover: #c4c3be;
   --scroll-thumb-active: #a9a8a3;
   --scroll-track: transparent;
   --scroll-track-hover: rgba(0, 0, 0, 0.03);
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 256 256' fill='%23737270'%3E%3Cpath d='M216.49 104.49l-80 80a12 12 0 0 1-17 0l-80-80a12 12 0 0 1 17-17L128 159l71.51-71.52a12 12 0 0 1 17 17Z'/%3E%3C/svg%3E");
-  --select-arrow-hover: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 256 256' fill='%232f3437'%3E%3Cpath d='M216.49 104.49l-80 80a12 12 0 0 1-17 0l-80-80a12 12 0 0 1 17-17L128 159l71.51-71.52a12 12 0 0 1 17 17Z'/%3E%3C/svg%3E");
   --scrim: rgba(25, 25, 24, 0.18);
   --selection: #e1f3fe;
   /* Ambient warm light spot behind page headers */
@@ -33,7 +34,7 @@
   /* Ink — never pure black */
   --text: #2f3437;
   --text-soft: #50555a;
-  --muted: #737270;
+  --muted: #6b6a68;
 
   /* Accent — ink, not color. Color is reserved for meaning. */
   --accent: #2f3437;
@@ -47,6 +48,9 @@
   /* Botanical spot color — page thumbnails and the brand mark only */
   --leaf: #346538;
   --leaf-soft: #edf3ec;
+
+  /* Saved pages bring their own styles and expect a white canvas in both themes */
+  --page-canvas: #ffffff;
 
   /* Status — muted pastels */
   --danger: #9f2f2d;
@@ -78,6 +82,17 @@
   --font: "Geist Variable", "SF Pro Display", "Helvetica Neue", ui-sans-serif, sans-serif;
   --font-display: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
   --mono: "Geist Mono Variable", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-base: 14px;
+  --fs-md: 15px;
+  --fs-lg: 19px;
+  --fs-xl: 22px;
+  --fs-2xl: 24px;
+  --fs-3xl: 30px;
+  --fs-4xl: 40px;
+  --fs-5xl: 52px;
 
   /* Motion — quiet */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -90,6 +105,13 @@
   --inspector-w: 320px;
   --topbar-h: 54px;
   --content-w: 1080px;
+
+  /* Stacking */
+  --z-modal: 40;
+  --z-palette: 50;
+  --z-popover: 60;
+  --z-overlay: 70;
+  --z-toast: 80;
 }
 
 /* ============ Dark theme ============ */
@@ -105,14 +127,14 @@
   --border: #2c2c2b;
   --border-strong: #363635;
   --border-hover: #4a4a48;
+  --border-input: #706f6c;
+  --border-input-hover: #8a8985;
   --placeholder: #9b9a97;
   --scroll-thumb: #3a3a38;
   --scroll-thumb-hover: #4f4f4c;
   --scroll-thumb-active: #66655f;
   --scroll-track: transparent;
   --scroll-track-hover: rgba(255, 255, 255, 0.03);
-  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 256 256' fill='%239b9a97'%3E%3Cpath d='M216.49 104.49l-80 80a12 12 0 0 1-17 0l-80-80a12 12 0 0 1 17-17L128 159l71.51-71.52a12 12 0 0 1 17 17Z'/%3E%3C/svg%3E");
-  --select-arrow-hover: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 256 256' fill='%23e6e5e3'%3E%3Cpath d='M216.49 104.49l-80 80a12 12 0 0 1-17 0l-80-80a12 12 0 0 1 17-17L128 159l71.51-71.52a12 12 0 0 1 17 17Z'/%3E%3C/svg%3E");
   --scrim: rgba(0, 0, 0, 0.45);
   --selection: #1e3a50;
   --glow: rgba(255, 244, 222, 0.025);
@@ -171,7 +193,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
-  font-size: 14px;
+  font-size: var(--fs-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -200,8 +222,7 @@ button:disabled {
 }
 
 input,
-textarea,
-select {
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -300,7 +321,7 @@ body,
 
 /* Small uppercase section label */
 .eyebrow {
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   line-height: 1.4;
   text-transform: uppercase;
@@ -360,7 +381,7 @@ body,
   background: var(--raised);
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   line-height: 1;
 }
 
@@ -392,7 +413,7 @@ body,
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   line-height: 1.2;
   white-space: nowrap;
@@ -451,14 +472,15 @@ body,
 
 .btn-sm {
   padding: 5px 10px;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   gap: 5px;
 }
 
 .btn-xs {
+  min-height: 24px;
   padding: 2px 7px;
   font-family: var(--mono);
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   gap: 4px;
   border-radius: var(--radius-xs);
 }
@@ -519,7 +541,7 @@ body,
   border-radius: 9999px;
   background: var(--info-soft);
   color: var(--info);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   line-height: 1.7;
   text-transform: uppercase;
@@ -558,7 +580,7 @@ body,
   background: var(--warn-soft);
   color: var(--warn);
   font-family: var(--mono);
-  font-size: 10.5px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
 }
 
@@ -579,7 +601,7 @@ body,
 }
 
 .field > label {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--muted);
 }
@@ -588,11 +610,10 @@ input[type="text"],
 input[type="search"],
 input[type="number"],
 input[type="url"],
-textarea,
-select {
+textarea {
   width: 100%;
   padding: 8px 10px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--text);
@@ -603,14 +624,12 @@ select {
 }
 
 input:hover:not(:disabled),
-textarea:hover:not(:disabled),
-select:hover:not(:disabled) {
-  border-color: var(--border-hover);
+textarea:hover:not(:disabled) {
+  border-color: var(--border-input-hover);
 }
 
 input:focus,
-textarea:focus,
-select:focus {
+textarea:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-ring);
@@ -620,44 +639,6 @@ textarea {
   resize: vertical;
   min-height: 64px;
   line-height: 1.6;
-}
-
-select {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  cursor: pointer;
-  font-size: 13.5px;
-  font-weight: 500;
-  line-height: 1.4;
-  padding: 7px 32px 7px 11px;
-  background-color: var(--surface);
-  background-image: var(--select-arrow);
-  background-repeat: no-repeat;
-  background-position: right 10px center;
-  background-size: 12px 12px;
-}
-
-select:hover:not(:disabled) {
-  background-color: var(--raised);
-  background-image: var(--select-arrow-hover);
-}
-
-select:focus {
-  background-color: var(--surface);
-  background-image: var(--select-arrow-hover);
-}
-
-select:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-  background-color: var(--sunken);
-}
-
-select option {
-  background-color: var(--surface);
-  color: var(--text);
-  font-weight: normal;
 }
 
 /* ============ Dropdown System ============ */
@@ -679,7 +660,7 @@ select option {
   border-radius: var(--radius);
   box-shadow: var(--shadow-lg);
   padding: 4px;
-  z-index: 60;
+  z-index: var(--z-popover);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -713,7 +694,7 @@ select option {
   border: none;
   background: transparent;
   color: var(--text-soft);
-  font-size: 13px;
+  font-size: var(--fs-sm);
   border-radius: var(--radius-xs);
   cursor: pointer;
   text-align: left;
@@ -729,6 +710,12 @@ select option {
   outline: none;
   background: var(--sunken);
   color: var(--text);
+}
+
+/* Keyboard-driven highlight needs an edge, not just a faint fill */
+.dropdown-item:focus-visible,
+.dropdown-item.highlighted {
+  box-shadow: inset 0 0 0 1px var(--border-hover);
 }
 
 .dropdown-item.active {
@@ -766,7 +753,7 @@ select option {
 
 .dropdown-header {
   padding: 6px 10px 4px;
-  font-size: 11px;
+  font-size: var(--fs-2xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -784,13 +771,13 @@ select option {
   padding: 96px 20px;
   text-align: center;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-sm);
 }
 
 .empty strong {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 24px;
+  font-size: var(--fs-2xl);
   letter-spacing: -0.02em;
   line-height: 1.2;
   color: var(--text);

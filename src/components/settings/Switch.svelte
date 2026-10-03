@@ -27,7 +27,7 @@
     width: 38px;
     height: 22px;
     padding: 0;
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-input);
     border-radius: 999px;
     background: var(--sunken);
     cursor: pointer;
@@ -37,11 +37,11 @@
       box-shadow var(--t-fast) var(--ease-out);
   }
   .switch:hover:not(:disabled) {
-    border-color: var(--border-hover);
+    border-color: var(--border-input-hover);
   }
   .switch:focus-visible {
-    outline: none;
-    box-shadow: 0 0 0 3px var(--accent-ring);
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
   }
   .switch:disabled {
     opacity: 0.45;

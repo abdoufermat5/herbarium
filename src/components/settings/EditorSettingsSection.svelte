@@ -186,7 +186,7 @@
   .command {
     height: 36px;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
   .sample-row {
     padding: 20px 28px;

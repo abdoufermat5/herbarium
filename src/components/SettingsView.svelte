@@ -173,18 +173,18 @@
     min-width: 0;
   }
   h1 {
-    font-size: 40px;
+    font-size: var(--fs-4xl);
   }
   .sub {
     color: var(--muted);
-    font-size: 14px;
+    font-size: var(--fs-base);
   }
   .save-hint {
     display: flex;
     align-items: center;
     gap: 7px;
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--fs-xs);
     padding-bottom: 8px;
   }
 

@@ -401,7 +401,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    z-index: 40;
+    z-index: var(--z-modal);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -433,7 +433,7 @@
   }
 
   h2 {
-    font-size: 26px;
+    font-size: var(--fs-2xl);
   }
 
   .tabs {
@@ -445,7 +445,7 @@
   .tab {
     padding: 6px 0 8px;
     margin-bottom: -1px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     font-weight: 500;
     color: var(--muted);
     border-bottom: 1.5px solid transparent;
@@ -513,12 +513,12 @@
 
   .dropzone strong {
     color: var(--text);
-    font-size: 14px;
+    font-size: var(--fs-base);
     font-weight: 500;
   }
 
   .dropzone span {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .staged {
@@ -537,7 +537,7 @@
     align-items: center;
     gap: 8px;
     padding: 4px 6px 4px 10px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
 
@@ -562,7 +562,7 @@
     width: 100%;
     min-height: 130px;
     font-family: var(--mono);
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
 
   .foot {
@@ -575,7 +575,7 @@
   .message {
     flex: 1;
     min-width: 0;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--muted);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -607,7 +607,7 @@
   }
 
   .dest-label {
-    font-size: 12px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     color: var(--muted);
   }

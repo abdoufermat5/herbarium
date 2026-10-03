@@ -90,7 +90,7 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: var(--fs-xs);
   }
   .chip-label {
     overflow: hidden;
@@ -102,8 +102,9 @@
     flex: none;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
+    margin: -2px -2px -2px 0;
     border-radius: 50%;
     color: var(--muted);
   }

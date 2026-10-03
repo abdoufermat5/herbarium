@@ -213,7 +213,7 @@
               </span>
             </button>
             <span class="page-side">
-              {#if due}
+              {#if due && confirmDelId !== p.id}
                 <span
                   class="chip due"
                   class:chip-warn={due.hot && !due.overdue}
@@ -282,7 +282,7 @@
     gap: 10px;
   }
   h1 {
-    font-size: 40px;
+    font-size: var(--fs-4xl);
     padding-bottom: 2px;
   }
   .head-meta {
@@ -295,7 +295,7 @@
   }
   .count {
     font-family: var(--mono);
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
   }
 
   .toolbar {
@@ -340,8 +340,8 @@
   .clear {
     position: absolute;
     right: 6px;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     display: grid;
     place-items: center;
     border-radius: var(--radius-xs);
@@ -407,7 +407,7 @@
   }
   .page-title {
     font-family: var(--font-display);
-    font-size: 19px;
+    font-size: var(--fs-lg);
     font-weight: 500;
     line-height: 1.25;
     letter-spacing: -0.015em;
@@ -420,7 +420,7 @@
     overflow-wrap: anywhere;
   }
   .note {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     line-height: 1.55;
     color: var(--muted);
     display: -webkit-box;
@@ -442,16 +442,22 @@
     align-items: center;
     gap: 4px;
     margin-right: 2px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
   .page-side {
     position: absolute;
     top: 20px;
     right: 18px;
+    left: 66px;
     display: flex;
+    justify-content: flex-end;
     align-items: center;
     gap: 4px;
+    pointer-events: none;
+  }
+  .page-side > :global(*) {
+    pointer-events: auto;
   }
 
   .del {
@@ -508,7 +514,7 @@
   }
   .list .page-title {
     font-family: var(--font);
-    font-size: 14px;
+    font-size: var(--fs-base);
     letter-spacing: 0;
     -webkit-line-clamp: 1;
     line-clamp: 1;
@@ -516,7 +522,7 @@
   .list .note {
     -webkit-line-clamp: 1;
     line-clamp: 1;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
   }
   .list .meta {
     margin-top: 2px;

@@ -51,7 +51,7 @@
   }
   .vault p {
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-sm);
   }
   .vault-path {
     display: flex;
@@ -64,12 +64,12 @@
     border-radius: var(--radius-sm);
   }
   .vault-path span {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
   }
   .vault-path code {
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
   .rescan {

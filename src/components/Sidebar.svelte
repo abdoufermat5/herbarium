@@ -26,6 +26,14 @@
 
   let expanded = $state(loadExpanded());
 
+  const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+  let reduceMotion = $state(motionQuery.matches);
+  $effect(() => {
+    const onChange = (e: MediaQueryListEvent) => (reduceMotion = e.matches);
+    motionQuery.addEventListener("change", onChange);
+    return () => motionQuery.removeEventListener("change", onChange);
+  });
+
   const vaultName = $derived(
     app.config?.vaultPath?.split(/[\\/]/).filter(Boolean).pop() ?? "",
   );
@@ -164,8 +172,6 @@
       <button
         class="nav-item tree-item"
         style:padding-left="{10 + depth * 14}px"
-        role="treeitem"
-        aria-selected="false"
         aria-expanded={open}
         title={folder.path}
         onclick={() => toggleFolder(folder.path)}
@@ -184,7 +190,7 @@
       </span>
     </div>
     {#if open}
-      <div role="group" transition:slide={{ duration: 120 }}>
+      <div transition:slide={{ duration: reduceMotion ? 0 : 120 }}>
         {@render branch(folder, depth + 1)}
       </div>
     {/if}
@@ -194,8 +200,7 @@
       class="nav-item tree-item tree-page"
       class:active={app.readId === page.id}
       style:padding-left="{10 + depth * 14 + 16}px"
-      role="treeitem"
-      aria-selected={app.readId === page.id}
+      aria-current={app.readId === page.id ? "page" : undefined}
       title={page.title}
       onclick={() => openPage(page.id)}
     >
@@ -254,9 +259,9 @@
           </button>
         </div>
       </div>
-      <div class="tree" role="tree" aria-label={t("sidebar.files")}>
+      <nav class="tree" aria-label={t("sidebar.files")}>
         {@render branch(tree, 0)}
-      </div>
+      </nav>
       {#if app.library.length === 0 && app.folders.length === 0 && !creating}
         <div class="hint">
           <Icon name="info" size={14} />
@@ -326,14 +331,14 @@
   }
   .brand-text strong {
     font-family: var(--font-display);
-    font-size: 19px;
+    font-size: var(--fs-lg);
     font-weight: 500;
     letter-spacing: -0.02em;
     color: var(--text);
   }
   .brand-vault {
     font-family: var(--mono);
-    font-size: 10.5px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
   }
 
@@ -358,7 +363,7 @@
     gap: 10px;
     padding: 6px 10px;
     border-radius: var(--radius-sm);
-    font-size: 13.5px;
+    font-size: var(--fs-base);
     color: var(--text-soft);
     text-align: left;
     transition:
@@ -402,7 +407,7 @@
     align-items: center;
     gap: 6px;
     padding: 2px 10px 6px;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -433,7 +438,7 @@
   }
   .tree-item {
     width: 100%;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--text-soft);
     gap: 6px;
   }
@@ -454,8 +459,8 @@
   .tool {
     display: grid;
     place-items: center;
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
     border-radius: var(--radius-xs);
     color: var(--muted);
   }
@@ -480,6 +485,11 @@
   .tree-row:focus-within .row-actions {
     opacity: 1;
     pointer-events: auto;
+    background: var(--sunken);
+  }
+  .tree-row:hover .tree-item,
+  .tree-row:focus-within .tree-item {
+    padding-right: 56px;
   }
   .creator {
     cursor: text;
@@ -501,7 +511,7 @@
     display: flex;
     gap: 8px;
     padding: 12px;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     line-height: 1.5;
     color: var(--muted);
     border: 1px solid var(--border);
@@ -531,7 +541,7 @@
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     transition:
       border-color var(--t-fast) var(--ease-out),
       color var(--t-fast) var(--ease-out);
@@ -545,7 +555,7 @@
     text-align: left;
   }
   .shortcut-hint {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: center;
   }

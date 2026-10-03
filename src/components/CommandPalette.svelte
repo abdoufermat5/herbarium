@@ -251,7 +251,7 @@
   .overlay {
     position: fixed;
     inset: 0;
-    z-index: 50;
+    z-index: var(--z-palette);
     display: flex;
     align-items: flex-start;
     justify-content: center;
@@ -285,7 +285,7 @@
     border: none;
     background: transparent;
     padding: 2px 0;
-    font-size: 14.5px;
+    font-size: var(--fs-md);
     color: var(--text);
     outline: none;
     box-shadow: none;
@@ -299,7 +299,7 @@
   }
   .p-group {
     padding: 10px 10px 4px;
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     font-weight: 500;
     text-transform: uppercase;
     letter-spacing: 0.08em;
@@ -326,13 +326,13 @@
   .p-label {
     flex: 1;
     min-width: 0;
-    font-size: 13.5px;
+    font-size: var(--fs-base);
     font-weight: 500;
   }
   .p-hint {
     flex: none;
     max-width: 45%;
-    font-size: 12px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
   .p-item.active .p-hint {
@@ -341,7 +341,7 @@
   .p-empty {
     padding: 22px 12px;
     text-align: center;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
 
@@ -351,7 +351,7 @@
     padding: 9px 14px;
     border-top: 1px solid var(--border);
     background: var(--raised);
-    font-size: 11.5px;
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
   .p-foot span {

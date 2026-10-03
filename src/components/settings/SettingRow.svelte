@@ -37,13 +37,13 @@
     min-width: 0;
   }
   h3 {
-    font-size: 14px;
+    font-size: var(--fs-base);
     font-weight: 500;
     margin-bottom: 2px;
   }
   p {
     color: var(--muted);
-    font-size: 13px;
+    font-size: var(--fs-sm);
     overflow-wrap: anywhere;
   }
   .control {

@@ -240,7 +240,7 @@
   }
 
   .dropdown-shortcut {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
     margin-left: 12px;
     letter-spacing: 0.02em;

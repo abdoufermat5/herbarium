@@ -288,7 +288,7 @@
 
   {#if open}
     <div
-      class="select-menu"
+      class="dropdown-menu select-menu"
       class:align-right={align === "right"}
       class:drop-up={dropUp}
       role="listbox"
@@ -304,8 +304,8 @@
         <div
           role="option"
           id="{id}-opt-{idx}"
-          class="select-opt"
-          class:selected={isSelected}
+          class="dropdown-item select-opt"
+          class:active={isSelected}
           class:highlighted={isHighlighted}
           class:disabled={opt.disabled}
           aria-selected={isSelected}
@@ -336,7 +336,7 @@
           </div>
 
           {#if isSelected}
-            <span class="opt-check" aria-hidden="true">
+            <span class="dropdown-item-check" aria-hidden="true">
               <Icon name="check" size={13} />
             </span>
           {/if}
@@ -377,7 +377,7 @@
     gap: 7px;
     background: var(--surface);
     color: var(--text);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-input);
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-family: inherit;
@@ -392,7 +392,7 @@
   }
 
   .select-btn:hover:not(:disabled) {
-    border-color: var(--border-hover);
+    border-color: var(--border-input-hover);
     background: var(--raised);
   }
 
@@ -412,13 +412,13 @@
 
   .select-sm {
     padding: 5px 9px;
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     height: 32px;
   }
 
   .select-md {
     padding: 7px 11px;
-    font-size: 13.5px;
+    font-size: var(--fs-base);
     height: 36px;
   }
 
@@ -460,68 +460,10 @@
     transform: rotate(180deg);
   }
 
-  /* Popover Menu — animation `menu-in` is shared from app.css */
+  /* Popover menu/item visuals come from the global .dropdown-menu/.dropdown-item primitive */
   .select-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
     min-width: max(100%, 150px);
-    max-height: 250px;
-    overflow-y: auto;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: var(--shadow-lg);
-    padding: 4px;
-    z-index: 100;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
     outline: none;
-    animation: menu-in var(--t-med) var(--ease-out);
-  }
-
-  .select-menu.align-right {
-    left: auto;
-    right: 0;
-  }
-
-  .select-menu.drop-up {
-    top: auto;
-    bottom: calc(100% + 6px);
-  }
-
-  .select-opt {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 9px;
-    border-radius: var(--radius-xs);
-    cursor: pointer;
-    color: var(--text-soft);
-    font-size: 13px;
-    user-select: none;
-    outline: none;
-    transition:
-      background-color var(--t-fast) var(--ease-out),
-      color var(--t-fast) var(--ease-out);
-  }
-
-  .select-opt:hover,
-  .select-opt.highlighted {
-    background: var(--sunken);
-    color: var(--text);
-  }
-
-  .select-opt.selected {
-    color: var(--accent-strong);
-    font-weight: 500;
-  }
-
-  .select-opt.disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    pointer-events: none;
   }
 
   .opt-icon {
@@ -531,7 +473,7 @@
     color: var(--muted);
   }
 
-  .select-opt.selected .opt-icon,
+  .select-opt.active .opt-icon,
   .select-opt.highlighted .opt-icon {
     color: var(--accent);
   }
@@ -551,15 +493,7 @@
   }
 
   .opt-hint {
-    font-size: 11px;
+    font-size: var(--fs-2xs);
     color: var(--muted);
-  }
-
-  .opt-check {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--accent);
   }
 </style>

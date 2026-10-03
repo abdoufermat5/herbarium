@@ -242,7 +242,7 @@
     animation: fade-in var(--t-slow) var(--ease-out);
     padding: 32px;
     text-align: center;
-    font-size: 13px;
+    font-size: var(--fs-sm);
   }
   .boot-mark {
     width: 44px;
@@ -255,11 +255,11 @@
     margin-bottom: 4px;
   }
   .boot-error h1 {
-    font-size: 30px;
+    font-size: var(--fs-3xl);
   }
   .error-text {
     max-width: 460px;
-    font-size: 13px;
+    font-size: var(--fs-sm);
     color: var(--danger);
     background: var(--danger-soft);
     border-radius: var(--radius-sm);
@@ -292,7 +292,7 @@
   .drag-veil {
     position: fixed;
     inset: 0;
-    z-index: 60;
+    z-index: var(--z-overlay);
     display: grid;
     place-items: center;
     background: var(--scrim);
@@ -319,13 +319,13 @@
   }
   .drag-card strong {
     font-family: var(--font-display);
-    font-size: 22px;
+    font-size: var(--fs-xl);
     font-weight: 500;
     letter-spacing: -0.02em;
     color: var(--text);
   }
   .drag-card span {
-    font-size: 12.5px;
+    font-size: var(--fs-sm);
     color: var(--muted);
   }
 
