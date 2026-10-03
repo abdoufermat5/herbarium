@@ -18,9 +18,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - One-line Linux installer (`install.sh`) with `.deb` and AppImage support, `--version` and `--uninstall`.
 - MIT license.
 - README, CI workflow, and a tag-driven release workflow whose GitHub release description is taken from this changelog.
+- MCP server (`herbarium mcp`) so AI agents can create, read, search, edit, rewrite, delete and schedule review of pages in the vault, with built-in guidance for writing Herbarium-compatible HTML.
+- Extension API: features register named JSON operations and subscribe to vault events; the desktop UI and the MCP server both run through the same operation registry. Built-in features are implemented as extensions.
+- Sidecar metadata gains `schemaVersion` and an `ext` namespace for extension data, preserved across edits and re-indexing.
+- The app re-syncs with the vault folder when its window regains focus, picking up pages added by agents or other tools.
 
 ### Changed
 - Remove duplicate theme and language controls from the sidebar; preferences remain in Settings, while the footer keeps Settings and Search.
+- Backend split into a Cargo workspace: `herbarium-core` (vault, index, extensions), `herbarium-mcp`, and the desktop shell.
+- Folder paths that escape the vault are now rejected instead of silently falling back to the vault root.
 
 ### Fixed
 - Preserve newer inspector edits when an in-flight metadata save completes.

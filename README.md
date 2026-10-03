@@ -60,6 +60,18 @@ curl -fsSL https://raw.githubusercontent.com/abdoufermat5/herbarium/main/install
 
 On Debian/Ubuntu this installs the `.deb` (needs `sudo`); elsewhere it installs the AppImage under `~/.local`. Options go after `sh -s --`, e.g. `... | sh -s -- --version 0.1.0`, `--appimage` to force the AppImage, or `--uninstall`. Prefer to inspect first? Download `install.sh` or grab the `.deb`/`.AppImage` from the [releases page](https://github.com/abdoufermat5/herbarium/releases/latest).
 
+## Use with AI agents (MCP)
+
+The `herbarium` binary also runs as a [Model Context Protocol](https://modelcontextprotocol.io) server over stdio, so agents can save, search, organize and schedule pages in your vault. For example, in Claude Code:
+
+```bash
+claude mcp add herbarium -- herbarium mcp
+```
+
+Then ask things like *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. The server uses `--vault <path>` if given, otherwise `HERBARIUM_VAULT`, otherwise the vault last opened in the app. The app picks up agent changes when its window regains focus.
+
+Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_clear`, `review_due`, `network_set`, `tags_list`, `folders_list`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
+
 ## Getting started
 
 ### Prerequisites
@@ -86,7 +98,9 @@ pnpm tauri build    # produces .deb and .AppImage bundles
 ### Checks
 
 ```bash
-pnpm check          # svelte-check + TypeScript
+pnpm check                                         # svelte-check + TypeScript
+cargo test --manifest-path src-tauri/Cargo.toml --workspace
+make ci                                            # everything CI runs; `make help` lists targets
 ```
 
 ### Releasing
@@ -100,23 +114,53 @@ git push --follow-tags
 
 Document changes under `[Unreleased]` in `CHANGELOG.md` first. The script bumps `package.json` and `src-tauri/Cargo.toml`, moves `[Unreleased]` into the new version, then commits and tags `vX.Y.Z`. Pushing the tag triggers `.github/workflows/release.yml`, which builds the `.deb` and `.AppImage` and publishes a GitHub release whose description is the matching `CHANGELOG.md` section (versions with a `-suffix` are marked as pre-releases). Pull requests and `main` run `.github/workflows/ci.yml`.
 
+## Architecture
+
+Every feature is an **extension** that registers **operations** (`area.verb`, JSON in / JSON out, with a JSON Schema) and may subscribe to **events** (`page.created`, `page.updated`, `page.deleted`, `vault.indexed`). Front ends never call features directly: the desktop UI goes through one `invoke_op` command and the MCP server turns each agent-visible operation into a tool. A new operation therefore appears in both without extra wiring. The built-in features (pages, library, review, network) use the same API a plugin would. That JSON-only boundary is meant to be implemented later by a sandboxed WASM plugin runtime.
+
+Extensions keep per-page data under `ext.<extension-id>` in the sidecar JSON. The core preserves it through every edit and re-index. Sidecars carry a `schemaVersion`.
+
+```rust
+struct Stars;
+impl Extension for Stars {
+    fn id(&self) -> &str { "stars" }
+    fn register(&self, r: &mut Registry) -> OpResult<()> {
+        r.add(Operation::new("stars.add", "Star a page.", schema, |ctx: &mut Ctx, a: IdArgs| {
+            let mut meta = ctx.page(&a.id)?;
+            meta.ext.insert("stars".into(), json!({ "starred": true }));
+            ctx.save(&meta)?;
+            Ok(meta)
+        }))?;
+        r.on(events::PAGE_CREATED, |_store, event| { /* react */ });
+        Ok(())
+    }
+}
+// Host::with_extensions(vec![Box::new(Stars)])
+```
+
 ## Project layout
 
 ```
-src/                    Svelte frontend
-├── components/         Sidebar, page list, reader, review queue, import dialog, palette…
+src/                         Svelte frontend
+├── components/              Sidebar, page list, reader, review queue, import dialog, palette…
 └── lib/
-    ├── state.svelte.ts   app state and data loading
-    ├── api.ts            typed wrappers around Tauri commands
-    ├── i18n.svelte.ts    translation runtime
-    └── locales/          en.ts (source), fr.ts
-src-tauri/src/          Rust backend
-├── commands.rs         Tauri commands exposed to the UI
-├── vault.rs            files on disk, sidecar JSON, re-indexing
-├── store.rs            SQLite index and search
-├── protocol.rs         herbarium:// scheme and CSP
-├── content.rs          title and text extraction
-└── models.rs           data models, mirrored in src/lib/types.ts
+    ├── state.svelte.ts      app state, data loading, resync on focus
+    ├── api.ts               typed wrappers around operations (invoke_op)
+    ├── i18n.svelte.ts       translation runtime
+    └── locales/             en.ts (source), fr.ts
+src-tauri/                   Cargo workspace
+├── src/                     desktop shell: window, herbarium:// scheme + CSP, `herbarium mcp`
+└── crates/
+    ├── herbarium-core/      vault kernel, extension API, built-in extensions
+    │   └── src/
+    │       ├── extension.rs Operation, Registry, Extension, Ctx, events
+    │       ├── host.rs      Host: extensions + open vault, single call entry point
+    │       ├── builtin/     pages, library, review, network
+    │       ├── vault.rs     files on disk, sidecar JSON, re-indexing
+    │       ├── store.rs     SQLite index and search
+    │       ├── content.rs   title and text extraction
+    │       └── models.rs    data models, mirrored in src/lib/types.ts
+    └── herbarium-mcp/       MCP stdio server over the operation registry
 ```
 
 ## Adding a language
@@ -128,7 +172,7 @@ TypeScript fails if a locale is missing a key that English defines.
 
 ## Scope
 
-Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included: sync, mobile, Markdown notes, page linking, plugins, AI features. Desktop only (Linux bundles for now).
+Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included yet: sync, mobile, Markdown notes, page linking, a plugin loader (the extension API is in place; a WASM runtime will come later). Desktop only (Linux bundles for now).
 
 ## License
 
