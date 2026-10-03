@@ -10,7 +10,7 @@ Your pages stay plain `.html` files in a folder you own, in the spirit of an vau
 - **Search** across titles, tags, folders and page text, backed by a SQLite full-text index.
 - **Organize** with folders, tags and a personal note per page. Titles are filled in from `<title>` (falling back to the first `<h1>`).
 - **Read** each page in a sandboxed viewer with scripts running.
-- **Review** pages at fixed intervals (1, 3, 7 or 30 days) and work through a "Review today" queue.
+- **Review** pages on a schedule you configure: preset intervals in any mix of minutes, hours and days (1, 3, 7, 30 days by default), a "Done" button that picks the next date (step up the presets, multiply the interval, or repeat it), optional automatic scheduling of imports, and a cap on the "Review today" queue. Settings live in the vault (`.herbarium/review.json`).
 - **Command palette** (`Ctrl/⌘ K`) and keyboard shortcuts (`/` to search, `i` to import, `Esc` to go back).
 - **Light and dark themes**, and an **English / French** interface (English by default).
 
@@ -70,7 +70,7 @@ claude mcp add herbarium -- herbarium mcp
 
 Then ask things like *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. The server uses `--vault <path>` if given, otherwise `HERBARIUM_VAULT`, otherwise the vault last opened in the app. The app picks up agent changes when its window regains focus.
 
-Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_clear`, `review_due`, `network_set`, `tags_list`, `folders_list`, `folders_create`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
+Tools: `pages_create`, `pages_get`, `pages_list`, `pages_search`, `pages_update`, `pages_set_html`, `pages_delete`, `review_schedule`, `review_complete`, `review_clear`, `review_due`, `review_settings`, `network_set`, `tags_list`, `folders_list`, `folders_create`, `vault_info`, `vault_rescan`. The server also sends agents instructions for writing pages that work in Herbarium (self-contained HTML, allowed CDNs, sandbox limits).
 
 ## Getting started
 

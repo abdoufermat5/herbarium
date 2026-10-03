@@ -12,6 +12,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - English (default) and French interface.
 - Settings page for theme, interface language, library layout and sorting, with automatic preference persistence and the current vault location. Open it from the sidebar, command palette, or `Ctrl+,` / `⌘,`.
 - Import dialog with a staged file list (sizes, remove, duplicate detection), drag-and-drop feedback, and paste-HTML import.
+- Import dialog lets you choose the destination folder when the vault has folders; it starts on the folder you are browsing. `pages.import` takes an optional `folder`.
+- Configurable review system (Settings → Review): editable preset intervals in minutes, hours or days (a review can come back in 30 minutes), a "Done" action that schedules the next review by strategy (next preset, multiply by a factor, or repeat), a longest-interval cap, automatic review of imported pages, and a limit on the review queue size. Stored in `.herbarium/review.json`. New operations `review.complete`, `review.settings` (agents) and `review.configure` (UI only). Review durations are in minutes everywhere: `review.schedule` takes `intervalMinutes`, `pages.create` takes `reviewInMinutes`, and pages carry `intervalMinutes` (sidecars and indexes written with whole `intervalDays` are upgraded automatically; sidecar `schemaVersion` is now 2).
+- The "due" badge refreshes every minute, and review times show the time of day.
 - Content validation on import: files renamed to `.html` that are not real HTML are rejected, in both the picker and the backend.
 - Linux `.deb` and `.AppImage` bundles; the desktop entry is installed as `herbarium.desktop` so the icon shows on Wayland (KDE Plasma).
 - Themed, draggable title bar (minimize / maximize / close) replacing the default GTK header bar, following the light and dark themes.
