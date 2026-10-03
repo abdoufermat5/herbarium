@@ -71,3 +71,9 @@ export interface IndexReport {
   removed: number;
   total: number;
 }
+
+/** A text editor detected on the system. */
+export interface EditorInfo {
+  id: string;
+  name: string;
+}

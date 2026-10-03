@@ -9,6 +9,7 @@ Your pages stay plain `.html` files in a folder you own, in the spirit of an vau
 - **Import** by drag and drop, file picker, or pasting HTML. Pages are copied into the vault unmodified.
 - **Search** across titles, tags, folders and page text, backed by a SQLite full-text index.
 - **Organize** with folders, tags and a personal note per page. Titles are filled in from `<title>` (falling back to the first `<h1>`).
+- **Edit** a page's HTML in the app, or open its file in an editor installed on your system (VS Code, Zed, Kate… detected automatically, or a custom command).
 - **Read** each page in a sandboxed viewer with scripts running.
 - **Review** pages on a schedule you configure: preset intervals in any mix of minutes, hours and days (1, 3, 7, 30 days by default), a "Done" button that picks the next date (step up the presets, multiply the interval, or repeat it), optional automatic scheduling of imports, and a cap on the "Review today" queue. Settings live in the vault (`.herbarium/review.json`).
 - **Command palette** (`Ctrl/⌘ K`) and keyboard shortcuts (`/` to search, `i` to import, `Esc` to go back).

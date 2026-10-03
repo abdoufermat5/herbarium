@@ -9,6 +9,7 @@
   import PresetButtons from "./PresetButtons.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { indent, applyToTextarea } from "../lib/editor";
+  import { loadEditors, currentEditor } from "../lib/editors.svelte";
 
   let { id }: { id: string } = $props();
 
@@ -105,12 +106,17 @@
   let source = $state("");
   let savingSource = $state(false);
   let previewNonce = $state(0);
+  let openingExternal = $state(false);
+  /** Set after the file was handed to another editor: reload it when we regain focus. */
+  let externalPending = false;
+  const externalEditor = $derived(currentEditor());
   const sourceDirty = $derived(editing && !!page && source !== page.html);
 
   function startEditing() {
     if (!page) return;
     source = page.html;
     editing = true;
+    void loadEditors();
   }
 
   function stopEditing() {
@@ -119,6 +125,40 @@
 
   function discardSource() {
     if (page) source = page.html;
+  }
+
+  async function openExternally() {
+    const p = page;
+    const choice = externalEditor;
+    if (!p || !choice || sourceDirty || openingExternal) return;
+    openingExternal = true;
+    try {
+      const name = await api.openInEditor(p.meta.id, choice.id, choice.custom);
+      externalPending = true;
+      toast(t("edit.openedIn", { editor: name }), "success");
+    } catch (e) {
+      toast(`${t("edit.openFailed")}: ${e}`, "error");
+    } finally {
+      openingExternal = false;
+    }
+  }
+
+  /** Pick up edits made in another editor while this window was in the background. */
+  async function reloadFromDisk() {
+    if (!externalPending) return;
+    externalPending = false;
+    const p = page;
+    if (!p || sourceDirty) return;
+    try {
+      const fresh = await api.getPage(p.meta.id);
+      if (fresh.html === p.html) return;
+      p.html = fresh.html;
+      if (editing) source = fresh.html;
+      previewNonce++;
+      toast(t("edit.reloaded"), "info");
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   async function saveSource() {
@@ -260,7 +300,11 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    void load();
+    window.addEventListener("focus", reloadFromDisk);
+    return () => window.removeEventListener("focus", reloadFromDisk);
+  });
   onDestroy(() => {
     clearTimeout(frameTimer);
     clearTimeout(confirmTimer);
@@ -398,6 +442,16 @@
                 <span class="eyebrow">{t("edit.source")}</span>
                 {#if sourceDirty}<span class="unsaved">· {t("edit.unsaved")}</span>{/if}
                 <span class="grow"></span>
+                {#if externalEditor}
+                  <button
+                    class="btn btn-xs"
+                    onclick={openExternally}
+                    disabled={sourceDirty || openingExternal}
+                    title={sourceDirty ? t("edit.saveFirst") : t("edit.openInHint", { editor: externalEditor.name })}
+                  >
+                    <Icon name="external-link" size={12} />{externalEditor.name}
+                  </button>
+                {/if}
                 <button class="btn btn-xs" onclick={discardSource} disabled={!sourceDirty || savingSource}>
                   {t("edit.discard")}
                 </button>
@@ -443,7 +497,7 @@
           <iframe
             class:ready={frameReady}
             title={t("read.preview")}
-            src={`herbarium://page/${page.meta.id}`}
+            src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
             sandbox="allow-scripts"
             onload={markReady}
           ></iframe>
@@ -759,6 +813,7 @@
     flex: none;
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 8px;
     padding: 6px 12px;
     border-bottom: 1px solid var(--border);

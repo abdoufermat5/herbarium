@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   Config,
+  EditorInfo,
   ImportFile,
   ImportResult,
   IndexReport,
@@ -109,5 +110,15 @@ export const api = {
 
   rescan(): Promise<IndexReport> {
     return op("vault.rescan");
+  },
+
+  /** Text editors installed on this system, best candidates first. */
+  listEditors(): Promise<EditorInfo[]> {
+    return invoke("list_editors");
+  },
+
+  /** Open the page's HTML file in an external editor; resolves to the editor's name. */
+  openInEditor(pageId: string, editor: string | null, custom: string | null): Promise<string> {
+    return invoke("open_in_editor", { pageId, editor, custom });
   },
 };

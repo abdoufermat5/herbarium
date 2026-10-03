@@ -31,6 +31,10 @@ export interface Prefs {
   editorTabIndents: boolean;
   editorSpellcheck: boolean;
   editorPreview: PreviewLayout;
+  /** Detected editor used by "open in editor"; empty picks the first detected. */
+  externalEditor: string;
+  /** Command template (`code --goto {file}`); overrides `externalEditor` when set. */
+  externalEditorCommand: string;
 }
 
 export const DEFAULT_PREFS: Prefs = {
@@ -46,6 +50,8 @@ export const DEFAULT_PREFS: Prefs = {
   editorTabIndents: true,
   editorSpellcheck: false,
   editorPreview: "right",
+  externalEditor: "",
+  externalEditorCommand: "",
 };
 
 /** Values offered in the settings UI. */
@@ -59,6 +65,10 @@ function oneOf<T>(value: unknown, allowed: readonly T[], fallback: T): T {
 
 function bool(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
+}
+
+function text(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.length <= 500 ? value : fallback;
 }
 
 function sanitize(raw: unknown): Prefs {
@@ -77,6 +87,8 @@ function sanitize(raw: unknown): Prefs {
     editorTabIndents: bool(r.editorTabIndents, d.editorTabIndents),
     editorSpellcheck: bool(r.editorSpellcheck, d.editorSpellcheck),
     editorPreview: oneOf(r.editorPreview, ["right", "below", "off"], d.editorPreview),
+    externalEditor: text(r.externalEditor, d.externalEditor),
+    externalEditorCommand: text(r.externalEditorCommand, d.externalEditorCommand),
   };
 }
 

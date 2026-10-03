@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { t } from "../../lib/i18n.svelte";
+  import { editors, loadEditors } from "../../lib/editors.svelte";
   import {
     prefs,
     setPref,
@@ -43,6 +45,20 @@
     { value: "below", label: t("settings.editor.previewBelow") },
     { value: "off", label: t("settings.editor.previewOff") },
   ]);
+  // "" = automatic: the first editor detected on the system.
+  const externalOptions = $derived<SelectOption<string>[]>([
+    { value: "", label: t("settings.editor.externalAuto") },
+    ...editors.list.map((e) => ({ value: e.id, label: e.name })),
+  ]);
+  const customSet = $derived(prefs.externalEditorCommand.trim() !== "");
+
+  onMount(() => void loadEditors());
+
+  function commitCommand(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    input.value = input.value.trim();
+    setPref("externalEditorCommand", input.value);
+  }
 </script>
 
 <SettingsSection id="settings-editor" title={t("settings.editor")}>
@@ -135,9 +151,43 @@
       onchange={(v) => setPref("editorPreview", v)}
     />
   </SettingRow>
+  <SettingRow
+    title={t("settings.editor.external")}
+    hint={editors.loaded && editors.list.length === 0
+      ? t("settings.editor.externalNone")
+      : t("settings.editor.externalHint")}
+  >
+    <Select
+      fill
+      size="md"
+      align="right"
+      value={prefs.externalEditor}
+      ariaLabel={t("settings.editor.external")}
+      disabled={customSet}
+      options={externalOptions}
+      onchange={(v) => setPref("externalEditor", v)}
+    />
+  </SettingRow>
+  <SettingRow stacked title={t("settings.editor.command")} hint={t("settings.editor.commandHint")}>
+    <input
+      type="text"
+      class="command"
+      value={prefs.externalEditorCommand}
+      placeholder="code --goto {'{file}'}"
+      aria-label={t("settings.editor.command")}
+      spellcheck="false"
+      autocomplete="off"
+      onchange={commitCommand}
+    />
+  </SettingRow>
 </SettingsSection>
 
 <style>
+  .command {
+    height: 36px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+  }
   .sample-row {
     padding: 20px 28px;
   }

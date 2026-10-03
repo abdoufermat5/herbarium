@@ -1,5 +1,6 @@
 mod commands;
 mod config;
+mod editors;
 mod protocol;
 
 use std::sync::Mutex;
@@ -27,6 +28,8 @@ pub fn run() {
             commands::set_vault,
             commands::create_vault,
             commands::invoke_op,
+            commands::list_editors,
+            commands::open_in_editor,
         ])
         .run(tauri::generate_context!())
         .expect("error while running herbarium");

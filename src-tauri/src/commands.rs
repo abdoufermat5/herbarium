@@ -5,10 +5,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use herbarium_core::{Caller, Host};
-use serde_json::Value;
+use serde_json::{json, Value};
 use tauri::State;
 
 use crate::config::{self, Config};
+use crate::editors::{self, Choice, EditorInfo};
 
 pub struct AppState {
     pub host: Mutex<Host>,
@@ -57,4 +58,33 @@ pub async fn create_vault(state: State<'_, AppState>, parent_dir: String, name: 
 pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
     let host = state.host.lock().map_err(|e| e.to_string())?;
     host.call(Caller::Ui, &name, args)
+}
+
+/// Text editors installed on this system, best candidates first.
+#[tauri::command]
+pub async fn list_editors() -> Vec<EditorInfo> {
+    editors::list()
+}
+
+/// Open a page's HTML file in an external editor and return the editor's name.
+/// `custom` (a command template) wins over `editor` (a detected id); with
+/// neither, the first detected editor is used.
+#[tauri::command]
+pub async fn open_in_editor(
+    state: State<'_, AppState>,
+    page_id: String,
+    editor: Option<String>,
+    custom: Option<String>,
+) -> CmdResult<String> {
+    let path = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+        let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
+        let folder = page["meta"]["folder"].as_str().map(str::to_owned);
+        herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref())
+    };
+    if !path.is_file() {
+        return Err(format!("page file not found: {}", path.display()));
+    }
+    editors::open(&Choice { editor, custom }, &path)
 }
