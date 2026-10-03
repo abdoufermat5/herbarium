@@ -65,7 +65,9 @@ pub fn split_command(line: &str) -> Result<Vec<String>, String> {
             (Some('"'), '\\') | (None, '\\') => {
                 // Inside double quotes only a few characters are escapable.
                 match chars.next() {
-                    Some(n) if quote.is_none() || matches!(n, '"' | '\\' | '$' | '`') => cur.push(n),
+                    Some(n) if quote.is_none() || matches!(n, '"' | '\\' | '$' | '`') => {
+                        cur.push(n)
+                    }
                     Some(n) => {
                         cur.push('\\');
                         cur.push(n);
@@ -111,7 +113,9 @@ fn with_file_placeholder(mut argv: Vec<String>) -> Vec<String> {
 /* ----------------------------------------------------------------- PATH */
 
 fn is_executable(path: &Path) -> bool {
-    let Ok(meta) = fs::metadata(path) else { return false };
+    let Ok(meta) = fs::metadata(path) else {
+        return false;
+    };
     if !meta.is_file() {
         return false;
     }
@@ -127,7 +131,9 @@ fn is_executable(path: &Path) -> bool {
 }
 
 fn find_on_path(cmd: &str, path: &[PathBuf]) -> Option<PathBuf> {
-    path.iter().map(|dir| dir.join(cmd)).find(|p| is_executable(p))
+    path.iter()
+        .map(|dir| dir.join(cmd))
+        .find(|p| is_executable(p))
 }
 
 /// A program name or absolute path that resolves to something runnable.
@@ -165,8 +171,15 @@ fn parse_desktop(text: &str) -> DesktopEntry {
         if !in_main || line.starts_with('#') {
             continue;
         }
-        let Some((key, value)) = line.split_once('=') else { continue };
-        let list = |v: &str| v.split(';').filter(|s| !s.is_empty()).map(str::to_string).collect::<Vec<_>>();
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let list = |v: &str| {
+            v.split(';')
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        };
         match key.trim() {
             "Type" => entry.kind = value.to_string(),
             "Name" => entry.name = value.to_string(),
@@ -185,7 +198,12 @@ fn parse_desktop(text: &str) -> DesktopEntry {
 impl DesktopEntry {
     /// A graphical application that edits text or code.
     fn is_editor(&self) -> bool {
-        if self.kind != "Application" || self.hidden || self.terminal || self.name.is_empty() || self.exec.is_empty() {
+        if self.kind != "Application"
+            || self.hidden
+            || self.terminal
+            || self.name.is_empty()
+            || self.exec.is_empty()
+        {
             return false;
         }
         let has = |c: &str| self.categories.iter().any(|x| x == c);
@@ -194,7 +212,11 @@ impl DesktopEntry {
         }
         has("TextEditor")
             || has("IDE")
-            || (has("Development") && self.mime.iter().any(|m| m == "text/plain" || m == "text/html"))
+            || (has("Development")
+                && self
+                    .mime
+                    .iter()
+                    .any(|m| m == "text/plain" || m == "text/html"))
     }
 
     /// Exec line as an argument template: field codes for the file become
@@ -232,24 +254,38 @@ fn read_desktop_entries(apps_dirs: &[PathBuf], path: &[PathBuf]) -> Vec<Editor> 
     let mut found = Vec::new();
     let mut seen_ids = HashSet::new();
     for dir in apps_dirs {
-        let Ok(read) = fs::read_dir(dir) else { continue };
+        let Ok(read) = fs::read_dir(dir) else {
+            continue;
+        };
         for item in read.flatten() {
             let file_name = item.file_name().to_string_lossy().into_owned();
             if !file_name.ends_with(".desktop") || !seen_ids.insert(file_name.clone()) {
                 continue; // earlier directories override later ones
             }
-            let Ok(text) = fs::read_to_string(item.path()) else { continue };
+            let Ok(text) = fs::read_to_string(item.path()) else {
+                continue;
+            };
             let entry = parse_desktop(&text);
             if !entry.is_editor() {
                 continue;
             }
             let Ok(argv) = entry.argv() else { continue };
             let program = argv.first().map(String::as_str).unwrap_or_default();
-            let tried = if entry.try_exec.is_empty() { program } else { entry.try_exec.as_str() };
+            let tried = if entry.try_exec.is_empty() {
+                program
+            } else {
+                entry.try_exec.as_str()
+            };
             if !resolves(tried, path) {
                 continue; // stale entry for an uninstalled app
             }
-            found.push(Editor { info: EditorInfo { id: format!("desktop:{file_name}"), name: entry.name }, argv });
+            found.push(Editor {
+                info: EditorInfo {
+                    id: format!("desktop:{file_name}"),
+                    name: entry.name,
+                },
+                argv,
+            });
         }
     }
     found.sort_by_key(|e| e.info.name.to_lowercase());
@@ -264,18 +300,26 @@ fn detect_with(path: &[PathBuf], apps_dirs: &[PathBuf]) -> Vec<Editor> {
     let mut programs = HashSet::new();
 
     for (name, commands) in KNOWN {
-        if let Some((cmd, _)) = commands.iter().find_map(|c| find_on_path(c, path).map(|p| (*c, p))) {
+        if let Some((cmd, _)) = commands
+            .iter()
+            .find_map(|c| find_on_path(c, path).map(|p| (*c, p)))
+        {
             names.insert(name.to_lowercase());
             programs.insert(cmd.to_string());
             editors.push(Editor {
-                info: EditorInfo { id: format!("bin:{cmd}"), name: (*name).to_string() },
+                info: EditorInfo {
+                    id: format!("bin:{cmd}"),
+                    name: (*name).to_string(),
+                },
                 argv: vec![cmd.to_string(), FILE.to_string()],
             });
         }
     }
 
     for editor in read_desktop_entries(apps_dirs, path) {
-        let program = Path::new(&editor.argv[0]).file_name().map(|n| n.to_string_lossy().into_owned());
+        let program = Path::new(&editor.argv[0])
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
         let duplicate = names.contains(&editor.info.name.to_lowercase())
             || program.as_ref().is_some_and(|p| programs.contains(p));
         if !duplicate {
@@ -287,7 +331,9 @@ fn detect_with(path: &[PathBuf], apps_dirs: &[PathBuf]) -> Vec<Editor> {
 }
 
 fn path_dirs() -> Vec<PathBuf> {
-    std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect()).unwrap_or_default()
+    std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default()
 }
 
 /// Directories holding `*.desktop` files: user, system, Flatpak and Snap.
@@ -339,12 +385,20 @@ fn launch(argv: &[String], file: &Path) -> Result<(), String> {
     let argv: Vec<String> = argv.iter().map(|a| a.replace(FILE, &file)).collect();
     let (program, args) = argv.split_first().ok_or("empty editor command")?;
     let mut command = Command::new(program);
-    command.args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    command
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     if std::env::var_os("APPDIR").is_some() {
         // Inside an AppImage the bundled libraries must not leak into the editor.
-        command.env_remove("LD_LIBRARY_PATH").env_remove("LD_PRELOAD");
+        command
+            .env_remove("LD_LIBRARY_PATH")
+            .env_remove("LD_PRELOAD");
     }
-    let mut child = command.spawn().map_err(|e| format!("cannot start {program}: {e}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("cannot start {program}: {e}"))?;
     // Reap the child so it does not linger as a zombie.
     std::thread::spawn(move || {
         let _ = child.wait();
@@ -354,16 +408,28 @@ fn launch(argv: &[String], file: &Path) -> Result<(), String> {
 
 /// Open `file` and return the name of the editor used.
 pub fn open(choice: &Choice, file: &Path) -> Result<String, String> {
-    if let Some(custom) = choice.custom.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+    if let Some(custom) = choice
+        .custom
+        .as_deref()
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+    {
         let argv = with_file_placeholder(split_command(custom)?);
         launch(&argv, file)?;
-        let program = Path::new(&argv[0]).file_name().map(|n| n.to_string_lossy().into_owned());
+        let program = Path::new(&argv[0])
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned());
         return Ok(program.unwrap_or_else(|| argv[0].clone()));
     }
     let editors = detect();
     let editor = match choice.editor.as_deref().filter(|id| !id.is_empty()) {
-        Some(id) => editors.iter().find(|e| e.info.id == id).ok_or_else(|| format!("editor no longer available: {id}"))?,
-        None => editors.first().ok_or("no text editor found on this system")?,
+        Some(id) => editors
+            .iter()
+            .find(|e| e.info.id == id)
+            .ok_or_else(|| format!("editor no longer available: {id}"))?,
+        None => editors
+            .first()
+            .ok_or("no text editor found on this system")?,
     };
     launch(&editor.argv, file)?;
     Ok(editor.info.name.clone())
@@ -374,7 +440,8 @@ mod tests {
     use super::*;
 
     fn temp_dir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("herbarium-editors-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("herbarium-editors-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
@@ -389,12 +456,18 @@ mod tests {
 
     #[test]
     fn split_command_honours_quotes_and_escapes() {
-        assert_eq!(split_command("code --goto {file}").unwrap(), ["code", "--goto", "{file}"]);
+        assert_eq!(
+            split_command("code --goto {file}").unwrap(),
+            ["code", "--goto", "{file}"]
+        );
         assert_eq!(
             split_command(r#"  "my editor" -a 'one two' x\ y ""  "#).unwrap(),
             ["my editor", "-a", "one two", "x y", ""]
         );
-        assert_eq!(split_command(r#""a \"quoted\" word""#).unwrap(), [r#"a "quoted" word"#]);
+        assert_eq!(
+            split_command(r#""a \"quoted\" word""#).unwrap(),
+            [r#"a "quoted" word"#]
+        );
         assert!(split_command("code 'unterminated").is_err());
         assert!(split_command("   ").unwrap().is_empty());
     }
@@ -402,27 +475,61 @@ mod tests {
     #[test]
     fn desktop_entries_become_editors_only_when_they_edit_text() {
         let editor = |extra: &str| {
-            parse_desktop(&format!("[Desktop Entry]\nType=Application\nName=X\nExec=x %F\n{extra}\n[Desktop Action new]\nName=Other\nExec=nope"))
+            parse_desktop(&format!(
+                "[Desktop Entry]\nType=Application\nName=X\nExec=x %F\n{extra}\n[Desktop Action new]\nName=Other\nExec=nope"
+            ))
         };
         assert!(editor("Categories=Utility;TextEditor;").is_editor());
         assert!(editor("Categories=Development;IDE;").is_editor());
         assert!(editor("Categories=Development;\nMimeType=text/plain;").is_editor());
-        assert!(!editor("Categories=Development;").is_editor(), "a dev tool that does not open text");
-        assert!(!editor("Categories=Network;WebBrowser;TextEditor;").is_editor(), "browsers are excluded");
-        assert!(!editor("Categories=TextEditor;\nTerminal=true").is_editor(), "terminal editors cannot be launched");
+        assert!(
+            !editor("Categories=Development;").is_editor(),
+            "a dev tool that does not open text"
+        );
+        assert!(
+            !editor("Categories=Network;WebBrowser;TextEditor;").is_editor(),
+            "browsers are excluded"
+        );
+        assert!(
+            !editor("Categories=TextEditor;\nTerminal=true").is_editor(),
+            "terminal editors cannot be launched"
+        );
         assert!(!editor("Categories=TextEditor;\nNoDisplay=true").is_editor());
     }
 
     #[test]
     fn exec_field_codes_are_mapped_to_the_file_placeholder() {
-        let argv = |exec: &str| parse_desktop(&format!("[Desktop Entry]\nExec={exec}")).argv().unwrap();
-        assert_eq!(argv("code --unity-launch %F"), ["code", "--unity-launch", "{file}"]);
+        let argv = |exec: &str| {
+            parse_desktop(&format!("[Desktop Entry]\nExec={exec}"))
+                .argv()
+                .unwrap()
+        };
+        assert_eq!(
+            argv("code --unity-launch %F"),
+            ["code", "--unity-launch", "{file}"]
+        );
         assert_eq!(argv("kate -b %U"), ["kate", "-b", "{file}"]);
-        assert_eq!(argv("app --icon %i %c 100%% %f"), ["app", "--icon", "100%", "{file}"]);
-        assert_eq!(argv("flatpak run --file-forwarding org.x.Editor @@ %f @@"), [
-            "flatpak", "run", "--file-forwarding", "org.x.Editor", "@@", "{file}", "@@"
-        ]);
-        assert_eq!(argv("gedit"), ["gedit", "{file}"], "the file is appended when the entry has no field code");
+        assert_eq!(
+            argv("app --icon %i %c 100%% %f"),
+            ["app", "--icon", "100%", "{file}"]
+        );
+        assert_eq!(
+            argv("flatpak run --file-forwarding org.x.Editor @@ %f @@"),
+            [
+                "flatpak",
+                "run",
+                "--file-forwarding",
+                "org.x.Editor",
+                "@@",
+                "{file}",
+                "@@"
+            ]
+        );
+        assert_eq!(
+            argv("gedit"),
+            ["gedit", "{file}"],
+            "the file is appended when the entry has no field code"
+        );
     }
 
     #[cfg(unix)]
@@ -432,15 +539,48 @@ mod tests {
         let apps = temp_dir("apps");
         make_executable(&bin.join("code"));
         make_executable(&bin.join("mycoolide"));
-        let desktop = |name: &str, exec: &str, cats: &str| format!("[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nCategories={cats}\n");
-        fs::write(apps.join("code.desktop"), desktop("Visual Studio Code", &format!("{}/code %F", bin.display()), "Utility;TextEditor;IDE;")).unwrap();
-        fs::write(apps.join("cool.desktop"), desktop("Cool IDE", "mycoolide %F", "Development;IDE;")).unwrap();
-        fs::write(apps.join("gone.desktop"), desktop("Uninstalled", "not-installed %F", "TextEditor;")).unwrap();
-        fs::write(apps.join("firefox.desktop"), desktop("Firefox", "mycoolide %u", "Network;WebBrowser;")).unwrap();
+        let desktop = |name: &str, exec: &str, cats: &str| {
+            format!(
+                "[Desktop Entry]\nType=Application\nName={name}\nExec={exec}\nCategories={cats}\n"
+            )
+        };
+        fs::write(
+            apps.join("code.desktop"),
+            desktop(
+                "Visual Studio Code",
+                &format!("{}/code %F", bin.display()),
+                "Utility;TextEditor;IDE;",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            apps.join("cool.desktop"),
+            desktop("Cool IDE", "mycoolide %F", "Development;IDE;"),
+        )
+        .unwrap();
+        fs::write(
+            apps.join("gone.desktop"),
+            desktop("Uninstalled", "not-installed %F", "TextEditor;"),
+        )
+        .unwrap();
+        fs::write(
+            apps.join("firefox.desktop"),
+            desktop("Firefox", "mycoolide %u", "Network;WebBrowser;"),
+        )
+        .unwrap();
 
         let found = detect_with(std::slice::from_ref(&bin), std::slice::from_ref(&apps));
-        let summary: Vec<_> = found.iter().map(|e| (e.info.id.as_str(), e.info.name.as_str())).collect();
-        assert_eq!(summary, [("bin:code", "Visual Studio Code"), ("desktop:cool.desktop", "Cool IDE")]);
+        let summary: Vec<_> = found
+            .iter()
+            .map(|e| (e.info.id.as_str(), e.info.name.as_str()))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("bin:code", "Visual Studio Code"),
+                ("desktop:cool.desktop", "Cool IDE")
+            ]
+        );
 
         let _ = fs::remove_dir_all(bin);
         let _ = fs::remove_dir_all(apps);
@@ -455,7 +595,14 @@ mod tests {
         fs::write(&page, "<html></html>").unwrap();
 
         let custom = format!("/bin/sh -c 'printf %s \"$1\" > \"{}\"' sh", out.display());
-        let name = open(&Choice { editor: None, custom: Some(custom) }, &page).unwrap();
+        let name = open(
+            &Choice {
+                editor: None,
+                custom: Some(custom),
+            },
+            &page,
+        )
+        .unwrap();
         assert_eq!(name, "sh");
 
         for _ in 0..100 {
@@ -465,7 +612,16 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         assert_eq!(fs::read_to_string(&out).unwrap(), page.to_string_lossy());
-        assert!(open(&Choice { editor: None, custom: Some("/definitely/not/here".into()) }, &page).is_err());
+        assert!(
+            open(
+                &Choice {
+                    editor: None,
+                    custom: Some("/definitely/not/here".into())
+                },
+                &page
+            )
+            .is_err()
+        );
 
         let _ = fs::remove_dir_all(dir);
     }

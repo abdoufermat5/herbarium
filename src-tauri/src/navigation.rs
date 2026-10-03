@@ -47,13 +47,17 @@ pub fn decide<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
 
 /// Plugin installing [`decide`] on every webview.
 pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri::plugin::Builder::new("navigation-guard").on_navigation(decide).build()
+    tauri::plugin::Builder::new("navigation-guard")
+        .on_navigation(decide)
+        .build()
 }
 
 /// Build the main window from its config (`"create": false` there) with the
 /// guards that only a builder can install. Pages may request popups
 /// (`target="_blank"` links): none opens, web links are offered instead.
-pub fn build_main_window<R: Runtime>(app: &tauri::App<R>) -> tauri::Result<tauri::WebviewWindow<R>> {
+pub fn build_main_window<R: Runtime>(
+    app: &tauri::App<R>,
+) -> tauri::Result<tauri::WebviewWindow<R>> {
     let config = app
         .config()
         .app
@@ -90,7 +94,7 @@ fn guard_frames<R: Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<(
 mod windows_frames {
     use tauri::{Runtime, Url};
     use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Controller;
-    use webview2_com::{take_pwstr, NavigationStartingEventHandler};
+    use webview2_com::{NavigationStartingEventHandler, take_pwstr};
     use windows_core::PWSTR;
 
     pub fn install<R: Runtime>(

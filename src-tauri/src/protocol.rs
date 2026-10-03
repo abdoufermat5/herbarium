@@ -2,6 +2,7 @@
 // iframe. Injects a Content-Security-Policy and never grants same-origin access.
 
 use std::borrow::Cow;
+use std::path::{Path, PathBuf};
 
 use percent_encoding::percent_decode_str;
 use tauri::http::{Request, Response, StatusCode, Uri};
@@ -10,10 +11,27 @@ use tauri::{AppHandle, Manager, UriSchemeContext, UriSchemeResponder};
 use crate::commands::AppState;
 
 /// Network allowed: known CDN hosts for scripts/fonts, `https:` for assets.
-const CSP_ALLOW: &str = "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com; style-src 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; img-src https: data: blob:; media-src https: data: blob:; connect-src https://fonts.googleapis.com https://fonts.gstatic.com; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+pub const CSP_ALLOW: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com https://esm.sh; worker-src blob: 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
 
 /// Network blocked (per-page kill switch).
-const CSP_BLOCK: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; font-src data:; img-src data:; media-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
+pub const CSP_BLOCK: &str = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
+
+const FRAGMENT: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'<')
+    .add(b'>')
+    .add(b'`')
+    .add(b'/')
+    .add(b'\\')
+    .add(b'?')
+    .add(b'#');
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ParsedRequest {
+    pub page_id: String,
+    pub relative_path: Option<String>,
+}
 
 /// Answer off the UI thread: the host lock can be held by a long rescan, and
 /// the synchronous scheme callback runs on the GTK main thread.
@@ -23,51 +41,314 @@ pub fn handle<R: tauri::Runtime>(
     responder: UriSchemeResponder,
 ) {
     let app = ctx.app_handle().clone();
-    tauri::async_runtime::spawn_blocking(move || responder.respond(serve(&app, request.uri())));
+    tauri::async_runtime::spawn_blocking(move || responder.respond(serve(&app, &request)));
 }
 
-fn serve<R: tauri::Runtime>(app: &AppHandle<R>, uri: &Uri) -> Response<Cow<'static, [u8]>> {
-    let Some(id) = page_id(uri) else {
-        return not_found();
-    };
-    let state = app.state::<AppState>();
-    let Ok(host) = state.host.lock() else {
-        return not_found();
-    };
-    let Some(store) = host.store() else {
-        return not_found();
-    };
-    let Ok(Some(meta)) = store.get_meta(&id) else {
-        return not_found();
-    };
-    let html = herbarium_core::vault::read_html(&store.vault, &id, meta.folder.as_deref())
-        .unwrap_or("<p>Page file missing on disk.</p>".to_string());
-    let csp = if meta.allow_cdn { CSP_ALLOW } else { CSP_BLOCK };
-
-    Response::builder()
-        .status(StatusCode::OK)
-        .header("Content-Type", "text/html; charset=utf-8")
-        .header("Content-Security-Policy", csp)
-        .header("X-Content-Type-Options", "nosniff")
-        .body(Cow::Owned(html.into_bytes()))
-        .unwrap_or_else(|_| not_found())
+pub fn mime_for_path(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("html" | "htm") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("avif") => "image/avif",
+        Some("bmp") => "image/bmp",
+        Some("mp3") => "audio/mpeg",
+        Some("wav") => "audio/wav",
+        Some("ogg" | "oga") => "audio/ogg",
+        Some("mp4") => "video/mp4",
+        Some("webm") => "video/webm",
+        Some("ogv") => "video/ogg",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("ttf") => "font/ttf",
+        Some("otf") => "font/otf",
+        Some("txt" | "text") => "text/plain; charset=utf-8",
+        Some("csv") => "text/csv; charset=utf-8",
+        Some("xml") => "application/xml",
+        Some("pdf") => "application/pdf",
+        Some("wasm") => "application/wasm",
+        _ => "application/octet-stream",
+    }
 }
 
-/// The page id of `herbarium://page/{id}` (host="page", path="/{id}"), or of
-/// the path form `http://herbarium.localhost/page/{id}` (how Windows WebView2
-/// exposes custom schemes). The URL carries it percent-encoded
-/// (file stems may hold spaces or accents); a decoded `/` is rejected.
-fn page_id(uri: &Uri) -> Option<String> {
-    let raw = if uri.host() == Some("page") {
-        uri.path().trim_matches('/')
+/// Percent-decode one path segment exactly once. `None` for invalid UTF-8, an
+/// exact `.`/`..` component, an empty segment, or a decoded separator/NUL.
+/// A `..` inside a longer name (`release..notes.html`) is a valid filename.
+fn decode_segment(raw: &str) -> Option<Cow<'_, str>> {
+    let decoded = percent_decode_str(raw).decode_utf8().ok()?;
+    if decoded.is_empty()
+        || decoded == "."
+        || decoded == ".."
+        || decoded.contains(['/', '\\', '\0'])
+    {
+        return None;
+    }
+    Some(decoded)
+}
+
+pub fn validate_relative_path(raw_rel: &str) -> Option<String> {
+    if raw_rel.starts_with('/') || raw_rel.starts_with('\\') {
+        return None;
+    }
+    if raw_rel.ends_with('/') || raw_rel.ends_with('\\') {
+        return None;
+    }
+
+    let mut out = String::with_capacity(raw_rel.len());
+    for (i, seg) in raw_rel.split('/').enumerate() {
+        let decoded = decode_segment(seg)?;
+        if decoded.starts_with('.')
+            || decoded.contains(':')
+            || decoded.to_ascii_lowercase().ends_with(".json")
+        {
+            return None;
+        }
+        if i > 0 {
+            out.push('/');
+        }
+        out.push_str(&decoded);
+    }
+    Some(out)
+}
+
+fn raw_page_path(uri: &Uri) -> Option<&str> {
+    if uri.host() == Some("page") {
+        Some(uri.path())
+    } else if uri.host() == Some("herbarium.localhost")
+        || uri.host().is_none()
+        || uri.host() == Some("")
+    {
+        uri.path().strip_prefix("/page")
     } else {
-        uri.path().strip_prefix("/page/")?.trim_end_matches('/')
-    };
-    let id = percent_decode_str(raw).decode_utf8().ok()?;
-    (!id.is_empty() && !id.contains(['/', '\\'])).then(|| id.into_owned())
+        None
+    }
 }
 
-fn not_found() -> Response<Cow<'static, [u8]>> {
+pub fn parse_uri_and_referer(uri: &Uri, referer: Option<&str>) -> Option<ParsedRequest> {
+    let raw_path = raw_page_path(uri)?;
+
+    let trimmed = raw_path.trim_start_matches('/');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (first_seg, rest) = match trimmed.split_once('/') {
+        Some((f, r)) => (f, Some(r)),
+        None => (trimmed, None),
+    };
+
+    let rest = rest.filter(|r| !r.is_empty());
+
+    let decoded_first = decode_segment(first_seg)?;
+
+    if let Some(rel) = rest {
+        let validated_rel = validate_relative_path(rel)?;
+        return Some(ParsedRequest {
+            page_id: decoded_first.into_owned(),
+            relative_path: Some(validated_rel),
+        });
+    }
+
+    if let Some((ref_id, validated_rel)) = referer
+        .and_then(extract_page_id_from_referer)
+        .filter(|id| id != decoded_first.as_ref())
+        .and_then(|id| validate_relative_path(first_seg).map(|rel| (id, rel)))
+    {
+        return Some(ParsedRequest {
+            page_id: ref_id,
+            relative_path: Some(validated_rel),
+        });
+    }
+
+    Some(ParsedRequest {
+        page_id: decoded_first.into_owned(),
+        relative_path: None,
+    })
+}
+
+pub fn extract_page_id_from_referer(referer: &str) -> Option<String> {
+    let uri: Uri = referer.parse().ok()?;
+    let raw_path = raw_page_path(&uri)?;
+    let trimmed = raw_path.trim_start_matches('/');
+    let id_part = trimmed.split('/').next()?;
+    decode_segment(id_part).map(Cow::into_owned)
+}
+
+/// Resolve `rel_path` under `page_folder`, which itself must canonically live
+/// inside `vault` (an indexed folder may have been swapped for a symlink).
+pub fn resolve_safe_asset_path(
+    vault: &Path,
+    page_folder: &Path,
+    rel_path: &str,
+) -> Option<PathBuf> {
+    let canon_vault = vault.canonicalize().ok()?;
+    let canon_folder = page_folder.canonicalize().ok()?;
+    if !canon_folder.is_dir() || !canon_folder.starts_with(&canon_vault) {
+        return None;
+    }
+
+    let mut current = canon_folder.clone();
+    for seg in rel_path.split('/') {
+        if seg.is_empty() || seg.starts_with('.') || seg == ".." {
+            return None;
+        }
+        current.push(seg);
+        let meta = std::fs::symlink_metadata(&current).ok()?;
+        if meta.file_type().is_symlink() {
+            return None; // Reject symlinks
+        }
+    }
+
+    if !current.is_file() {
+        return None;
+    }
+
+    let canon_file = current.canonicalize().ok()?;
+    if !canon_file.starts_with(&canon_folder) {
+        return None;
+    }
+
+    if canon_file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("json"))
+        .unwrap_or(false)
+    {
+        return None;
+    }
+
+    Some(current)
+}
+
+pub fn inject_base_tag(html: &str, base_href: &str) -> String {
+    let base_tag = format!("<base href=\"{base_href}\">");
+    let lower = html.to_ascii_lowercase();
+
+    if let Some(insert_at) = lower
+        .find("<head")
+        .and_then(|pos| lower[pos..].find('>').map(|close| pos + close + 1))
+    {
+        let mut result = String::with_capacity(html.len() + base_tag.len() + 2);
+        result.push_str(&html[..insert_at]);
+        result.push('\n');
+        result.push_str(&base_tag);
+        result.push_str(&html[insert_at..]);
+        return result;
+    }
+
+    format!("{base_tag}\n{html}")
+}
+
+fn percent_encode_segment(s: &str) -> String {
+    percent_encoding::utf8_percent_encode(s, FRAGMENT).to_string()
+}
+
+fn serve<R: tauri::Runtime>(
+    app: &AppHandle<R>,
+    request: &Request<Vec<u8>>,
+) -> Response<Cow<'static, [u8]>> {
+    let uri = request.uri();
+    let referer = request
+        .headers()
+        .get("referer")
+        .and_then(|v| v.to_str().ok());
+
+    let parsed = match parse_uri_and_referer(uri, referer) {
+        Some(p) => p,
+        None => return not_found(),
+    };
+
+    // Step 1: Query Host/Store with early lock release
+    let lookup_result = {
+        let state = app.state::<AppState>();
+        let Ok(host) = state.host.lock() else {
+            return not_found();
+        };
+        let Some(store) = host.store() else {
+            return not_found();
+        };
+        match store.get_meta(&parsed.page_id) {
+            Ok(Some(meta)) => Some((store.vault.clone(), meta.folder.clone(), meta.allow_cdn)),
+            Ok(None) => None,
+            Err(_) => return not_found(),
+        }
+    }; // host lock dropped HERE, before disk I/O!
+    let (vault, folder, allow_cdn) = match lookup_result {
+        Some(info) => info,
+        None => return not_found(),
+    };
+
+    // Step 2: Serve asset or page HTML (with NO host lock held!)
+    if let Some(rel) = parsed.relative_path {
+        // Asset request
+        let html_path =
+            herbarium_core::vault::html_path(&vault, &parsed.page_id, folder.as_deref());
+        let page_folder = match html_path.parent() {
+            Some(p) => p,
+            None => &vault,
+        };
+        let file_path = match resolve_safe_asset_path(&vault, page_folder, &rel) {
+            Some(p) => p,
+            None => return not_found(),
+        };
+
+        let bytes = match std::fs::read(&file_path) {
+            Ok(b) => b,
+            Err(_) => return not_found(),
+        };
+
+        let mime = mime_for_path(&file_path);
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", mime)
+            .header("X-Content-Type-Options", "nosniff")
+            .body(Cow::Owned(bytes))
+            .unwrap_or_else(|_| not_found())
+    } else {
+        // Page HTML request
+        let raw_html =
+            match herbarium_core::vault::read_html(&vault, &parsed.page_id, folder.as_deref()) {
+                Ok(h) => h,
+                Err(_) => return not_found(), // Missing file returns 404
+            };
+
+        let base_href = if uri.host() == Some("herbarium.localhost") {
+            format!(
+                "http://herbarium.localhost/page/{}/",
+                percent_encode_segment(&parsed.page_id)
+            )
+        } else {
+            format!(
+                "herbarium://page/{}/",
+                percent_encode_segment(&parsed.page_id)
+            )
+        };
+        let html = inject_base_tag(&raw_html, &base_href);
+
+        let csp = if allow_cdn { CSP_ALLOW } else { CSP_BLOCK };
+
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "text/html; charset=utf-8")
+            .header("Content-Security-Policy", csp)
+            .header("X-Content-Type-Options", "nosniff")
+            .body(Cow::Owned(html.into_bytes()))
+            .unwrap_or_else(|_| not_found())
+    }
+}
+
+pub fn not_found() -> Response<Cow<'static, [u8]>> {
     Response::builder()
         .status(StatusCode::NOT_FOUND)
         .header("Content-Type", "text/html; charset=utf-8")
@@ -79,17 +360,289 @@ fn not_found() -> Response<Cow<'static, [u8]>> {
 mod tests {
     use super::*;
 
-    fn id(uri: &str) -> Option<String> {
-        page_id(&uri.parse().unwrap())
+    fn parse(uri: &str) -> Option<ParsedRequest> {
+        parse_uri_and_referer(&uri.parse().unwrap(), None)
     }
 
     #[test]
     fn page_id_is_percent_decoded_and_cannot_hold_a_path() {
-        assert_eq!(id("herbarium://page/Mon%20cours%20%C3%A9t%C3%A9?v=2").as_deref(), Some("Mon cours été"));
-        assert_eq!(id("http://herbarium.localhost/page/abc/").as_deref(), Some("abc"));
-        assert_eq!(id("herbarium://page/a%2F..%2Fb"), None);
-        assert_eq!(id("herbarium://page/a/b"), None);
-        assert_eq!(id("herbarium://page/%FF"), None);
-        assert_eq!(id("herbarium://other/abc"), None);
+        let req = parse("herbarium://page/Mon%20cours%20%C3%A9t%C3%A9?v=2").unwrap();
+        assert_eq!(req.page_id, "Mon cours été");
+        assert_eq!(req.relative_path, None);
+
+        let req = parse("http://herbarium.localhost/page/abc/").unwrap();
+        assert_eq!(req.page_id, "abc");
+        assert_eq!(req.relative_path, None);
+
+        assert_eq!(parse("herbarium://page/a%2F..%2Fb"), None);
+        assert_eq!(parse("herbarium://page/%FF"), None);
+        assert_eq!(parse("herbarium://other/abc"), None);
+    }
+
+    #[test]
+    fn parse_with_referer_routes_relative_asset() {
+        let req = parse_uri_and_referer(
+            &"herbarium://page/style.css".parse().unwrap(),
+            Some("herbarium://page/my-page/"),
+        )
+        .unwrap();
+        assert_eq!(req.page_id, "my-page");
+        assert_eq!(req.relative_path.as_deref(), Some("style.css"));
+    }
+
+    #[test]
+    fn asset_paths_are_parsed_and_percent_decoded() {
+        let req = parse("herbarium://page/abc/style.css").unwrap();
+        assert_eq!(req.page_id, "abc");
+        assert_eq!(req.relative_path.as_deref(), Some("style.css"));
+
+        let req = parse("herbarium://page/abc/assets/images/logo.png").unwrap();
+        assert_eq!(req.page_id, "abc");
+        assert_eq!(req.relative_path.as_deref(), Some("assets/images/logo.png"));
+
+        let req = parse("http://herbarium.localhost/page/my-page/theme.css").unwrap();
+        assert_eq!(req.page_id, "my-page");
+        assert_eq!(req.relative_path.as_deref(), Some("theme.css"));
+
+        let req = parse("herbarium://page/my%20page/my%20image.png").unwrap();
+        assert_eq!(req.page_id, "my page");
+        assert_eq!(req.relative_path.as_deref(), Some("my image.png"));
+    }
+
+    #[test]
+    fn rejects_traversal_attacks() {
+        assert_eq!(parse("herbarium://page/abc/.."), None);
+        assert_eq!(parse("herbarium://page/abc/../secret.txt"), None);
+        assert_eq!(parse("herbarium://page/abc/%2e%2e"), None);
+        assert_eq!(parse("herbarium://page/abc/%2e%2e/secret.txt"), None);
+        assert_eq!(parse("herbarium://page/abc/%2E%2E/secret.txt"), None);
+        assert_eq!(parse("herbarium://page/abc/a%2F..%2Fb"), None);
+        assert_eq!(parse("herbarium://page/abc/assets/..%2fsecret"), None);
+        assert_eq!(parse("herbarium://page/abc/assets//logo.png"), None);
+    }
+
+    #[test]
+    fn rejects_hidden_segments() {
+        assert_eq!(parse("herbarium://page/abc/.herbarium"), None);
+        assert_eq!(parse("herbarium://page/abc/.git/config"), None);
+        assert_eq!(parse("herbarium://page/abc/.env"), None);
+        assert_eq!(parse("herbarium://page/abc/assets/.secret.png"), None);
+    }
+
+    #[test]
+    fn rejects_json_sidecars() {
+        assert_eq!(parse("herbarium://page/abc/page.json"), None);
+        assert_eq!(parse("herbarium://page/abc/abc.JSON"), None);
+        assert_eq!(parse("herbarium://page/abc/assets/data.json"), None);
+    }
+
+    #[test]
+    fn extract_page_id_from_referer_header() {
+        assert_eq!(
+            extract_page_id_from_referer("herbarium://page/my-doc?v=1").as_deref(),
+            Some("my-doc")
+        );
+        assert_eq!(
+            extract_page_id_from_referer("http://herbarium.localhost/page/my-doc/").as_deref(),
+            Some("my-doc")
+        );
+        assert_eq!(
+            extract_page_id_from_referer("herbarium://page/my%20doc").as_deref(),
+            Some("my doc")
+        );
+        assert_eq!(extract_page_id_from_referer("herbarium://page/.."), None);
+    }
+
+    #[test]
+    fn mime_by_extension_resolution() {
+        assert_eq!(
+            mime_for_path(Path::new("file.html")),
+            "text/html; charset=utf-8"
+        );
+        assert_eq!(
+            mime_for_path(Path::new("file.css")),
+            "text/css; charset=utf-8"
+        );
+        assert_eq!(
+            mime_for_path(Path::new("file.js")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            mime_for_path(Path::new("file.mjs")),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(mime_for_path(Path::new("file.png")), "image/png");
+        assert_eq!(mime_for_path(Path::new("file.jpg")), "image/jpeg");
+        assert_eq!(mime_for_path(Path::new("file.svg")), "image/svg+xml");
+        assert_eq!(mime_for_path(Path::new("file.woff2")), "font/woff2");
+        assert_eq!(mime_for_path(Path::new("file.wasm")), "application/wasm");
+        assert_eq!(
+            mime_for_path(Path::new("file.xyz")),
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn csp_contains_required_directives() {
+        assert!(CSP_ALLOW.contains("'unsafe-eval'"));
+        assert!(CSP_ALLOW.contains("'wasm-unsafe-eval'"));
+        assert!(CSP_ALLOW.contains("worker-src blob: 'self'"));
+        assert!(CSP_ALLOW.contains("https://esm.sh"));
+        assert!(CSP_ALLOW.contains("img-src 'self'"));
+        assert!(CSP_ALLOW.contains("style-src 'self'"));
+        assert!(CSP_ALLOW.contains("font-src 'self'"));
+        assert!(CSP_ALLOW.contains("media-src 'self'"));
+        assert!(CSP_ALLOW.contains("base-uri 'self'"));
+
+        assert!(CSP_BLOCK.contains("img-src 'self'"));
+        assert!(CSP_BLOCK.contains("style-src 'self'"));
+        assert!(CSP_BLOCK.contains("font-src 'self'"));
+        assert!(CSP_BLOCK.contains("media-src 'self'"));
+        assert!(CSP_BLOCK.contains("connect-src 'none'"));
+        assert!(CSP_BLOCK.contains("base-uri 'self'"));
+    }
+
+    #[test]
+    fn base_tag_injection_behavior() {
+        let html_head = "<html><head><title>Test</title></head><body>Hello</body></html>";
+        let injected = inject_base_tag(html_head, "herbarium://page/my-page/");
+        assert!(injected.contains("<head>\n<base href=\"herbarium://page/my-page/\">"));
+
+        let html_no_head = "<div>Snippet</div>";
+        let injected_no_head = inject_base_tag(html_no_head, "herbarium://page/my-page/");
+        assert!(injected_no_head.starts_with("<base href=\"herbarium://page/my-page/\">"));
+    }
+
+    #[test]
+    fn safe_asset_path_disk_validation() {
+        let unique = format!(
+            "herbarium_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let temp_dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(temp_dir.join("sub")).unwrap();
+
+        let valid_file = temp_dir.join("sub").join("test.png");
+        std::fs::write(&valid_file, b"fake png").unwrap();
+
+        let json_file = temp_dir.join("sub").join("sidecar.json");
+        std::fs::write(&json_file, b"{}").unwrap();
+
+        #[cfg(unix)]
+        let symlink_file = temp_dir.join("sym.png");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&valid_file, &symlink_file).unwrap();
+
+        // 1. Valid file resolves
+        assert!(resolve_safe_asset_path(&temp_dir, &temp_dir, "sub/test.png").is_some());
+
+        // 2. Sidecar .json is rejected
+        assert_eq!(
+            resolve_safe_asset_path(&temp_dir, &temp_dir, "sub/sidecar.json"),
+            None
+        );
+
+        // 3. Symlink is rejected
+        #[cfg(unix)]
+        assert_eq!(
+            resolve_safe_asset_path(&temp_dir, &temp_dir, "sym.png"),
+            None
+        );
+
+        // 4. Missing file returns None
+        assert_eq!(
+            resolve_safe_asset_path(&temp_dir, &temp_dir, "sub/missing.png"),
+            None
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn double_dots_inside_filenames_are_served_but_components_are_not() {
+        let req = parse("herbarium://page/abc/release..notes.png").unwrap();
+        assert_eq!(req.relative_path.as_deref(), Some("release..notes.png"));
+        let req = parse("herbarium://page/release..notes").unwrap();
+        assert_eq!(req.page_id, "release..notes");
+        assert_eq!(parse("herbarium://page/abc/a/%2e%2e/b"), None);
+        assert_eq!(parse("herbarium://page/abc/a%5Cb"), None);
+
+        let dir = tempfile_dir("dots");
+        std::fs::write(dir.join("release..notes.png"), b"x").unwrap();
+        assert!(resolve_safe_asset_path(&dir, &dir, "release..notes.png").is_some());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn page_folder_swapped_for_outside_symlink_is_rejected() {
+        let root = tempfile_dir("swap");
+        let vault = root.join("vault");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("secret.png"), b"secret").unwrap();
+        std::os::unix::fs::symlink(&outside, vault.join("folder")).unwrap();
+
+        assert_eq!(
+            resolve_safe_asset_path(&vault, &vault.join("folder"), "secret.png"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_subdirectory_cannot_escape_vault() {
+        let root = tempfile_dir("nested");
+        let vault = root.join("vault");
+        let outside = root.join("outside");
+        std::fs::create_dir_all(vault.join("assets")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(vault.join("assets").join("ok.png"), b"ok").unwrap();
+        std::fs::write(outside.join("secret.png"), b"secret").unwrap();
+        std::os::unix::fs::symlink(&outside, vault.join("assets").join("link")).unwrap();
+
+        // A real in-vault asset still resolves.
+        assert!(resolve_safe_asset_path(&vault, &vault.join("assets"), "ok.png").is_some());
+        // Anything reached through the escaping directory symlink is refused.
+        assert_eq!(
+            resolve_safe_asset_path(&vault, &vault.join("assets"), "link/secret.png"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sibling_directory_with_shared_prefix_is_not_inside_vault() {
+        let root = tempfile_dir("prefix");
+        let vault = root.join("vault");
+        let sibling = root.join("vault-evil");
+        std::fs::create_dir_all(&vault).unwrap();
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::write(sibling.join("secret.png"), b"secret").unwrap();
+
+        assert_eq!(
+            resolve_safe_asset_path(&vault, &sibling, "secret.png"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn tempfile_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "herbarium_proto_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
     }
 }

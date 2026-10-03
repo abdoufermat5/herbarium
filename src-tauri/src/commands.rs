@@ -1,12 +1,14 @@
 // IPC commands exposed to the frontend. Vault selection is app-level; every
 // other feature goes through `invoke_op`, which runs a registered operation.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use herbarium_core::{Caller, Host};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tauri::State;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 use crate::config::{self, Config};
 use crate::editors::{self, Choice, EditorInfo};
@@ -29,7 +31,11 @@ fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
         report.removed,
         report.total
     );
-    let cfg = Config { vault_path: canonical };
+    let mut cfg = config::load().unwrap_or_default();
+    cfg.vault_path = canonical.clone();
+    if let Some(p) = &canonical {
+        config::add_recent(&mut cfg, p);
+    }
     config::save(&cfg)?;
     Ok(cfg)
 }
@@ -45,7 +51,11 @@ pub async fn set_vault(state: State<'_, AppState>, path: String) -> CmdResult<Co
 }
 
 #[tauri::command]
-pub async fn create_vault(state: State<'_, AppState>, parent_dir: String, name: String) -> CmdResult<Config> {
+pub async fn create_vault(
+    state: State<'_, AppState>,
+    parent_dir: String,
+    name: String,
+) -> CmdResult<Config> {
     let name = name.trim();
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return Err("invalid folder name".into());
@@ -54,6 +64,232 @@ pub async fn create_vault(state: State<'_, AppState>, parent_dir: String, name: 
     open_vault(&state, &target.to_string_lossy())
 }
 
+#[tauri::command]
+pub async fn remove_recent_vault(path: String) -> CmdResult<Config> {
+    let mut cfg = config::load().unwrap_or_default();
+    config::remove_recent(&mut cfg, &path);
+    config::save(&cfg)?;
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub async fn set_close_to_tray(enabled: bool) -> CmdResult<Config> {
+    let mut cfg = config::load().unwrap_or_default();
+    cfg.close_to_tray = enabled;
+    config::save(&cfg)?;
+    Ok(cfg)
+}
+
+#[tauri::command]
+pub async fn reveal_page(state: State<'_, AppState>, page_id: String) -> CmdResult<()> {
+    let path = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+        let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
+        let folder = page["meta"]["folder"].as_str().map(str::to_owned);
+        herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref())
+    };
+    if !path.is_file() {
+        return Err(format!("page file not found: {}", path.display()));
+    }
+    tauri_plugin_opener::reveal_item_in_dir(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn reveal_vault(state: State<'_, AppState>) -> CmdResult<()> {
+    let vault = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        host.vault_path().ok_or("no vault open")?.to_path_buf()
+    };
+    if !vault.is_dir() {
+        return Err(format!("vault directory not found: {}", vault.display()));
+    }
+    tauri_plugin_opener::reveal_item_in_dir(&vault).map_err(|e| e.to_string())
+}
+
+fn archive_dir<W: std::io::Write + std::io::Seek>(
+    root: &Path,
+    dir: &Path,
+    zip: &mut ZipWriter<W>,
+    options: SimpleFileOptions,
+    excluded: &[PathBuf],
+) -> Result<(), String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() {
+            continue;
+        }
+
+        let Ok(rel_path) = path.strip_prefix(root) else {
+            continue;
+        };
+
+        let rel_str: String = rel_path
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+
+        // Exclusions:
+        // 1. Exclude .herbarium/index.sqlite*
+        if rel_str == ".herbarium/index.sqlite" || rel_str.starts_with(".herbarium/index.sqlite") {
+            continue;
+        }
+        // 2. Exclude .herbarium/trash and anything inside it
+        if rel_str == ".herbarium/trash" || rel_str.starts_with(".herbarium/trash/") {
+            continue;
+        }
+        // 3. Exclude the destination archive and its in-progress temp file
+        // when they live inside the vault.
+        if !excluded.is_empty()
+            && let Ok(canon) = path.canonicalize()
+            && excluded.contains(&canon)
+        {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            let dir_name = if rel_str.ends_with('/') {
+                rel_str.clone()
+            } else {
+                format!("{rel_str}/")
+            };
+            zip.add_directory(&dir_name, options)
+                .map_err(|e| e.to_string())?;
+            archive_dir(root, &path, zip, options, excluded)?;
+        } else if file_type.is_file() {
+            zip.start_file(&rel_str, options)
+                .map_err(|e| e.to_string())?;
+            let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+            std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+/// Unique temp path beside `dest` so the final rename stays on one filesystem
+/// and is atomic.
+fn temp_archive_path(dest: &Path) -> PathBuf {
+    let parent = dest.parent().filter(|p| !p.as_os_str().is_empty());
+    let name = dest
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "herbarium-export.zip".to_owned());
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp_name = format!(".{name}.tmp-{}-{unique}", std::process::id());
+    match parent {
+        Some(p) => p.join(temp_name),
+        None => PathBuf::from(temp_name),
+    }
+}
+
+/// Build a ZIP with `build`, sync it, then atomically rename it over `dest`.
+/// Any failure removes the temp file and leaves an existing archive untouched.
+fn write_zip_atomically<F>(dest: &Path, build: F) -> Result<(), String>
+where
+    F: FnOnce(&mut ZipWriter<std::fs::File>, &Path) -> Result<(), String>,
+{
+    if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create parent dir for zip: {e}"))?;
+    }
+
+    let temp_path = temp_archive_path(dest);
+    let outcome = (|| -> Result<(), String> {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+            .map_err(|e| format!("cannot create zip file: {e}"))?;
+        let mut zip = ZipWriter::new(file);
+        build(&mut zip, &temp_path)?;
+        let file = zip
+            .finish()
+            .map_err(|e| format!("failed to finish zip: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("failed to sync zip: {e}"))?;
+        Ok(())
+    })();
+
+    if let Err(e) = outcome {
+        let _ = std::fs::remove_file(&temp_path);
+        return Err(e);
+    }
+
+    std::fs::rename(&temp_path, dest).map_err(|e| {
+        let _ = std::fs::remove_file(&temp_path);
+        format!("cannot replace {}: {e}", dest.display())
+    })
+}
+
+fn export_vault_to(vault: &Path, dest: &Path) -> Result<(), String> {
+    if !vault.is_dir() {
+        return Err(format!("vault directory not found: {}", vault.display()));
+    }
+    write_zip_atomically(dest, |zip, temp_path| {
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        let mut excluded = Vec::new();
+        if let Ok(canon_dest) = dest.canonicalize() {
+            excluded.push(canon_dest);
+        }
+        if let Ok(canon_temp) = temp_path.canonicalize() {
+            excluded.push(canon_temp);
+        }
+        archive_dir(vault, vault, zip, options, &excluded)
+            .map_err(|e| format!("failed to archive vault: {e}"))
+    })
+}
+
+fn export_page_to(html_file: &Path, page_id: &str, dest: &Path) -> Result<(), String> {
+    if !html_file.is_file() {
+        return Err(format!("page file not found: {}", html_file.display()));
+    }
+    write_zip_atomically(dest, |zip, _temp_path| {
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file(format!("{page_id}.html"), options)
+            .map_err(|e| e.to_string())?;
+        let mut f = std::fs::File::open(html_file).map_err(|e| e.to_string())?;
+        std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+        Ok(())
+    })
+}
+
+#[tauri::command]
+pub async fn export_vault(state: State<'_, AppState>, dest_zip: String) -> CmdResult<()> {
+    let vault = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        host.vault_path().ok_or("no vault open")?.to_path_buf()
+    };
+    export_vault_to(&vault, &PathBuf::from(&dest_zip))
+}
+
+#[tauri::command]
+pub async fn export_page(
+    state: State<'_, AppState>,
+    page_id: String,
+    dest_zip: String,
+) -> CmdResult<()> {
+    let (vault, folder) = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+        let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
+        let folder = page["meta"]["folder"].as_str().map(str::to_owned);
+        (vault, folder)
+    };
+    let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
+    export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
+}
 #[tauri::command]
 pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
     let host = state.host.lock().map_err(|e| e.to_string())?;
@@ -98,5 +334,105 @@ pub async fn open_external(app: tauri::AppHandle, url: String) -> CmdResult<()> 
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!("only web links can be opened: {url}"));
     }
-    app.opener().open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())
+    app.opener()
+        .open_url(parsed.as_str(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "herbarium_cmd_{tag}_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn zip_names(path: &Path) -> Vec<String> {
+        let file = std::fs::File::open(path).unwrap();
+        let mut archive = zip::ZipArchive::new(file).unwrap();
+        (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect()
+    }
+
+    /// A failing build must never truncate or replace the selected archive.
+    #[test]
+    fn failed_zip_preserves_existing_archive() {
+        let dir = temp_dir("fail");
+        let dest = dir.join("vault.zip");
+        std::fs::write(&dest, b"OLD-ARCHIVE").unwrap();
+
+        let err = write_zip_atomically(&dest, |_zip, _temp| -> Result<(), String> {
+            Err("boom".to_string())
+        })
+        .unwrap_err();
+        assert!(err.contains("boom"));
+        assert_eq!(std::fs::read(&dest).unwrap(), b"OLD-ARCHIVE");
+
+        // The temp file is cleaned up: only the original archive remains.
+        let mut names: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec![std::ffi::OsString::from("vault.zip")]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Export produces a readable ZIP, hides database/trash internals, keeps
+    /// valid double-dot filenames, and never archives its own destination.
+    #[test]
+    fn export_writes_valid_zip_and_skips_metadata_and_destination() {
+        let dir = temp_dir("vault");
+        std::fs::create_dir_all(dir.join("sub")).unwrap();
+        std::fs::create_dir_all(dir.join(".herbarium/trash/gone")).unwrap();
+        std::fs::write(dir.join("notes.html"), b"<p>hi</p>").unwrap();
+        std::fs::write(dir.join("sub/release..notes.html"), b"<p>deep</p>").unwrap();
+        std::fs::write(dir.join(".herbarium/index.sqlite"), b"db").unwrap();
+        std::fs::write(dir.join(".herbarium/index.sqlite-wal"), b"wal").unwrap();
+        std::fs::write(dir.join(".herbarium/network.json"), b"{}").unwrap();
+        std::fs::write(dir.join(".herbarium/trash/gone/gone.html"), b"t").unwrap();
+
+        // Destination inside the vault must not include itself.
+        let dest = dir.join("export.zip");
+        export_vault_to(&dir, &dest).unwrap();
+
+        let names = zip_names(&dest);
+        assert!(names.contains(&"notes.html".to_string()));
+        assert!(names.contains(&"sub/release..notes.html".to_string()));
+        assert!(names.contains(&".herbarium/network.json".to_string()));
+        assert!(
+            !names
+                .iter()
+                .any(|n| n.starts_with(".herbarium/index.sqlite"))
+        );
+        assert!(!names.iter().any(|n| n.starts_with(".herbarium/trash")));
+        assert!(!names.contains(&"export.zip".to_string()));
+        assert!(!names.iter().any(|n| n.contains(".tmp-")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A successful export replaces (not appends to) a prior archive.
+    #[test]
+    fn successful_export_replaces_previous_archive() {
+        let dir = temp_dir("replace");
+        std::fs::write(dir.join("page.html"), b"<p>1</p>").unwrap();
+        let dest = dir.join("out.zip");
+        std::fs::write(&dest, b"not a zip yet").unwrap();
+
+        export_vault_to(&dir, &dest).unwrap();
+
+        assert!(zip_names(&dest).contains(&"page.html".to_string()));
+        assert!(!std::fs::read(&dest).unwrap().starts_with(b"not a zip"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

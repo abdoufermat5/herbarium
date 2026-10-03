@@ -11,6 +11,12 @@
     "core:window:allow-start-dragging",
     "core:window:allow-is-maximized",
     "dialog:default",
-    "notification:default"
+    "notification:default",
+    "opener:default",
+    "core:window:allow-hide",
+    "core:window:allow-destroy",
+    "core:window:allow-show",
+    "core:window:allow-unminimize",
+    "core:window:allow-set-focus"
   ]
 }

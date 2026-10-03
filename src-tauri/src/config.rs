@@ -1,6 +1,5 @@
-// App settings shared by the desktop window and `herbarium mcp`: currently
-// just the last opened vault, in `<config dir>/io.herbarium.desktop/config.json`
-// (the same directory Tauri reports as `app_config_dir`).
+// App settings shared by the desktop window and `herbarium mcp`.
+// Stored in `<config dir>/io.herbarium.desktop/config.json`.
 
 use std::path::PathBuf;
 
@@ -9,10 +8,28 @@ use serde::{Deserialize, Serialize};
 /// Must match `identifier` in `tauri.conf.json`.
 const IDENTIFIER: &str = "io.herbarium.desktop";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+fn default_close_to_tray() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     pub vault_path: Option<String>,
+    #[serde(default)]
+    pub recent_vaults: Vec<String>,
+    #[serde(default = "default_close_to_tray")]
+    pub close_to_tray: bool,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            vault_path: None,
+            recent_vaults: Vec::new(),
+            close_to_tray: true,
+        }
+    }
 }
 
 fn path() -> Result<PathBuf, String> {
@@ -24,11 +41,56 @@ fn path() -> Result<PathBuf, String> {
 }
 
 pub fn load() -> Result<Config, String> {
-    let raw = std::fs::read_to_string(path()?).ok();
-    Ok(raw.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default())
+    let config_path = path()?;
+    if !config_path.exists() {
+        return Ok(Config::default());
+    }
+    let raw = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!(
+                "herbarium: failed to read config file {}: {}",
+                config_path.display(),
+                e
+            );
+            return Ok(Config::default());
+        }
+    };
+    match serde_json::from_str::<Config>(&raw) {
+        Ok(cfg) => Ok(cfg),
+        Err(e) => {
+            eprintln!(
+                "herbarium: corrupt config file {}: {}",
+                config_path.display(),
+                e
+            );
+            let bak_path = config_path.with_file_name("config.json.bak");
+            if let Err(err) = std::fs::rename(&config_path, &bak_path) {
+                eprintln!(
+                    "herbarium: failed to rename corrupt config file to {}: {}",
+                    bak_path.display(),
+                    err
+                );
+            }
+            Ok(Config::default())
+        }
+    }
 }
 
 pub fn save(cfg: &Config) -> Result<(), String> {
+    let config_path = path()?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(path()?, json).map_err(|e| e.to_string())
+    herbarium_core::vault::write_atomic(&config_path, json.as_bytes()).map_err(|e| e.to_string())
+}
+
+pub fn add_recent(cfg: &mut Config, path: &str) {
+    cfg.recent_vaults.retain(|p| p != path);
+    cfg.recent_vaults.insert(0, path.to_string());
+    if cfg.recent_vaults.len() > 8 {
+        cfg.recent_vaults.truncate(8);
+    }
+}
+
+pub fn remove_recent(cfg: &mut Config, path: &str) {
+    cfg.recent_vaults.retain(|p| p != path);
 }
