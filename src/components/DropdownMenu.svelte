@@ -200,7 +200,7 @@
 
             {#if item.checked}
               <span class="dropdown-item-check" aria-hidden="true">
-                <Icon name="check" size={13} stroke={2.2} />
+                <Icon name="check" size={13} />
               </span>
             {/if}
           </button>

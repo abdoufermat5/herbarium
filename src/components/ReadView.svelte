@@ -205,7 +205,7 @@
       title={t("read.back")}
       aria-label={t("read.backLabel")}
     >
-      <Icon name="arrow-left" size={18} />
+      <Icon name="arrow-left" size={16} />
     </button>
 
     {#if page}
@@ -218,7 +218,7 @@
             <span class="loc"><Icon name="folder" size={12} />{page.meta.folder}</span>
           {/if}
           {#each page.meta.tags as tag (tag)}
-            <span class="chip chip-muted">#{tag}</span>
+            <span class="chip chip-muted">{tag}</span>
           {/each}
         </div>
       </div>
@@ -263,13 +263,13 @@
   {:else if page}
     <div class="review-bar">
       {#if page.meta.nextReview}
-        <span class="rb-label"><Icon name="calendar-clock" size={13} />{t("read.nextReview")}</span>
+        <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.nextReview")}</span>
         <span class="rb-date" class:overdue={due?.overdue}>
           {fmtDate(page.meta.nextReview)}
           {#if due?.overdue}· {due.label}{/if}
         </span>
         <span class="rb-sep" aria-hidden="true"></span>
-        <span class="rb-label">{t("read.reschedule")}</span>
+        <span class="rb-label eyebrow">{t("read.reschedule")}</span>
         <div class="rb-btns">
           {#each REVIEW_INTERVALS as days (days)}
             <button
@@ -286,7 +286,7 @@
           {t("common.clear")}
         </button>
       {:else}
-        <span class="rb-label"><Icon name="calendar-clock" size={13} />{t("read.reviewIn")}</span>
+        <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.reviewIn")}</span>
         <div class="rb-btns">
           {#each REVIEW_INTERVALS as days (days)}
             <button
@@ -336,7 +336,7 @@
       {#if app.inspectorOpen}
         <aside class="inspector" aria-label={t("insp.label")}>
           <section class="insp-section">
-            <h2 class="insp-title"><Icon name="file-text" size={13} />{t("read.details")}</h2>
+            <h2 class="eyebrow">{t("read.details")}</h2>
             <div class="field">
               <label for="d-title">{t("insp.title")}</label>
               <input id="d-title" type="text" bind:value={dTitle} />
@@ -384,7 +384,7 @@
           </section>
 
           <section class="insp-section">
-            <h2 class="insp-title"><Icon name="clock" size={13} />{t("insp.activity")}</h2>
+            <h2 class="eyebrow">{t("insp.activity")}</h2>
             <dl class="facts">
               <div><dt>{t("insp.created")}</dt><dd>{fmtDate(page.meta.createdAt)}</dd></div>
               <div><dt>{t("insp.updated")}</dt><dd>{timeAgo(page.meta.updatedAt)}</dd></div>
@@ -399,8 +399,8 @@
             </dl>
           </section>
 
-          <section class="insp-section danger-zone">
-            <h2 class="insp-title"><Icon name="trash-2" size={13} />{t("insp.danger")}</h2>
+          <section class="insp-section">
+            <h2 class="eyebrow">{t("insp.danger")}</h2>
             <button
               class="btn btn-sm btn-danger delete-btn"
               class:confirming={confirmDelete}
@@ -443,8 +443,8 @@
   .bar {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 9px 14px;
+    gap: 12px;
+    padding: 10px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     z-index: 5;
@@ -456,13 +456,15 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
   }
 
   .title {
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 500;
+    line-height: 1.2;
+    letter-spacing: -0.02em;
   }
 
   .meta {
@@ -489,22 +491,22 @@
 
   .net.on {
     color: var(--ok);
-    border-color: var(--ok);
+    border-color: transparent;
     background: var(--ok-soft);
   }
 
   .details-btn.active {
-    background: var(--accent-soft);
-    border-color: var(--accent);
+    background: var(--sunken);
+    border-color: var(--border-hover);
     color: var(--accent-strong);
   }
 
   .review-bar {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    padding: 7px 14px;
+    padding: 8px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--raised);
     font-size: 12.5px;
@@ -515,7 +517,7 @@
   .rb-label {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
   }
 
   .rb-date {
@@ -523,18 +525,19 @@
     align-items: center;
     gap: 5px;
     color: var(--text);
-    font-weight: 600;
+    font-family: var(--mono);
+    font-size: 12px;
   }
 
   .rb-date.overdue {
-    color: var(--warn);
+    color: var(--danger);
   }
 
   .rb-sep {
     width: 1px;
     height: 14px;
     background: var(--border-strong);
-    margin: 0 2px;
+    margin: 0 4px;
   }
 
   .rb-btns {
@@ -544,6 +547,7 @@
 
   .rb-last {
     margin-left: auto;
+    font-size: 12px;
   }
 
   .content {
@@ -563,7 +567,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 14px;
+    padding: 8px 16px;
     background: var(--warn-soft);
     color: var(--warn);
     font-size: 12.5px;
@@ -586,17 +590,19 @@
     justify-content: center;
     gap: 10px;
     color: var(--muted);
+    font-size: 13px;
     background: var(--surface);
     z-index: 1;
   }
 
+  /* Saved pages render on white regardless of theme — they bring their own styles. */
   iframe {
     width: 100%;
     height: 100%;
     border: none;
-    background: #fff;
+    background: #ffffff;
     opacity: 0;
-    transition: opacity var(--t-med) var(--ease-out);
+    transition: opacity var(--t-slow) var(--ease-out);
     display: block;
   }
 
@@ -611,39 +617,24 @@
     background: var(--raised);
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 14px;
+    padding: 24px 20px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
-    animation: insp-in var(--t-med) var(--ease-out);
+    gap: 28px;
+    animation: insp-in var(--t-slow) var(--ease-out);
   }
 
   @keyframes insp-in {
     from {
-      transform: translateX(10px);
+      transform: translateX(12px);
       opacity: 0;
-    }
-    to {
-      transform: none;
-      opacity: 1;
     }
   }
 
   .insp-section {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-  }
-
-  .insp-title {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 11.5px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    color: var(--muted);
+    gap: 12px;
   }
 
   .insp-actions {
@@ -655,7 +646,6 @@
   .facts {
     display: flex;
     flex-direction: column;
-    gap: 6px;
     margin: 0;
   }
 
@@ -663,7 +653,13 @@
     display: flex;
     justify-content: space-between;
     gap: 10px;
+    padding: 8px 0;
     font-size: 12.5px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .facts > div:first-child {
+    border-top: 1px solid var(--border);
   }
 
   .facts dt {
@@ -673,18 +669,19 @@
   .facts dd {
     margin: 0;
     color: var(--text);
+    font-family: var(--mono);
+    font-size: 11.5px;
     text-align: right;
   }
 
-  .danger-zone {
-    border-top: 1px solid var(--border);
-    padding-top: 14px;
+  .delete-btn {
+    align-self: flex-start;
   }
 
   .delete-btn.confirming {
-    background: var(--danger);
-    border-color: var(--danger);
-    color: #fff;
+    background: var(--danger-fill);
+    border-color: var(--danger-fill);
+    color: var(--on-danger);
   }
 
   .hint {
@@ -700,24 +697,27 @@
     justify-content: center;
     gap: 10px;
     color: var(--muted);
-    padding: 30px;
+    padding: 32px;
   }
 
   .err {
     display: flex;
     flex-direction: column;
     gap: 8px;
-    padding: 20px 24px;
+    padding: 28px 32px;
     max-width: 460px;
   }
 
   .err strong {
-    font-size: 15px;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
   }
 
   .err-actions {
     display: flex;
     gap: 8px;
-    margin-top: 4px;
+    margin-top: 8px;
   }
 </style>

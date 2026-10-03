@@ -36,7 +36,7 @@
 
 <aside class="sidebar">
   <div class="brand">
-    <div class="brand-mark"><Icon name="leaf" size={19} /></div>
+    <div class="brand-mark"><Icon name="leaf" size={16} /></div>
     <div class="brand-text">
       <strong>Herbarium</strong>
       {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
@@ -78,7 +78,7 @@
           aria-expanded={foldersOpen}
           onclick={() => (foldersOpen = !foldersOpen)}
         >
-          <span class="chev" class:open={foldersOpen}><Icon name="chevron-right" size={13} /></span>
+          <span class="chev" class:open={foldersOpen}><Icon name="chevron-right" size={10} /></span>
           {t("sidebar.folders")}
         </button>
         {#if foldersOpen}
@@ -107,7 +107,7 @@
           aria-expanded={tagsOpen}
           onclick={() => (tagsOpen = !tagsOpen)}
         >
-          <span class="chev" class:open={tagsOpen}><Icon name="chevron-right" size={13} /></span>
+          <span class="chev" class:open={tagsOpen}><Icon name="chevron-right" size={10} /></span>
           {t("sidebar.tags")}
         </button>
         {#if tagsOpen}
@@ -175,33 +175,34 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 16px 14px 14px;
+    padding: 20px 18px 18px;
   }
   .brand-mark {
     flex: none;
-    width: 36px;
-    height: 36px;
+    width: 28px;
+    height: 28px;
     display: grid;
     place-items: center;
-    border-radius: var(--radius);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    border-radius: var(--radius-sm);
+    background: var(--leaf-soft);
+    color: var(--leaf);
   }
   .brand-text {
     display: flex;
     flex-direction: column;
     min-width: 0;
-    line-height: 1.25;
+    line-height: 1.2;
   }
   .brand-text strong {
     font-family: var(--font-display);
-    font-size: 16.5px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 19px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
     color: var(--text);
   }
   .brand-vault {
-    font-size: 11.5px;
+    font-family: var(--mono);
+    font-size: 10.5px;
     color: var(--muted);
   }
 
@@ -209,42 +210,48 @@
     flex: 1;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 0 10px 10px;
+    padding: 4px 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 22px;
   }
   .nav {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
   }
 
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 7px 10px;
+    gap: 10px;
+    padding: 6px 10px;
     border-radius: var(--radius-sm);
     font-size: 13.5px;
-    font-weight: 500;
     color: var(--text-soft);
     text-align: left;
-    transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+    transition:
+      background var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
   }
   .nav-item:hover {
     background: var(--sunken);
     color: var(--text);
   }
   .nav-item.active {
-    background: var(--accent-soft);
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
     color: var(--accent-strong);
+    font-weight: 500;
   }
   .nav-icon {
     flex: none;
     display: grid;
     place-items: center;
-    opacity: 0.85;
+    color: var(--muted);
+  }
+  .nav-item.active .nav-icon {
+    color: var(--accent-strong);
   }
   .nav-label {
     flex: 1;
@@ -254,12 +261,13 @@
     margin-left: auto;
   }
   .nav-sub {
-    font-weight: 400;
+    font-size: 13px;
     color: var(--muted);
   }
   .nav-sub .count {
     margin-left: auto;
-    font-size: 11.5px;
+    font-family: var(--mono);
+    font-size: 10.5px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
   }
@@ -267,21 +275,22 @@
   .group {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
   }
   .group-title {
     display: flex;
     align-items: center;
-    gap: 5px;
-    padding: 4px 10px 8px;
+    gap: 6px;
+    padding: 2px 10px 6px;
     font-size: 11px;
-    font-weight: 600;
+    font-weight: 500;
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
     color: var(--muted);
+    border-radius: var(--radius-xs);
   }
   .group-title:hover {
-    color: var(--text-soft);
+    color: var(--text);
   }
   .chev {
     display: grid;
@@ -294,26 +303,27 @@
   .list {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
   }
 
   .hint {
     display: flex;
     gap: 8px;
-    padding: 10px 10px;
+    padding: 12px;
     font-size: 12px;
-    line-height: 1.45;
+    line-height: 1.5;
     color: var(--muted);
-    border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
   }
   .hint :global(svg) {
-    margin-top: 1px;
+    margin-top: 2px;
   }
 
   .foot {
     flex: none;
-    padding: 10px 10px 12px;
+    padding: 10px 10px 14px;
     border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
@@ -325,17 +335,19 @@
     align-items: center;
     gap: 8px;
     width: 100%;
-    padding: 7px 10px;
+    padding: 6px 6px 6px 10px;
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--muted);
     font-size: 13px;
-    transition: border-color var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+    transition:
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
   }
   .search-btn:hover {
     border-color: var(--border-hover);
-    color: var(--text-soft);
+    color: var(--text);
   }
   .search-btn span {
     flex: 1;

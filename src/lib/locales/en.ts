@@ -108,7 +108,6 @@ export const en = {
   "list.grid": "Grid view",
   "list.list": "List view",
   "list.import": "Import",
-  "list.filtering": "Filtering:",
   "list.clearFilters": "Clear filters",
   "list.noMatch": "Nothing matches “{query}”",
   "list.noMatchHint": "Try a different word, or clear the search.",

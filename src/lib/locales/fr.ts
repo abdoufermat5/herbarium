@@ -107,7 +107,6 @@ export const fr: Record<MessageKey, string> = {
   "list.grid": "Vue grille",
   "list.list": "Vue liste",
   "list.import": "Importer",
-  "list.filtering": "Filtre :",
   "list.clearFilters": "Effacer les filtres",
   "list.noMatch": "Aucun résultat pour « {query} »",
   "list.noMatchHint": "Essayez un autre mot, ou effacez la recherche.",

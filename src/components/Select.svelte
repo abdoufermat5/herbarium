@@ -278,7 +278,7 @@
     <span class="select-label ellipsis">{currentLabel}</span>
 
     <span class="chevron" class:flipped={open} aria-hidden="true">
-      <Icon name="chevron-down" size={size === "sm" ? 13 : 14} />
+      <Icon name="chevron-down" size={size === "sm" ? 11 : 12} />
     </span>
   </button>
 
@@ -333,7 +333,7 @@
 
           {#if isSelected}
             <span class="opt-check" aria-hidden="true">
-              <Icon name="check" size={13} stroke={2.2} />
+              <Icon name="check" size={13} />
             </span>
           {/if}
         </div>
@@ -363,7 +363,6 @@
     line-height: 1.3;
     white-space: nowrap;
     user-select: none;
-    box-shadow: var(--shadow-sm);
     transition:
       border-color var(--t-fast) var(--ease-out),
       background-color var(--t-fast) var(--ease-out),
@@ -379,7 +378,7 @@
   .select-btn.active {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-ring), var(--shadow-sm);
+    box-shadow: 0 0 0 3px var(--accent-ring);
     background: var(--surface);
   }
 
@@ -390,13 +389,13 @@
   }
 
   .select-sm {
-    padding: 5px 9px 5px 9px;
-    font-size: 13px;
+    padding: 5px 9px;
+    font-size: 12.5px;
     height: 32px;
   }
 
   .select-md {
-    padding: 7px 12px 7px 11px;
+    padding: 7px 11px;
     font-size: 13.5px;
     height: 36px;
   }
@@ -411,13 +410,12 @@
 
   .select-btn:hover:not(:disabled) .leading-icon,
   .select-btn.active .leading-icon {
-    color: var(--accent);
+    color: var(--text);
   }
 
   .select-label {
     min-width: 0;
     font-weight: 500;
-    letter-spacing: -0.01em;
   }
 
   .chevron {
@@ -425,69 +423,50 @@
     display: inline-flex;
     align-items: center;
     color: var(--muted);
-    margin-left: 1px;
+    margin-left: 2px;
     transition:
-      transform var(--t-med) var(--ease-spring),
+      transform var(--t-med) var(--ease-out),
       color var(--t-fast) var(--ease-out);
   }
 
   .select-btn:hover:not(:disabled) .chevron,
   .select-btn.active .chevron {
-    color: var(--text-soft);
+    color: var(--text);
   }
 
   .chevron.flipped {
     transform: rotate(180deg);
-    color: var(--accent);
   }
 
-  /* Popover Menu */
+  /* Popover Menu — animation `menu-in` is shared from app.css */
   .select-menu {
     position: absolute;
-    top: calc(100% + 4px);
+    top: calc(100% + 6px);
     left: 0;
     min-width: max(100%, 150px);
     max-height: 250px;
     overflow-y: auto;
     background: var(--surface);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow-lg);
     padding: 4px;
     z-index: 100;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
     outline: none;
-    transform-origin: top left;
-    animation: select-pop var(--t-fast) var(--ease-out);
+    animation: menu-in var(--t-med) var(--ease-out);
   }
 
   .select-menu.align-right {
     left: auto;
     right: 0;
-    transform-origin: top right;
   }
 
   .select-menu.drop-up {
     top: auto;
-    bottom: calc(100% + 4px);
-    transform-origin: bottom left;
-  }
-
-  .select-menu.drop-up.align-right {
-    transform-origin: bottom right;
-  }
-
-  @keyframes select-pop {
-    from {
-      opacity: 0;
-      transform: translateY(-4px) scale(0.97);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
+    bottom: calc(100% + 6px);
   }
 
   .select-opt {
@@ -499,7 +478,6 @@
     cursor: pointer;
     color: var(--text-soft);
     font-size: 13px;
-    font-weight: 500;
     user-select: none;
     outline: none;
     transition:
@@ -509,13 +487,13 @@
 
   .select-opt:hover,
   .select-opt.highlighted {
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    background: var(--sunken);
+    color: var(--text);
   }
 
   .select-opt.selected {
     color: var(--accent-strong);
-    font-weight: 600;
+    font-weight: 500;
   }
 
   .select-opt.disabled {

@@ -7,7 +7,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 - Tauri 2 + Svelte 5 desktop app for keeping generated HTML pages in a plain-file vault and reviewing them at the right time.
-- Botanical design system with a command palette, toasts, an inspector panel and a review flow.
+- Minimal editorial design system: warm monochrome palette with pastel status colors, bundled Geist / Geist Mono / Newsreader fonts, Phosphor icons, hairline borders, and quiet scroll-entry motion. Includes a command palette, toasts, an inspector panel and a review flow.
 - Light and dark themes.
 - English (default) and French interface.
 - Settings page for theme, interface language, library layout and sorting, with automatic preference persistence and the current vault location. Open it from the sidebar, command palette, or `Ctrl+,` / `⌘,`.

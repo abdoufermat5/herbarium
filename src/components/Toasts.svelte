@@ -40,18 +40,18 @@
     display: flex;
     align-items: center;
     gap: 9px;
-    padding: 10px 12px;
+    padding: 12px 14px;
     border-radius: var(--radius);
     background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
-    animation: toast-in var(--t-med) var(--ease-spring);
+    animation: toast-in var(--t-slow) var(--ease-out);
   }
   .toast-icon {
     display: grid;
     place-items: center;
     flex: none;
-    color: var(--accent);
+    color: var(--info);
   }
   .toast.success .toast-icon {
     color: var(--ok);
@@ -82,7 +82,7 @@
   @keyframes toast-in {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.98);
+      transform: translateY(12px);
     }
   }
 </style>

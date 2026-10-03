@@ -164,7 +164,7 @@
 {:else if app.initError}
   <div class="boot boot-error">
     <div class="boot-mark"><Icon name="leaf" size={22} /></div>
-    <h1>{t("boot.failed")}</h1>
+    <h1 class="display">{t("boot.failed")}</h1>
     <p class="error-text">{app.initError}</p>
     <button class="btn btn-primary" onclick={retry} disabled={retrying}>
       {retrying ? t("boot.retrying") : t("boot.retry")}
@@ -232,36 +232,33 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
+    gap: 14px;
     color: var(--muted);
     animation: fade-in var(--t-slow) var(--ease-out);
     padding: 32px;
     text-align: center;
+    font-size: 13px;
   }
   .boot-mark {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     display: grid;
     place-items: center;
     border-radius: var(--radius);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    background: var(--leaf-soft);
+    color: var(--leaf);
     margin-bottom: 4px;
   }
   .boot-error h1 {
-    font-family: var(--font-display);
-    font-size: 22px;
-    color: var(--text);
-    letter-spacing: -0.01em;
+    font-size: 30px;
   }
   .error-text {
     max-width: 460px;
     font-size: 13px;
     color: var(--danger);
     background: var(--danger-soft);
-    border: 1px solid var(--danger-border);
     border-radius: var(--radius-sm);
-    padding: 8px 14px;
+    padding: 10px 14px;
     overflow-wrap: anywhere;
   }
 
@@ -275,7 +272,13 @@
     flex-direction: column;
     min-width: 0;
     overflow: hidden;
-    background: var(--bg);
+    background-color: var(--bg);
+    /* A single warm light spot so the canvas never reads as flat. */
+    background-image: radial-gradient(
+      ellipse 60% 40% at 70% 0%,
+      var(--glow),
+      transparent 70%
+    );
   }
 
   .drag-veil {
@@ -284,8 +287,7 @@
     z-index: 60;
     display: grid;
     place-items: center;
-    background: rgba(35, 40, 29, 0.28);
-    backdrop-filter: blur(2px);
+    background: var(--scrim);
     pointer-events: none;
     animation: fade-in var(--t-fast) var(--ease-out);
   }
@@ -294,20 +296,24 @@
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 28px 36px;
+    padding: 36px 48px;
     border-radius: var(--radius-lg);
     background: var(--surface);
-    border: 2px dashed var(--accent);
+    border: 1px dashed var(--border-hover);
     box-shadow: var(--shadow-lg);
     color: var(--text-soft);
     text-align: center;
-    animation: pop-in var(--t-med) var(--ease-spring);
+    animation: pop-in var(--t-med) var(--ease-out);
   }
   .drag-card :global(svg) {
-    color: var(--accent);
+    color: var(--text);
+    margin-bottom: 6px;
   }
   .drag-card strong {
-    font-size: 15px;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
     color: var(--text);
   }
   .drag-card span {
@@ -323,7 +329,7 @@
   @keyframes pop-in {
     from {
       opacity: 0;
-      transform: scale(0.96);
+      transform: translateY(8px);
     }
   }
 </style>

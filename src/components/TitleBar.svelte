@@ -49,7 +49,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    background: var(--surface, var(--bg));
+    background: var(--raised);
     border-bottom: 1px solid var(--border);
     user-select: none;
   }
@@ -83,7 +83,7 @@
   }
 
   .ctl.close:hover {
-    background: var(--danger);
-    color: #fff;
+    background: var(--danger-fill);
+    color: var(--on-danger);
   }
 </style>

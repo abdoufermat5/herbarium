@@ -2,14 +2,16 @@
   import { app, setTheme, setLayout, setSort } from "../lib/state.svelte";
   import { t, i18n, setLocale, LOCALES } from "../lib/i18n.svelte";
   import Icon from "../lib/Icon.svelte";
+  import { reveal } from "../lib/reveal";
   import Select from "./Select.svelte";
 </script>
 
 <div class="settings">
   <div class="settings-inner">
     <header class="head">
-      <div>
-        <h1>{t("settings.title")}</h1>
+      <div class="head-text">
+        <span class="eyebrow">Herbarium</span>
+        <h1 class="display">{t("settings.title")}</h1>
         <p class="sub">{t("settings.sub")}</p>
       </div>
       <button class="btn" onclick={() => (app.view = "list")}>
@@ -18,8 +20,8 @@
       </button>
     </header>
 
-    <section aria-labelledby="settings-appearance">
-      <h2 id="settings-appearance"><Icon name="sun" size={16} />{t("settings.appearance")}</h2>
+    <section aria-labelledby="settings-appearance" use:reveal>
+      <h2 id="settings-appearance" class="eyebrow">{t("settings.appearance")}</h2>
       <div class="card settings-card">
         <div class="setting-row">
           <div class="setting-copy">
@@ -58,8 +60,8 @@
       </div>
     </section>
 
-    <section aria-labelledby="settings-library">
-      <h2 id="settings-library"><Icon name="files" size={16} />{t("settings.library")}</h2>
+    <section aria-labelledby="settings-library" use:reveal>
+      <h2 id="settings-library" class="eyebrow">{t("settings.library")}</h2>
       <div class="card settings-card">
         <div class="setting-row">
           <div class="setting-copy">
@@ -99,8 +101,8 @@
       </div>
     </section>
 
-    <section aria-labelledby="settings-vault">
-      <h2 id="settings-vault"><Icon name="folder-open" size={16} />{t("settings.vault")}</h2>
+    <section aria-labelledby="settings-vault" use:reveal>
+      <h2 id="settings-vault" class="eyebrow">{t("settings.vault")}</h2>
       <div class="card vault-card">
         <p>{t("settings.vaultHint")}</p>
         <div class="vault-path">
@@ -118,71 +120,70 @@
   .settings {
     height: 100%;
     overflow-y: auto;
-    padding: 28px 32px;
+    padding: 48px 40px 72px;
   }
   .settings-inner {
-    max-width: 760px;
+    max-width: 720px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 28px;
+    gap: 40px;
   }
   .head {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
-    gap: 20px;
+    align-items: flex-end;
+    gap: 24px;
+  }
+  .head-text {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
   }
   h1 {
-    font-family: var(--font-display);
-    font-size: 28px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-size: 40px;
   }
-  .sub, .setting-copy p, .vault-card p {
+  .sub,
+  .setting-copy p,
+  .vault-card p {
     color: var(--muted);
     font-size: 13px;
   }
   .sub {
-    margin-top: 4px;
+    font-size: 14px;
   }
   h2 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    color: var(--accent-strong);
-    font-size: 13px;
-    font-weight: 600;
+    margin-bottom: 12px;
   }
   .settings-card {
-    padding: 0 20px;
+    padding: 0 28px;
   }
   .setting-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 180px;
     align-items: center;
     gap: 24px;
-    padding: 20px 0;
+    padding: 24px 0;
   }
   .setting-row + .setting-row {
     border-top: 1px solid var(--border);
   }
   h3 {
     font-size: 14px;
-    font-weight: 600;
-    margin-bottom: 4px;
+    font-weight: 500;
+    margin-bottom: 2px;
   }
   .vault-card {
-    padding: 20px;
+    padding: 24px 28px;
   }
   .vault-path {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    margin-top: 16px;
-    padding: 12px 14px;
-    background: var(--sunken);
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--raised);
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
   }
   .vault-path span {
@@ -204,7 +205,7 @@
   }
   @media (max-width: 900px) {
     .settings {
-      padding: 24px 20px;
+      padding: 32px 24px;
     }
     .setting-row {
       grid-template-columns: minmax(0, 1fr);

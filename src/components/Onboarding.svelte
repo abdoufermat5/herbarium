@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { app, reloadPages, toast } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
+  import { reveal } from "../lib/reveal";
   import { t } from "../lib/i18n.svelte";
 
   let name = $state("Herbarium");
@@ -52,17 +53,17 @@
 </script>
 
 <div class="onboard">
-  <div class="hero">
-    <span class="hero-mark"><Icon name="leaf" size={30} /></span>
-    <h1>{t("onboard.welcome")}</h1>
+  <div class="hero" use:reveal>
+    <span class="hero-mark"><Icon name="leaf" size={22} /></span>
+    <h1 class="display">{t("onboard.welcome")}</h1>
     <p>
       {t("onboard.intro")}
     </p>
   </div>
 
   <div class="cards">
-    <section class="card option">
-      <span class="option-icon"><Icon name="file-plus" size={20} /></span>
+    <section class="card option" use:reveal>
+      <span class="option-icon"><Icon name="file-plus" size={18} /></span>
       <h2>{t("onboard.createTitle")}</h2>
       <p>{t("onboard.createText")}</p>
       <div class="name-row">
@@ -78,25 +79,27 @@
           {#if busy === "create"}
             <span class="spinner"></span>
           {:else}
-            <Icon name="plus" size={14} />
+            <Icon name="plus" size={13} />
           {/if}
           {busy === "create" ? t("onboard.creating") : t("onboard.create")}
         </button>
       </div>
     </section>
 
-    <section class="card option">
-      <span class="option-icon"><Icon name="folder-open" size={20} /></span>
+    <section class="card option" use:reveal>
+      <span class="option-icon"><Icon name="folder-open" size={18} /></span>
       <h2>{t("onboard.openTitle")}</h2>
       <p>{t("onboard.openText")}</p>
-      <button class="btn" onclick={openExisting} disabled={busy !== null}>
-        {#if busy === "open"}
-          <span class="spinner"></span>
-        {:else}
-          <Icon name="folder" size={14} />
-        {/if}
-        {busy === "open" ? t("onboard.opening") : t("onboard.choose")}
-      </button>
+      <div class="name-row">
+        <button class="btn" onclick={openExisting} disabled={busy !== null}>
+          {#if busy === "open"}
+            <span class="spinner"></span>
+          {:else}
+            <Icon name="folder" size={13} />
+          {/if}
+          {busy === "open" ? t("onboard.opening") : t("onboard.choose")}
+        </button>
+      </div>
     </section>
   </div>
 
@@ -111,49 +114,53 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 30px;
+    gap: 56px;
     height: 100%;
-    padding: 32px;
+    padding: 64px 32px;
     overflow-y: auto;
+    background-color: var(--bg);
+    background-image: radial-gradient(
+      ellipse 55% 45% at 50% 0%,
+      var(--glow),
+      transparent 70%
+    );
   }
 
   .hero {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 10px;
-    max-width: 480px;
+    gap: 16px;
+    max-width: 560px;
     text-align: center;
   }
 
   .hero-mark {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 64px;
-    height: 64px;
-    margin-bottom: 4px;
-    border-radius: var(--radius-lg);
-    background: var(--accent-soft);
-    color: var(--accent);
-    box-shadow: var(--shadow-sm);
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    margin-bottom: 8px;
+    border-radius: var(--radius);
+    background: var(--leaf-soft);
+    color: var(--leaf);
   }
 
   h1 {
-    font-family: var(--font-display);
-    font-size: 28px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 52px;
+    letter-spacing: -0.035em;
   }
 
   .hero p {
+    font-size: 15px;
     color: var(--muted);
+    max-width: 460px;
   }
 
   .cards {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 320px));
     gap: 16px;
-    flex-wrap: wrap;
     justify-content: center;
     width: 100%;
   }
@@ -162,25 +169,27 @@
     display: flex;
     flex-direction: column;
     gap: 10px;
-    width: 300px;
-    max-width: 100%;
-    padding: 20px;
+    padding: 32px;
   }
 
   .option-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    margin-bottom: 10px;
+    border: 1px solid var(--border);
     border-radius: var(--radius-sm);
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--raised);
+    color: var(--text);
   }
 
   h2 {
-    font-size: 15px;
-    font-weight: 600;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
   }
 
   .option p {
@@ -192,6 +201,7 @@
   .name-row {
     display: flex;
     gap: 8px;
+    margin-top: 14px;
   }
 
   .name-row input {
@@ -200,11 +210,17 @@
   }
 
   .error {
-    padding: 8px 14px;
+    padding: 10px 14px;
     border-radius: var(--radius-sm);
     background: var(--danger-soft);
     color: var(--danger);
     font-size: 13px;
     max-width: 480px;
+  }
+
+  @media (max-width: 720px) {
+    .cards {
+      grid-template-columns: minmax(0, 420px);
+    }
   }
 </style>

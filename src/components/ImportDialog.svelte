@@ -248,7 +248,7 @@
     tabindex={-1}
   >
     <header class="dlg-head">
-      <h2 id="import-title">{t("import.title")}</h2>
+      <h2 id="import-title" class="display">{t("import.title")}</h2>
       <button
         class="btn btn-ghost btn-icon"
         aria-label={t("common.close")}
@@ -299,7 +299,7 @@
           ondragleave={() => (dragDepth = Math.max(0, dragDepth - 1))}
           ondrop={onDrop}
         >
-          <Icon name="upload" size={26} />
+          <span class="drop-icon"><Icon name="upload" size={18} /></span>
           <strong>{dragOver ? t("import.release") : t("import.drop")}</strong>
           <span>{t("import.browse")}</span>
         </button>
@@ -388,11 +388,13 @@
     max-height: 100%;
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    padding: 18px 20px 16px;
+    gap: 16px;
+    padding: 24px 28px 22px;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
     overflow-y: auto;
     overscroll-behavior: contain;
-    animation: pop-in var(--t-med) var(--ease-spring);
+    animation: pop-in var(--t-med) var(--ease-out);
   }
 
   .dlg-head {
@@ -403,25 +405,26 @@
   }
 
   h2 {
-    font-size: 17px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-size: 26px;
   }
 
   .tabs {
     display: flex;
-    gap: 4px;
+    gap: 16px;
     border-bottom: 1px solid var(--border);
   }
 
   .tab {
-    padding: 6px 10px;
+    padding: 6px 0 8px;
     margin-bottom: -1px;
     font-size: 13px;
     font-weight: 500;
     color: var(--muted);
-    border-bottom: 2px solid transparent;
-    transition: color var(--t-fast) var(--ease-out);
+    border-bottom: 1.5px solid transparent;
+    border-radius: 0;
+    transition:
+      color var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out);
   }
 
   .tab:hover {
@@ -430,13 +433,13 @@
 
   .tab.active {
     color: var(--accent-strong);
-    border-bottom-color: var(--accent);
+    border-bottom-color: var(--accent-strong);
   }
 
   .panel {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
   }
 
   .dropzone {
@@ -445,8 +448,8 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 30px 16px;
-    border: 1.5px dashed var(--border-strong);
+    padding: 36px 16px;
+    border: 1px dashed var(--border-hover);
     border-radius: var(--radius);
     background: var(--raised);
     color: var(--muted);
@@ -458,20 +461,32 @@
   }
 
   .dropzone:hover {
-    border-color: var(--accent);
+    border-color: var(--text-soft);
     color: var(--text-soft);
   }
 
   .dropzone.over {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    color: var(--accent-strong);
+    border-color: var(--info);
+    background: var(--info-soft);
+    color: var(--info);
+  }
+
+  .drop-icon {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    margin-bottom: 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
   }
 
   .dropzone strong {
     color: var(--text);
     font-size: 14px;
-    margin-top: 2px;
+    font-weight: 500;
   }
 
   .dropzone span {
