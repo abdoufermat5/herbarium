@@ -11,13 +11,24 @@ export const LOCALES: Record<Locale, { name: string; short: string; bcp47: strin
 const CATALOGS: Record<Locale, Record<string, string>> = { en, fr };
 const STORAGE_KEY = "herbarium.locale";
 
+/** The OS language when it is one we ship, else English. */
+export function systemLocale(languages: readonly string[] = navigator.languages ?? [navigator.language]): Locale {
+  for (const tag of languages) {
+    const base = tag?.toLowerCase().split("-")[0];
+    if (base === "fr" || base === "en") return base;
+  }
+  return "en";
+}
+
+/** The user's explicit choice, else the OS language. */
 function storedLocale(): Locale {
   try {
     const v = localStorage.getItem(STORAGE_KEY);
-    return v === "fr" ? "fr" : "en"; // English unless the user chose otherwise
+    if (v === "fr" || v === "en") return v;
   } catch {
-    return "en";
+    /* fall through to the OS language */
   }
+  return systemLocale();
 }
 
 export const i18n = $state<{ locale: Locale }>({ locale: storedLocale() });

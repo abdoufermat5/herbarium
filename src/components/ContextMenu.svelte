@@ -120,6 +120,7 @@
   class="dropdown-menu context-menu"
   role="menu"
   aria-label={ariaLabel}
+  aria-orientation="vertical"
   tabindex="-1"
   style:left="{left}px"
   style:top="{top}px"
@@ -148,6 +149,9 @@
           <span class="menu-icon" aria-hidden="true"><Icon name={item.icon} size={14} /></span>
         {/if}
         <span class="dropdown-item-label">{item.label}</span>
+        {#if item.shortcut}
+          <span class="menu-shortcut">{item.shortcut}</span>
+        {/if}
       </button>
     {/if}
   {/each}
@@ -172,6 +176,15 @@
   .dropdown-item.highlighted .menu-icon {
     color: currentColor;
   }
+
+  .menu-shortcut {
+    margin-left: auto;
+    padding-left: 14px;
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+
 
   .dropdown-item:disabled {
     opacity: 0.45;

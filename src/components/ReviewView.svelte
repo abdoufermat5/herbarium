@@ -1,53 +1,90 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, refreshAll, toast } from "../lib/state.svelte";
-  import { dueInfo, fmtDate, fmtDateTime, fmtDuration, plural, startOfToday } from "../lib/format";
-  import type { PageMeta } from "../lib/types";
+  import {
+    app,
+    errorMessage,
+    goAll,
+    openPage,
+    refreshAll,
+    startReviewSession,
+    toast,
+  } from "../lib/state.svelte";
+  import { dueInfo, fmtDate, fmtDateTime, fmtDuration, plural } from "../lib/format";
+  import type { PageMeta, ReviewGrade, ReviewStats } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { reveal } from "../lib/reveal";
   import PresetButtons from "./PresetButtons.svelte";
-  import { t } from "../lib/i18n.svelte";
+  import { i18n, LOCALES, t } from "../lib/i18n.svelte";
 
-  // Preset intervals come from the vault's review settings (`app.review`).
-  const DAY = 86400000;
+  const now = Date.now();
 
   let due = $state<PageMeta[]>([]);
-  let loaded = $state(false);
-  let failed = $state(false);
+  let queueLoaded = $state(false);
+  let queueError = $state<string | null>(null);
+  let stats = $state<ReviewStats | null>(null);
+  let statsError = $state<string | null>(null);
   let busyId = $state<string | null>(null);
   let loadToken = 0;
 
-  const now = Date.now();
-  const overdueCount = $derived(
-    due.filter((p) => p.nextReview && now - p.nextReview >= DAY).length,
-  );
-  const reviewedToday = $derived(
-    app.library.filter((p) => p.lastReview && p.lastReview >= startOfToday()).length,
-  );
+  /** Freshest statistics we have: this view's fetch, else the shared poll. */
+  const shownStats = $derived(stats ?? app.reviewStats);
+  const upcoming = $derived(shownStats?.upcoming ?? []);
+  const forecastMax = $derived(Math.max(1, ...upcoming.map((d) => d.count)));
+  const forecastTotal = $derived(upcoming.reduce((sum, d) => sum + d.count, 0));
 
+  let active = $state(0);
+  let listEl = $state<HTMLDivElement | null>(null);
+  let expanded = $state<Record<string, boolean>>({});
+  let forecastView = $state<"chart" | "table">("chart");
+
+  /** Load the (capped) due queue and the uncapped statistics independently.
+   *  `queueLoaded` stays true across reloads so the list never flashes back to
+   *  the skeleton; it only starts false on the first load. */
   function load() {
     const token = ++loadToken;
-    loaded = false;
-    failed = false;
-    api
+    queueError = null;
+    statsError = null;
+
+    void api
       .reviewToday()
       .then((rows) => {
         if (token !== loadToken) return;
         due = [...rows].sort((a, b) => (a.nextReview ?? 0) - (b.nextReview ?? 0));
-        loaded = true;
+        active = Math.max(0, Math.min(active, due.length - 1));
+        queueLoaded = true;
       })
       .catch((e) => {
         if (token !== loadToken) return;
         console.error(e);
         due = [];
-        failed = true;
-        loaded = true;
+        queueError = errorMessage(e);
+        queueLoaded = true;
+      });
+
+    void api
+      .reviewStats()
+      .then((value) => {
+        if (token !== loadToken) return;
+        stats = value;
+        statsError = null;
+      })
+      .catch((e) => {
+        if (token !== loadToken) return;
+        console.error(e);
+        statsError = errorMessage(e);
       });
   }
 
   $effect(() => {
     if (app.view !== "review") return;
+    // Re-read on every rescan so external changes are reflected.
+    void app.vaultRevision;
     load();
+  });
+
+  // Keep the roving tabindex in range as the queue shrinks.
+  $effect(() => {
+    if (active >= due.length) active = Math.max(0, due.length - 1);
   });
 
   async function reschedule(id: string, minutes: number) {
@@ -56,32 +93,81 @@
     try {
       await api.scheduleReview(id, minutes);
       due = due.filter((p) => p.id !== id);
+      active = Math.max(0, Math.min(active, due.length - 1));
       toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
+      // Re-sync the queue (a capped list may uncover the next page) and the stats.
+      load();
       void refreshAll();
-    } catch {
+    } catch (e) {
+      console.error(e);
       toast(t("review.rescheduleFailed"), "error");
     } finally {
       busyId = null;
     }
   }
 
-  async function complete(id: string) {
-    if (busyId) return;
-    busyId = id;
-    try {
-      const next = await api.completeReview(id);
-      due = due.filter((p) => p.id !== id);
-      toast(t("toast.reviewed", { when: fmtDuration(next.intervalMinutes ?? 1) }), "success");
-      void refreshAll();
-    } catch {
-      toast(t("review.rescheduleFailed"), "error");
-    } finally {
-      busyId = null;
+  function focusRow(index: number) {
+    const rows = listEl?.querySelectorAll<HTMLButtonElement>("button.row-open");
+    rows?.[index]?.focus();
+  }
+
+  function moveRow(index: number) {
+    if (due.length === 0) return;
+    const next = Math.max(0, Math.min(due.length - 1, index));
+    active = next;
+    focusRow(next);
+  }
+
+  function onRowKey(e: KeyboardEvent, index: number) {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        moveRow(index + 1);
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        moveRow(index - 1);
+        break;
+      case "Home":
+        e.preventDefault();
+        moveRow(0);
+        break;
+      case "End":
+        e.preventDefault();
+        moveRow(due.length - 1);
+        break;
     }
   }
 
-  function open(id: string) {
-    app.readId = id;
+  function onTabKey(e: KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    forecastView = forecastView === "chart" ? "table" : "chart";
+    requestAnimationFrame(() => document.getElementById(`forecast-tab-${forecastView}`)?.focus());
+  }
+
+  function toggleHistory(id: string) {
+    expanded = { ...expanded, [id]: !expanded[id] };
+  }
+
+  function gradeLabel(grade: ReviewGrade): string {
+    return grade === "again" ? t("review.grade.again") : t("review.grade.good");
+  }
+
+  /** Format a UTC `YYYY-MM-DD` day as a locale date without timezone drift. */
+  function fmtDay(day: string): string {
+    const [y, m, d] = day.split("-").map(Number);
+    if (!y || !m || !d) return day;
+    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
+  function barHeight(count: number): string {
+    if (count <= 0) return "0%";
+    return `${Math.max(6, Math.round((count / forecastMax) * 100))}%`;
   }
 </script>
 
@@ -93,41 +179,69 @@
         <h1 class="display">{t("review.title")}</h1>
         <p class="sub">{t("review.sub")}</p>
       </div>
-      <button class="btn" onclick={() => (app.view = "list")}>
-        <Icon name="files" size={14} />
-        {t("review.allPages")}
-      </button>
+      <div class="head-actions">
+        {#if queueLoaded && due.length > 0}
+          <button
+            class="btn btn-primary"
+            title={t("review.startHint")}
+            onclick={() => void startReviewSession()}
+          >
+            <Icon name="calendar-clock" size={14} />
+            {t("review.start")}
+          </button>
+        {/if}
+        <button class="btn" onclick={() => void goAll()}>
+          <Icon name="files" size={14} />
+          {t("review.allPages")}
+        </button>
+      </div>
     </header>
 
-    {#if loaded && !failed && due.length > 0}
-      <div class="stats">
-        {#if overdueCount > 0}
-          <span class="chip chip-danger">
-            {t("review.overdue", { pages: plural(overdueCount, "page") })}
-          </span>
-        {/if}
-        <span class="chip chip-warn">
-          {t("review.toReview", { pages: plural(due.length, "page") })}
-        </span>
-        {#if reviewedToday > 0}
-          <span class="chip chip-ok">
-            {t("review.reviewedToday", { count: reviewedToday })}
-          </span>
-        {/if}
+    {#if statsError && !shownStats}
+      <div class="notice notice-error" role="alert">
+        <Icon name="info" size={16} />
+        <span>{t("review.statsUnavailable", { error: statsError })}</span>
+        <button class="btn btn-sm" onclick={load}>{t("boot.retry")}</button>
       </div>
+    {:else if shownStats}
+      <dl class="stats">
+        <div class="stat">
+          <dt class="stat-l">{t("review.stat.due")}</dt>
+          <dd class="stat-n">{shownStats.dueTotal}</dd>
+        </div>
+        <div class="stat">
+          <dt class="stat-l">{t("review.stat.overdue")}</dt>
+          <dd class="stat-n" class:hot={shownStats.overdue > 0}>{shownStats.overdue}</dd>
+        </div>
+        <div class="stat">
+          <dt class="stat-l">{t("review.stat.today")}</dt>
+          <dd class="stat-n">{shownStats.reviewedToday}</dd>
+        </div>
+        <div class="stat">
+          <dt class="stat-l">{t("review.stat.total")}</dt>
+          <dd class="stat-n">{shownStats.totalReviews}</dd>
+        </div>
+      </dl>
+      {#if statsError}
+        <div class="notice notice-warn" role="status">
+          <span>{t("review.statsUnavailable", { error: statsError })}</span>
+          <button class="btn btn-xs" onclick={load}>{t("boot.retry")}</button>
+        </div>
+      {/if}
     {/if}
 
-    {#if !loaded}
+    {#if !queueLoaded}
       <div class="list" role="status" aria-label={t("review.loading")}>
         {#each [0, 1, 2] as i (i)}
           <div class="skel-row" aria-hidden="true"></div>
         {/each}
       </div>
-    {:else if failed}
+    {:else if queueError}
       <div class="empty" role="alert">
         <span class="empty-icon"><Icon name="info" size={20} /></span>
         <strong>{t("review.loadFailed")}</strong>
         <span>{t("review.loadFailedHint")}</span>
+        <span class="err-detail">{queueError}</span>
         <button class="btn btn-sm" onclick={load}>{t("boot.retry")}</button>
       </div>
     {:else if due.length === 0}
@@ -135,48 +249,201 @@
         <span class="empty-icon"><Icon name="circle-check" size={20} /></span>
         <strong>{t("review.caughtUp")}</strong>
         <span>{t("review.caughtUpHint")}</span>
-        <button class="btn btn-sm" onclick={() => (app.view = "list")}>{t("review.browse")}</button>
+        <button class="btn btn-sm" onclick={() => void goAll()}>{t("review.browse")}</button>
       </div>
     {:else}
-      <div class="list">
-        {#each due as p (p.id)}
+      {#if shownStats && due.length < shownStats.dueTotal}
+        <p class="capped">
+          {t("review.queueCapped", { shown: due.length, total: shownStats.dueTotal })}
+        </p>
+      {/if}
+      <p id="queue-keys" class="sr-only">{t("review.queueKeys")}</p>
+      <div
+        class="list"
+        role="list"
+        aria-label={t("review.queueLabel")}
+        aria-describedby="queue-keys"
+        bind:this={listEl}
+      >
+        {#each due as p, i (p.id)}
           {@const d = dueInfo(p.nextReview)}
-          <article class="row" use:reveal>
-            <button class="row-open" onclick={() => open(p.id)}>
-              <span class="thumb"><Icon name="leaf" size={15} /></span>
-              <span class="body">
-                <span class="title ellipsis">{p.title || t("common.untitled")}</span>
-                <span class="meta">
-                  {#if p.folder}
-                    <span class="loc"><Icon name="folder" size={11} />{p.folder}</span>
-                  {/if}
-                  {#each p.tags.slice(0, 3) as tag (tag)}
-                    <span class="chip chip-muted">{tag}</span>
-                  {/each}
-                  <span class="date">{fmtDateTime(p.nextReview)}</span>
-                </span>
-              </span>
-            </button>
-            <span class="side">
-              {#if d}
-                <span class="chip" class:chip-danger={d.overdue} class:chip-warn={!d.overdue}>{d.label}</span>
-              {/if}
-              <span class="resched" role="group" aria-label={t("review.reschedule")}>
-                <PresetButtons onpick={(m) => reschedule(p.id, m)} disabled={busyId === p.id} />
-              </span>
+          {@const hist = p.ext?.review}
+          <article class="row" use:reveal role="listitem">
+            <div class="row-main">
               <button
-                class="btn btn-sm"
-                disabled={busyId === p.id}
-                title={t("review.doneHint")}
-                onclick={() => complete(p.id)}
+                class="row-open"
+                tabindex={i === active ? 0 : -1}
+                onfocus={() => (active = i)}
+                onkeydown={(e) => onRowKey(e, i)}
+                onclick={() => void openPage(p.id)}
               >
-                <Icon name="check" size={13} />{t("review.done")}
+                <span class="thumb"><Icon name="leaf" size={15} /></span>
+                <span class="body">
+                  <span class="title ellipsis">{p.title || t("common.untitled")}</span>
+                  <span class="meta">
+                    {#if p.folder}
+                      <span class="loc"><Icon name="folder" size={11} />{p.folder}</span>
+                    {/if}
+                    {#each p.tags.slice(0, 3) as tag (tag)}
+                      <span class="chip chip-muted">{tag}</span>
+                    {/each}
+                    <span class="date">{fmtDateTime(p.nextReview)}</span>
+                  </span>
+                </span>
               </button>
-              <button class="btn btn-sm btn-primary" onclick={() => open(p.id)}>{t("common.open")}</button>
-            </span>
+              <span class="side">
+                {#if d}
+                  <span class="chip" class:chip-danger={d.overdue} class:chip-warn={!d.overdue}
+                    >{d.label}</span
+                  >
+                {/if}
+                {#if hist && hist.count > 0}
+                  <button
+                    class="btn btn-xs"
+                    aria-expanded={!!expanded[p.id]}
+                    aria-controls={`hist-${p.id}`}
+                    onclick={() => toggleHistory(p.id)}
+                  >
+                    {expanded[p.id] ? t("review.historyHide") : t("review.historyShow")}
+                  </button>
+                {/if}
+                <span class="resched" role="group" aria-label={t("review.reschedule")}>
+                  <PresetButtons onpick={(m) => reschedule(p.id, m)} disabled={busyId === p.id} />
+                </span>
+                <button class="btn btn-sm btn-primary" onclick={() => void openPage(p.id)}>
+                  {t("common.open")}
+                </button>
+              </span>
+            </div>
+            {#if expanded[p.id]}
+              <div
+                class="hist"
+                id={`hist-${p.id}`}
+                role="region"
+                aria-label={t("review.historyTitle", {
+                  title: p.title || t("common.untitled"),
+                })}
+              >
+                {#if hist && hist.log.length > 0}
+                  <p class="hist-count">{t("review.historyCount", { count: hist.count })}</p>
+                  <ul class="hist-log">
+                    {#each [...hist.log].reverse() as entry, k (k)}
+                      <li>
+                        {t("review.logEntry", {
+                          when: fmtDateTime(entry.at),
+                          grade: gradeLabel(entry.grade),
+                          interval: fmtDuration(entry.intervalMinutes),
+                        })}
+                      </li>
+                    {/each}
+                  </ul>
+                  {#if hist.count > hist.log.length}
+                    <p class="hist-more">
+                      {t("review.historyLimit", {
+                        shown: hist.log.length,
+                        count: hist.count,
+                      })}
+                    </p>
+                  {/if}
+                {:else}
+                  <p class="hist-count muted">{t("review.noHistory")}</p>
+                {/if}
+              </div>
+            {/if}
           </article>
         {/each}
       </div>
+    {/if}
+
+    {#if shownStats}
+    <section class="forecast card">
+      <header class="fc-head">
+        <div class="fc-text">
+          <h2 class="fc-title">{t("review.forecast.title")}</h2>
+          <p class="fc-hint">{t("review.forecast.hint")}</p>
+        </div>
+        <div
+          class="tabs"
+          role="tablist"
+          aria-label={t("review.forecast.title")}
+          tabindex="-1"
+          onkeydown={onTabKey}
+        >
+          <button
+            id="forecast-tab-chart"
+            class="tab"
+            class:active={forecastView === "chart"}
+            role="tab"
+            aria-selected={forecastView === "chart"}
+            aria-controls="forecast-panel"
+            tabindex={forecastView === "chart" ? 0 : -1}
+            onclick={() => (forecastView = "chart")}
+          >
+            {t("review.forecast.chart")}
+          </button>
+          <button
+            id="forecast-tab-table"
+            class="tab"
+            class:active={forecastView === "table"}
+            role="tab"
+            aria-selected={forecastView === "table"}
+            aria-controls="forecast-panel"
+            tabindex={forecastView === "table" ? 0 : -1}
+            onclick={() => (forecastView = "table")}
+          >
+            {t("review.forecast.table")}
+          </button>
+        </div>
+      </header>
+      <div
+        id="forecast-panel"
+        class="fc-body"
+        role="tabpanel"
+        aria-labelledby={`forecast-tab-${forecastView}`}
+      >
+        {#if upcoming.length === 0}
+          <p class="fc-empty muted">{t("review.forecast.empty")}</p>
+        {:else if forecastView === "chart"}
+          <div
+            class="chart"
+            role="list"
+            aria-label={t("review.forecast.chartLabel", { total: forecastTotal })}
+          >
+            {#each upcoming as day (day.day)}
+              <div
+                class="bar-col"
+                role="listitem"
+                aria-label={`${fmtDay(day.day)}: ${plural(day.count, "page")}`}
+              >
+                <span class="bar-count" aria-hidden="true">{day.count}</span>
+                <span class="bar-track" aria-hidden="true">
+                  <span class="bar" style={`height:${barHeight(day.count)}`}></span>
+                </span>
+                <span class="bar-day" aria-hidden="true">{fmtDay(day.day)}</span>
+              </div>
+            {/each}
+          </div>
+        {:else}
+          <table class="fc-table">
+            <caption class="sr-only">{t("review.forecast.title")}</caption>
+            <thead>
+              <tr>
+                <th scope="col">{t("review.forecast.day")}</th>
+                <th scope="col">{t("review.forecast.pages")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each upcoming as day (day.day)}
+                <tr>
+                  <th scope="row">{fmtDay(day.day)}</th>
+                  <td>{day.count}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      </div>
+    </section>
     {/if}
   </div>
 </div>
@@ -208,6 +475,12 @@
     gap: 10px;
     min-width: 0;
   }
+  .head-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
   h1 {
     font-size: var(--fs-4xl);
   }
@@ -217,12 +490,74 @@
     max-width: 560px;
   }
 
+  /* ------------------------------------------------------------- statistics */
+
   .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin: 0;
+  }
+  .stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .stat-l {
+    font-size: var(--fs-2xs);
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+  }
+  .stat-n {
+    margin: 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-3xl);
+    font-weight: 500;
+    line-height: 1;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat-n.hot {
+    color: var(--danger);
+  }
+
+  .notice {
     display: flex;
     align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
+    gap: 10px;
+    padding: 10px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: var(--fs-sm);
   }
+  .notice-error {
+    border-color: var(--danger-border);
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+  .notice-warn {
+    border-color: var(--warn-border);
+    background: var(--warn-soft);
+    color: var(--warn);
+  }
+  .notice > span {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .capped {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    margin: -6px 0 0;
+  }
+
+  /* ------------------------------------------------------------------ queue */
 
   .list {
     display: flex;
@@ -231,15 +566,17 @@
   }
 
   .row {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 8px 0 0;
     border-bottom: 1px solid var(--border);
     transition: background var(--t-med) var(--ease-out);
   }
   .row:hover {
     background: var(--surface);
+  }
+  .row-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-right: 8px;
   }
 
   .row-open {
@@ -251,6 +588,10 @@
     padding: 16px 8px;
     text-align: left;
     border-radius: var(--radius-sm);
+  }
+  .row-open:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: -2px;
   }
 
   .thumb {
@@ -304,6 +645,170 @@
   .resched {
     display: flex;
     gap: 4px;
+  }
+
+  /* ---------------------------------------------------------------- history */
+
+  .hist {
+    padding: 4px 8px 16px 52px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hist-count {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    margin: 0;
+  }
+  .hist-log {
+    margin: 0;
+    padding-left: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+  .hist-more {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .err-detail {
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+
+  /* --------------------------------------------------------------- forecast */
+
+  .forecast {
+    padding: 20px 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .fc-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .fc-text {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .fc-title {
+    font-size: var(--fs-lg);
+    font-weight: 500;
+    margin: 0;
+  }
+  .fc-hint {
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .tabs {
+    display: inline-flex;
+    padding: 2px;
+    gap: 2px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+  }
+  .tab {
+    padding: 4px 12px;
+    border-radius: var(--radius-xs);
+    font-size: var(--fs-xs);
+    color: var(--muted);
+    transition:
+      background var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+  .tab:hover {
+    color: var(--text);
+  }
+  .tab.active {
+    background: var(--surface);
+    color: var(--accent-strong);
+    box-shadow: 0 0 0 1px var(--border);
+  }
+
+  .chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 6px;
+    min-height: 132px;
+  }
+  .bar-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+  }
+  .bar-count {
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+  .bar-track {
+    width: 100%;
+    height: 92px;
+    display: flex;
+    align-items: flex-end;
+  }
+  .bar {
+    width: 100%;
+    min-height: 0;
+    border-radius: var(--radius-xs) var(--radius-xs) 0 0;
+    background: var(--leaf);
+    transition: height var(--t-med) var(--ease-out);
+  }
+  .bar-day {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .fc-empty {
+    font-size: var(--fs-sm);
+    margin: 0;
+  }
+
+  .fc-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--fs-sm);
+  }
+  .fc-table th,
+  .fc-table td {
+    text-align: left;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .fc-table thead th {
+    font-size: var(--fs-2xs);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 500;
+  }
+  .fc-table tbody th {
+    font-weight: 400;
+    color: var(--text);
+  }
+  .fc-table td {
+    font-family: var(--mono);
+    color: var(--muted);
   }
 
   .skel-row {

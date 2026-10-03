@@ -1,10 +1,17 @@
 <script lang="ts">
-  import { tick } from "svelte";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar } from "./lib/state.svelte";
+  import { onMount, tick } from "svelte";
+  import { getCurrentWindow } from "@tauri-apps/api/window";
+  import { listen } from "@tauri-apps/api/event";
+  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, toast, errorMessage } from "./lib/state.svelte";
+  import { navigate } from "./lib/navigation.svelte";
+  import { folderPickerState } from "./lib/folder-picker.svelte";
+  import { api } from "./lib/api";
+  import FolderPicker from "./components/FolderPicker.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
+  import TrashView from "./components/TrashView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
   import Onboarding from "./components/Onboarding.svelte";
@@ -12,13 +19,20 @@
   import TitleBar from "./components/TitleBar.svelte";
   import Toasts from "./components/Toasts.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
+  import ShortcutsDialog from "./components/ShortcutsDialog.svelte";
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
+  import type { ShortcutContext } from "./lib/shortcuts";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
   let dragTimer: ReturnType<typeof setTimeout> | undefined;
   let retrying = $state(false);
+  let shortcutsOpen = $state(false);
+
+  const shortcutContext: ShortcutContext = $derived(
+    app.readId ? "reader" : app.view === "review" ? "review" : app.view === "list" ? "list" : "global",
+  );
 
   function hasFiles(e: DragEvent): boolean {
     return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
@@ -44,6 +58,8 @@
     );
     if (files.length === 0) return;
     pendingFiles.files = files;
+    pendingFiles.folder = undefined;
+    pendingFiles.allowCdn = undefined;
     app.importOpen = true;
   }
 
@@ -60,6 +76,10 @@
   }
 
   function onKeydown(e: KeyboardEvent) {
+    // A confirmation or folder chooser owns the keyboard until it settles.
+    if (confirmState.pending || folderPickerState.pending) return;
+    // The shortcuts reference is modal: it owns every key until it closes.
+    if (shortcutsOpen) return;
     const mod = e.metaKey || e.ctrlKey;
 
     // Command palette — works even while typing.
@@ -75,8 +95,7 @@
     }
     if (mod && e.key === "," && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
       e.preventDefault();
-      app.readId = null;
-      app.view = "settings";
+      void goView("settings");
       return;
     }
 
@@ -95,11 +114,11 @@
           (e.target as HTMLElement).blur();
           return;
         }
-        app.readId = null;
+        void goView(app.view);
         return;
       }
-      if (app.view === "settings") {
-        if (!e.defaultPrevented) app.view = "list";
+      if (app.view === "settings" || app.view === "trash") {
+        if (!e.defaultPrevented) void goView("list");
         return;
       }
       if (app.folderFilter || app.tagFilter) {
@@ -110,6 +129,12 @@
     }
 
     if (isTyping(e.target) || e.defaultPrevented || e.repeat) return;
+
+    if (e.key === "?" && !mod && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
+      e.preventDefault();
+      shortcutsOpen = true;
+      return;
+    }
 
     if (e.key === "/") {
       const input = document.getElementById("page-search") as HTMLInputElement | null;
@@ -138,18 +163,74 @@
     app.view;
     app.importOpen;
     app.paletteOpen;
+    shortcutsOpen;
     if (!focusSeen) {
       focusSeen = true;
       return;
     }
     void tick().then(() => {
-      if (app.importOpen || app.paletteOpen) return;
+      if (app.importOpen || app.paletteOpen || shortcutsOpen) return;
       const a = document.activeElement;
       if (a && a !== document.body && a.isConnected && !a.closest("[inert]")) return;
       document
         .querySelector<HTMLElement>(app.readId ? ".main .bar button" : "#page-search, .shell button")
         ?.focus();
     });
+  });
+
+  // Native close and tray quit both use the same serialized leave guards as
+  // navigation. The backend never hides the window ahead of a draft prompt.
+  let closing = false;
+  let lastTrayNav = 0;
+
+  onMount(() => {
+    const win = getCurrentWindow();
+    const unlisten: Array<() => void> = [];
+    let disposed = false;
+    const keep = (p: Promise<() => void>) =>
+      void p.then((fn) => (disposed ? fn() : unlisten.push(fn))).catch((e) => console.error(e));
+
+    async function requestClose(quit: boolean) {
+      if (closing) return;
+      closing = true;
+      try {
+        if (!(await win.isVisible())) {
+          await win.show();
+          await win.setFocus();
+        }
+        await navigate(async () => {
+          if (quit || !(app.config?.closeToTray ?? true)) await api.quitApp();
+          else await win.hide();
+        });
+      } catch (e) {
+        console.error(e);
+        toast(errorMessage(e), "error");
+      } finally {
+        closing = false;
+      }
+    }
+
+    keep(win.onCloseRequested((event) => {
+      event.preventDefault();
+      void requestClose(false);
+    }));
+    keep(listen("quit-requested", () => void requestClose(true)));
+
+    // Tray menu "Review today". The backend emits it on the window and the app, so de-duplicate.
+    keep(
+      listen<string>("navigate", (event) => {
+        if (event.payload !== "review" || !app.config?.vaultPath) return;
+        const now = Date.now();
+        if (now - lastTrayNav < 500) return;
+        lastTrayNav = now;
+        void goView("review");
+      }),
+    );
+
+    return () => {
+      disposed = true;
+      unlisten.forEach((fn) => fn());
+    };
   });
 
   async function retry() {
@@ -166,7 +247,10 @@
   ondragend={() => (dragging = false)}
 />
 
-<div class="window" inert={app.importOpen || app.paletteOpen || !!confirmState.pending}>
+<div
+  class="window"
+  inert={app.importOpen || app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}
+>
 <TitleBar />
 <div class="content">
 {#if !app.initialized}
@@ -198,6 +282,8 @@
         <ReviewView />
       {:else if app.view === "settings"}
         <SettingsView />
+      {:else if app.view === "trash"}
+        <TrashView />
       {:else}
         <PageList />
       {/if}
@@ -209,17 +295,29 @@
 </div>
 
 {#if app.importOpen}
-  <div inert={app.paletteOpen || !!confirmState.pending}>
+  <div inert={app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
     <ImportDialog />
   </div>
 {/if}
 
 {#if app.paletteOpen}
-  <CommandPalette />
+  <div inert={shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
+    <CommandPalette />
+  </div>
+{/if}
+
+{#if folderPickerState.pending}
+  <div inert={shortcutsOpen || !!confirmState.pending}>
+    <FolderPicker options={folderPickerState.pending} />
+  </div>
 {/if}
 
 {#if confirmState.pending}
   <ConfirmDialog options={confirmState.pending} />
+{/if}
+
+{#if shortcutsOpen}
+  <ShortcutsDialog context={shortcutContext} onclose={() => (shortcutsOpen = false)} />
 {/if}
 
 {#if dragging}

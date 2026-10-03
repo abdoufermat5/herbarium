@@ -1,31 +1,101 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
-  import { app, visiblePages, reloadPages, toast, clearFilters, setLayout, setSort, type SortKey } from "../lib/state.svelte";
+  import {
+    app,
+    visiblePages,
+    reloadPages,
+    toast,
+    clearFilters,
+    setLayout,
+    setSort,
+    openPage,
+    showFolder,
+    showTag,
+    movePages,
+    deletePages,
+    duplicatePage,
+    errorMessage,
+    type SortKey,
+  } from "../lib/state.svelte";
   import { api } from "../lib/api";
-  import type { PageMeta } from "../lib/types";
+  import type { BulkError, PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { reveal } from "../lib/reveal";
   import Select from "./Select.svelte";
-  import { dueInfo, plural } from "../lib/format";
+  import ContextMenu from "./ContextMenu.svelte";
+  import type { DropdownMenuItem } from "./DropdownMenu.svelte";
+  import { dueInfo, fmtDuration, plural } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
+
+  /** Search hits carry an optional `[match]`-marked snippet on top of the page meta. */
+  type Row = PageMeta & { snippet?: string };
 
   let searchInput = $state(app.search);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  let confirmDelId = $state<string | null>(null);
+  /** Last value the input itself pushed into `app.search`; external changes resync the field. */
+  let lastSearch = app.search;
 
-  const pages = $derived(visiblePages(app.pages));
+  let selected = $state<Set<string>>(new Set());
+  let anchorId = $state<string | null>(null);
+  let selectAllEl: HTMLInputElement | undefined = $state();
+  let tagDraft = $state("");
+  let scheduleMinutes = $state(1440);
+  let menu = $state<{ x: number; y: number; items: DropdownMenuItem[] } | null>(null);
+
+  const pages = $derived(visiblePages(app.pages) as Row[]);
+  const selectedIds = $derived([...selected]);
+  const searching = $derived(!!app.search.trim());
   const filtersActive = $derived(!!(app.folderFilter || app.tagFilter));
+  const allSelected = $derived(pages.length > 0 && pages.every((p) => selected.has(p.id)));
+  const someSelected = $derived(selected.size > 0 && !allSelected);
+
   const eyebrow = $derived(
     app.folderFilter ? t("sidebar.folders") : app.tagFilter ? t("sidebar.tags") : t("sidebar.library"),
   );
   const heading = $derived(
     app.folderFilter ?? (app.tagFilter ? `#${app.tagFilter}` : t("sidebar.all")),
   );
+  // Relevance only means something against the backend's ranked search hits.
   const sortOptions = $derived<Array<{ value: SortKey; label: string }>>([
+    ...(searching ? [{ value: "relevance" as SortKey, label: t("list.sortRelevance") }] : []),
     { value: "recent", label: t("list.sortRecent") },
     { value: "title", label: t("list.sortTitle") },
     { value: "review", label: t("list.sortReview") },
   ]);
+  const sortValue = $derived<SortKey>(app.sort === "relevance" && !searching ? "recent" : app.sort);
+  const scheduleOptions = $derived(
+    app.review.presets.map((m) => ({ value: m, label: fmtDuration(m) })),
+  );
+
+  // Keep the field in step when a route change (goAll, sidebar, palette) resets app.search.
+  $effect(() => {
+    const s = app.search;
+    if (s === lastSearch) return;
+    lastSearch = s;
+    clearTimeout(timer);
+    if (searchInput !== s) searchInput = s;
+  });
+
+  // Keep the bulk selection to what is actually on screen: switching vault, searching or
+  // changing a filter must never leave hidden pages selected.
+  $effect(() => {
+    const visible = new Set(pages.map((p) => p.id));
+    if (selectedIds.some((id) => !visible.has(id))) {
+      selected = new Set(selectedIds.filter((id) => visible.has(id)));
+      if (anchorId && !visible.has(anchorId)) anchorId = null;
+    }
+  });
+
+  // The header checkbox is "mixed" while some, but not all, visible pages are picked.
+  $effect(() => {
+    if (selectAllEl) selectAllEl.indeterminate = someSelected;
+  });
+
+  $effect(() => {
+    const presets = app.review.presets;
+    if (presets.length > 0 && !presets.includes(scheduleMinutes)) scheduleMinutes = presets[0];
+  });
+
   onDestroy(() => {
     clearTimeout(timer);
   });
@@ -34,7 +104,8 @@
     clearTimeout(timer);
     timer = setTimeout(() => {
       app.search = searchInput.trim();
-      reloadPages();
+      lastSearch = app.search;
+      void reloadPages();
     }, 250);
   }
 
@@ -42,27 +113,194 @@
     clearTimeout(timer);
     searchInput = "";
     app.search = "";
-    reloadPages();
+    lastSearch = "";
+    void reloadPages();
   }
 
-  function requestDelete(p: PageMeta) {
-    if (confirmDelId !== p.id) {
-      confirmDelId = p.id;
+  /* ------------------------------------------------------------- selection */
+
+  function toggleSelect(id: string, shift: boolean) {
+    const ids = pages.map((p) => p.id);
+    const from = anchorId ? ids.indexOf(anchorId) : -1;
+    const to = ids.indexOf(id);
+    if (shift && from >= 0 && to >= 0) {
+      const next = new Set(selected);
+      for (let i = Math.min(from, to); i <= Math.max(from, to); i++) next.add(ids[i]);
+      selected = next;
       return;
     }
-    confirmDelId = null;
-    void removePage(p);
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selected = next;
+    anchorId = id;
   }
 
-  async function removePage(p: PageMeta) {
+  function toggleAll() {
+    if (allSelected) {
+      selected = new Set();
+      anchorId = null;
+    } else {
+      selected = new Set(pages.map((p) => p.id));
+    }
+  }
+
+  function clearSelection() {
+    selected = new Set();
+    anchorId = null;
+  }
+
+  /* ----------------------------------------------------------- page actions */
+
+  function titleOf(id: string): string {
+    const meta = app.library.find((p) => p.id === id) ?? app.pages.find((p) => p.id === id);
+    return meta?.title || t("common.untitled");
+  }
+
+  /** First failure as "Title: reason", with a count of the rest. */
+  function failureDetail(errors: BulkError[]): string {
+    const first = errors[0];
+    if (!first) return "";
+    const rest = errors.length > 1 ? ` (+${errors.length - 1})` : "";
+    return `${titleOf(first.id)}: ${first.error}${rest}`;
+  }
+
+  async function revealPage(p: PageMeta) {
     try {
-      await api.deletePage(p.id);
-      toast(t("toast.deleted", { title: p.title || t("common.untitled") }));
-      await reloadPages();
+      await api.revealPage(p.id);
     } catch (e) {
       console.error(e);
-      toast(t("toast.deleteFailed"), "error");
+      toast(t("list.revealFailed", { detail: errorMessage(e) }), "error");
     }
+  }
+
+  function onOpenPage(e: MouseEvent, id: string) {
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      toggleSelect(id, e.shiftKey);
+      return;
+    }
+    void openPage(id);
+  }
+
+  function parseTags(): string[] {
+    return [...new Set(tagDraft.split(/[,\n]/).map((s) => s.trim()).filter(Boolean))];
+  }
+
+  async function bulkTags(mode: "add" | "remove") {
+    const tags = parseTags();
+    if (tags.length === 0) {
+      toast(t("list.tagsNone"), "error");
+      return;
+    }
+    const ids = selectedIds;
+    try {
+      const result = await api.bulkUpdate(ids, mode === "add" ? { addTags: tags } : { removeTags: tags });
+      if (result.errors.length > 0) {
+        toast(
+          t("list.tagsPartial", {
+            done: result.updated.length,
+            failed: result.errors.length,
+            detail: failureDetail(result.errors),
+          }),
+          "error",
+        );
+      } else {
+        toast(t("list.tagsDone", { count: result.updated.length }), "success");
+      }
+      tagDraft = "";
+      await reloadPages(true);
+    } catch (e) {
+      console.error(e);
+      toast(t("list.tagsFailed", { detail: errorMessage(e) }), "error");
+    }
+  }
+
+  async function bulkSchedule() {
+    const ids = selectedIds;
+    if (ids.length === 0) return;
+    let done = 0;
+    const errors: BulkError[] = [];
+    for (const id of ids) {
+      try {
+        await api.scheduleReview(id, scheduleMinutes);
+        done++;
+      } catch (e) {
+        console.error(e);
+        errors.push({ id, error: errorMessage(e) });
+      }
+    }
+    if (errors.length > 0) {
+      toast(
+        t("list.schedulePartial", { done, failed: errors.length, detail: failureDetail(errors) }),
+        "error",
+      );
+    } else {
+      toast(t("list.scheduled", { count: done }), "success");
+    }
+    await reloadPages(true);
+  }
+
+  /* ---------------------------------------------------------------- context */
+
+  /** Right click anchors at the pointer; the context-menu key (clientX/Y = 0) at the row. */
+  function anchor(e: MouseEvent): { x: number; y: number } {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.clientX === 0 && e.clientY === 0 && e.currentTarget instanceof HTMLElement) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      return { x: rect.left + 24, y: rect.bottom };
+    }
+    return { x: e.clientX, y: e.clientY };
+  }
+
+  function openPageMenu(e: MouseEvent, p: Row) {
+    const at = anchor(e);
+    menu = {
+      ...at,
+      items: [
+        { id: "open", label: t("common.open"), icon: "file-text", onclick: () => void openPage(p.id) },
+        { id: "move", label: t("list.move"), icon: "folder", onclick: () => void movePages([p.id]) },
+        { id: "duplicate", label: t("list.duplicate"), icon: "file-plus", onclick: () => void duplicatePage(p.id) },
+        { id: "reveal", label: t("list.reveal"), icon: "folder-open", onclick: () => void revealPage(p) },
+        { divider: true },
+        { id: "trash", label: t("list.trash"), icon: "trash-2", danger: true, onclick: () => void deletePages([p.id]) },
+      ],
+    };
+  }
+
+  /* ------------------------------------------------------------------- drag */
+
+  function onDragStart(e: DragEvent, p: Row) {
+    if (!e.dataTransfer) return;
+    const ids = selected.has(p.id) ? selectedIds : [p.id];
+    e.dataTransfer.setData("application/x-herbarium-page-ids", JSON.stringify(ids));
+    e.dataTransfer.setData("text/plain", ids.map((id) => titleOf(id)).join(", "));
+    e.dataTransfer.effectAllowed = "move";
+  }
+
+  /** Split a `[match]`-marked snippet into plain and highlighted runs. Text only — never HTML. */
+  function snippetParts(snippet: string): Array<{ text: string; mark: boolean }> {
+    const parts: Array<{ text: string; mark: boolean }> = [];
+    let buffer = "";
+    let mark = false;
+    const flush = () => {
+      if (buffer) parts.push({ text: buffer, mark });
+      buffer = "";
+    };
+    for (const ch of snippet) {
+      if (ch === "[") {
+        flush();
+        mark = true;
+      } else if (ch === "]") {
+        flush();
+        mark = false;
+      } else {
+        buffer += ch;
+      }
+    }
+    flush();
+    return parts;
   }
 </script>
 
@@ -81,7 +319,7 @@
           <span class="count">{plural(pages.length, "page")}</span>
         {/if}
         {#if filtersActive}
-          <button class="btn btn-ghost btn-sm" onclick={clearFilters}>
+          <button type="button" class="btn btn-ghost btn-sm" onclick={clearFilters}>
             <Icon name="x" size={11} />
             {t("list.clearFilters")}
           </button>
@@ -103,7 +341,7 @@
           autocomplete="off"
         />
         {#if searchInput}
-          <button class="clear" aria-label={t("list.clearSearch")} onclick={clearSearch}>
+          <button type="button" class="clear" aria-label={t("list.clearSearch")} onclick={clearSearch}>
             <Icon name="x" size={11} />
           </button>
         {:else}
@@ -113,7 +351,7 @@
 
       <div class="tools">
         <Select
-          value={app.sort}
+          value={sortValue}
           options={sortOptions}
           icon="arrow-up-down"
           ariaLabel={t("list.sort")}
@@ -123,6 +361,7 @@
 
         <div class="seg" role="group" aria-label={t("list.layout")}>
           <button
+            type="button"
             class="seg-btn"
             class:active={app.layout === "grid"}
             aria-pressed={app.layout === "grid"}
@@ -132,6 +371,7 @@
             <Icon name="layout-grid" size={14} />
           </button>
           <button
+            type="button"
             class="seg-btn"
             class:active={app.layout === "list"}
             aria-pressed={app.layout === "list"}
@@ -142,18 +382,103 @@
           </button>
         </div>
 
-        <button class="btn btn-primary" onclick={() => (app.importOpen = true)}>
+        <button type="button" class="btn btn-primary" onclick={() => (app.importOpen = true)}>
           <Icon name="plus" size={13} />
           <span>{t("list.import")}</span>
         </button>
       </div>
     </div>
 
+    {#if app.loadError && pages.length > 0}
+      <div class="error-banner" role="status">
+        <Icon name="info" size={14} />
+        <span class="error-text">{t("list.loadFailed")} <em>{app.loadError}</em></span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick={() => void reloadPages()}>
+          {t("list.retry")}
+        </button>
+      </div>
+    {/if}
+
+    {#if selectedIds.length > 0}
+      <div class="bulk" role="group" aria-label={t("list.bulk")}>
+        <label class="bulk-all">
+          <input
+            type="checkbox"
+            bind:this={selectAllEl}
+            checked={allSelected}
+            onchange={toggleAll}
+            aria-label={t("list.selectAll")}
+          />
+        </label>
+        <span class="bulk-count">{t("list.selected", { count: selectedIds.length })}</span>
+        <div class="bulk-actions">
+          <button type="button" class="btn btn-sm" onclick={() => void movePages(selectedIds)}>
+            <Icon name="folder" size={13} />
+            {t("list.move")}
+          </button>
+          <div class="tag-input">
+            <input
+              type="text"
+              bind:value={tagDraft}
+              placeholder={t("list.tagsPlaceholder")}
+              aria-label={t("list.tagsLabel")}
+              spellcheck="false"
+              autocomplete="off"
+            />
+          </div>
+          <button type="button" class="btn btn-sm" onclick={() => void bulkTags("add")}>
+            <Icon name="plus" size={12} />
+            {t("list.addTags")}
+          </button>
+          <button type="button" class="btn btn-sm" onclick={() => void bulkTags("remove")}>
+            <Icon name="x" size={12} />
+            {t("list.removeTags")}
+          </button>
+          <div class="schedule">
+            <Select
+              value={scheduleMinutes}
+              options={scheduleOptions}
+              ariaLabel={t("list.scheduleLabel")}
+              onchange={(val) => (scheduleMinutes = val)}
+              size="sm"
+              align="right"
+              disabled={scheduleOptions.length === 0}
+            />
+            <button
+              type="button"
+              class="btn btn-sm"
+              disabled={scheduleOptions.length === 0}
+              onclick={() => void bulkSchedule()}
+            >
+              <Icon name="calendar-clock" size={13} />
+              {t("list.schedule")}
+            </button>
+          </div>
+          <button type="button" class="btn btn-sm btn-danger-soft" onclick={() => void deletePages(selectedIds)}>
+            <Icon name="trash-2" size={13} />
+            {t("list.trash")}
+          </button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick={clearSelection}>
+            {t("list.clearSelection")}
+          </button>
+        </div>
+      </div>
+    {/if}
+
     {#if app.busy && app.pages.length === 0}
       <div class="grid" class:list={app.layout === "list"} aria-hidden="true">
         {#each Array(6) as _, i (i)}
           <div class="skel"></div>
         {/each}
+      </div>
+    {:else if app.loadError && pages.length === 0}
+      <div class="empty">
+        <span class="empty-icon danger"><Icon name="info" size={20} /></span>
+        <strong>{t("list.loadFailed")}</strong>
+        <span class="detail">{app.loadError}</span>
+        <button type="button" class="btn btn-sm" onclick={() => void reloadPages()}>
+          {t("list.retry")}
+        </button>
       </div>
     {:else if pages.length === 0}
       <div class="empty">
@@ -175,11 +500,11 @@
               : t("list.emptyHint")}
         </span>
         {#if app.search}
-          <button class="btn btn-sm" onclick={clearSearch}>{t("list.clearSearch")}</button>
+          <button type="button" class="btn btn-sm" onclick={clearSearch}>{t("list.clearSearch")}</button>
         {:else if filtersActive}
-          <button class="btn btn-sm" onclick={clearFilters}>{t("list.clearFilters")}</button>
+          <button type="button" class="btn btn-sm" onclick={clearFilters}>{t("list.clearFilters")}</button>
         {:else}
-          <button class="btn btn-primary btn-sm" onclick={() => (app.importOpen = true)}>
+          <button type="button" class="btn btn-primary btn-sm" onclick={() => (app.importOpen = true)}>
             <Icon name="plus" size={12} />
             {t("list.importPage")}
           </button>
@@ -189,21 +514,55 @@
       <div class="grid" class:list={app.layout === "list"}>
         {#each pages as p (p.id)}
           {@const due = dueInfo(p.nextReview)}
-          <article class="page" use:reveal>
-            <button class="page-open" onclick={() => (app.readId = p.id)}>
+          {@const selectedRow = selected.has(p.id)}
+          <article
+            class="page"
+            class:selected={selectedRow}
+            use:reveal
+            draggable="true"
+            ondragstart={(e) => onDragStart(e, p)}
+            oncontextmenu={(e) => openPageMenu(e, p)}
+          >
+            <button
+              type="button"
+              class="open-overlay"
+              aria-label={p.title || t("common.untitled")}
+              onclick={(e) => onOpenPage(e, p.id)}
+            ></button>
+            <div class="page-open">
               <span class="thumb"><Icon name="leaf" size={15} /></span>
               <span class="page-body">
                 <span class="page-title">{p.title || t("common.untitled")}</span>
-                {#if p.note}
+                {#if searching && p.snippet}
+                  <span class="note snippet">
+                    {#each snippetParts(p.snippet) as part, i (i)}
+                      {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                    {/each}
+                  </span>
+                {:else if p.note}
                   <span class="note">{p.note}</span>
                 {/if}
                 {#if p.folder || p.tags.length > 0}
                   <span class="meta">
                     {#if p.folder}
-                      <span class="loc"><Icon name="folder" size={11} />{p.folder}</span>
+                      <button
+                        type="button"
+                        class="loc chip-link"
+                        title={t("list.showFolder", { folder: p.folder })}
+                        onclick={() => void showFolder(p.folder!)}
+                      >
+                        <Icon name="folder" size={11} />{p.folder}
+                      </button>
                     {/if}
                     {#each p.tags.slice(0, 3) as tag (tag)}
-                      <span class="chip chip-muted">{tag}</span>
+                      <button
+                        type="button"
+                        class="chip chip-muted chip-link"
+                        title={t("list.showTag", { tag })}
+                        onclick={() => void showTag(tag)}
+                      >
+                        {tag}
+                      </button>
                     {/each}
                     {#if p.tags.length > 3}
                       <span class="chip chip-muted">+{p.tags.length - 3}</span>
@@ -211,9 +570,17 @@
                   </span>
                 {/if}
               </span>
-            </button>
+            </div>
             <span class="page-side">
-              {#if due && confirmDelId !== p.id}
+              <label class="check">
+                <input
+                  type="checkbox"
+                  checked={selectedRow}
+                  onclick={(e) => toggleSelect(p.id, e.shiftKey)}
+                  aria-label={t("list.select", { title: p.title || t("common.untitled") })}
+                />
+              </label>
+              {#if due}
                 <span
                   class="chip due"
                   class:chip-warn={due.hot && !due.overdue}
@@ -223,29 +590,13 @@
                   {due.label}
                 </span>
               {/if}
-              {#if confirmDelId === p.id}
-                <button
-                  class="btn btn-ghost btn-sm"
-                  aria-label={t("list.cancelDelete", { title: p.title || t("common.untitled") })}
-                  onclick={() => (confirmDelId = null)}
-                >
-                  {t("list.cancel")}
-                </button>
-              {/if}
               <button
-                class="btn btn-ghost btn-sm del"
-                class:btn-icon={confirmDelId !== p.id}
-                class:confirm={confirmDelId === p.id}
-                aria-label={confirmDelId === p.id
-                  ? t("list.confirmDelete", { title: p.title || t("common.untitled") })
-                  : t("list.delete", { title: p.title || t("common.untitled") })}
-                onclick={() => requestDelete(p)}
+                type="button"
+                class="btn btn-ghost btn-sm btn-icon del"
+                aria-label={t("list.delete", { title: p.title || t("common.untitled") })}
+                onclick={() => void deletePages([p.id])}
               >
-                {#if confirmDelId === p.id}
-                  {t("list.confirm")}
-                {:else}
-                  <Icon name="trash-2" size={14} />
-                {/if}
+                <Icon name="trash-2" size={14} />
               </button>
             </span>
           </article>
@@ -254,6 +605,16 @@
     {/if}
   </div>
 </section>
+
+{#if menu}
+  <ContextMenu
+    x={menu.x}
+    y={menu.y}
+    items={menu.items}
+    ariaLabel={t("list.menu")}
+    onclose={() => (menu = null)}
+  />
+{/if}
 
 <style>
   .pane {
@@ -352,6 +713,96 @@
     color: var(--text);
   }
 
+  /* ---- Load failure, distinct from an empty library ---- */
+  .error-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    margin-bottom: -8px;
+    border: 1px solid var(--danger);
+    border-radius: var(--radius-sm);
+    background: var(--danger-soft);
+    color: var(--danger);
+    font-size: var(--fs-sm);
+  }
+  .error-banner .error-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    gap: 6px;
+    align-items: baseline;
+    flex-wrap: wrap;
+  }
+  .error-banner em {
+    font-style: normal;
+    opacity: 0.85;
+    overflow-wrap: anywhere;
+  }
+  .empty .detail {
+    color: var(--text);
+    opacity: 0.8;
+    overflow-wrap: anywhere;
+    max-width: 44ch;
+  }
+  .empty .danger {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
+  /* ---- Bulk selection toolbar ---- */
+  .bulk {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+  }
+  .bulk-all,
+  .check {
+    display: inline-flex;
+    align-items: center;
+  }
+  .bulk-all input,
+  .check input {
+    width: 15px;
+    height: 15px;
+    accent-color: var(--leaf);
+    cursor: pointer;
+  }
+  .bulk-count {
+    font-size: var(--fs-sm);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .bulk-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-left: auto;
+  }
+  .tag-input input {
+    width: 160px;
+    padding: 4px 8px;
+    font-size: var(--fs-sm);
+    background: var(--surface);
+  }
+  .schedule {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .btn-danger-soft {
+    color: var(--danger);
+  }
+  .btn-danger-soft:hover {
+    background: var(--danger-soft);
+  }
+
   /* ---- Grid: bento cards ---- */
   .grid {
     display: grid;
@@ -376,7 +827,30 @@
     border-color: var(--border-hover);
     box-shadow: var(--shadow);
   }
+  .page.selected {
+    border-color: var(--leaf);
+    box-shadow: 0 0 0 1px var(--leaf);
+  }
+  .page.selected .page-open {
+    background: var(--leaf-soft);
+  }
+  .open-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border: none;
+    background: transparent;
+    border-radius: inherit;
+    cursor: pointer;
+  }
+  .open-overlay:focus-visible {
+    outline: 2px solid var(--leaf);
+    outline-offset: -2px;
+  }
   .page-open {
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
     flex: 1;
     min-width: 0;
     display: flex;
@@ -428,6 +902,13 @@
     line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    overflow-wrap: anywhere;
+  }
+  .snippet mark {
+    background: var(--leaf-soft);
+    color: var(--text);
+    border-radius: 2px;
+    padding: 0 1px;
   }
   .meta {
     display: flex;
@@ -437,6 +918,9 @@
     margin-top: auto;
     padding-top: 6px;
   }
+  .page-open .meta {
+    pointer-events: none;
+  }
   .loc {
     display: inline-flex;
     align-items: center;
@@ -445,8 +929,22 @@
     font-size: var(--fs-xs);
     color: var(--muted);
   }
+  .chip-link {
+    pointer-events: auto;
+    cursor: pointer;
+    border: none;
+    background: none;
+    font: inherit;
+  }
+  .chip-link:hover {
+    color: var(--leaf);
+  }
+  button.chip {
+    padding: 1px 6px;
+  }
   .page-side {
     position: absolute;
+    z-index: 2;
     top: 20px;
     right: 18px;
     left: 66px;
@@ -459,6 +957,9 @@
   .page-side > :global(*) {
     pointer-events: auto;
   }
+  .check {
+    margin-right: 2px;
+  }
 
   .del {
     opacity: 0;
@@ -469,20 +970,11 @@
   }
   .page:hover .del,
   .page:focus-within .del,
-  .del.confirm {
+  .page.selected .del {
     opacity: 1;
   }
-  .del:hover:not(.confirm) {
+  .del:hover {
     color: var(--danger);
-  }
-  .del.confirm {
-    background: var(--danger-fill);
-    border-color: var(--danger-fill);
-    color: var(--on-danger);
-  }
-  .del.confirm:hover {
-    background: var(--danger-fill);
-    color: var(--on-danger);
   }
 
   /* ---- List: document rows separated by hairlines ---- */
@@ -502,6 +994,13 @@
   .list .page:hover {
     box-shadow: none;
     background: var(--surface);
+  }
+  .list .page.selected {
+    box-shadow: none;
+    background: var(--leaf-soft);
+  }
+  .list .page.selected .page-open {
+    background: transparent;
   }
   .list .page-open {
     flex-direction: row;

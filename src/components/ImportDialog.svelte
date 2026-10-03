@@ -8,6 +8,7 @@
   import { t } from "../lib/i18n.svelte";
   import { prefs, lastImportFolder, rememberImportFolder } from "../lib/prefs.svelte";
   import Select, { type SelectOption } from "./Select.svelte";
+  import Switch from "./settings/Switch.svelte";
 
   type Tab = "files" | "paste";
 
@@ -19,6 +20,11 @@
   let busy = $state(false);
   let message = $state("");
   let messageErr = $state(false);
+  // Network access for the pages about to be imported; starts from the vault
+  // default and is overridable per import. `cdnTouched` keeps a late-arriving
+  // default from clobbering an explicit choice (drop metadata or the switch).
+  let allowCdn = $state(false);
+  let cdnTouched = false;
 
   // Destination folder; "" is the vault root. Where it starts is a setting.
   let destination = $state(
@@ -150,6 +156,20 @@
     if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
   }
 
+  // Keep the staged files the backend named in its errors so they can be
+  // retried. `pages.import` labels each failure "<name>: <reason>". When no
+  // label matches, a total failure keeps everything staged and a partial one
+  // clears it (the importer reported no per-file detail to attribute).
+  function failedStaged(files: File[], errors: string[], imported: number): File[] {
+    const failed = new Set<string>();
+    for (const err of errors) {
+      const label = err.split(": ")[0];
+      if (label && files.some((f) => f.name === label)) failed.add(label);
+    }
+    if (failed.size === 0) return imported === 0 ? files : [];
+    return files.filter((f) => failed.has(f.name));
+  }
+
   async function doImport(files: File[]) {
     const htmlFiles = files.filter(isHtml);
     if (htmlFiles.length === 0) {
@@ -163,7 +183,7 @@
     try {
       const payload: ImportFile[] = [];
       for (const f of htmlFiles) payload.push({ name: f.name, content: await f.text() });
-      const res = await api.importFiles(payload, target || null);
+      const res = await api.importFiles(payload, target || null, allowCdn);
       if (res.imported > 0) rememberImportFolder(target);
       if (res.errors.length > 0) {
         messageErr = true;
@@ -172,7 +192,8 @@
           failed: plural(res.errors.length, "file"),
           errors: res.errors.join("\n"),
         });
-        staged = [];
+        // Keep the files the backend named so they can be retried.
+        staged = failedStaged(htmlFiles, res.errors, res.imported);
         if (res.imported > 0) void reloadPages();
       } else if (res.imported > 0) {
         toast(t("toast.imported", { count: res.imported }), "success");
@@ -198,7 +219,7 @@
     message = "";
     messageErr = false;
     try {
-      const res = await api.importFiles([{ name: null, content }], target || null);
+      const res = await api.importFiles([{ name: null, content }], target || null, allowCdn);
       if (res.imported > 0) rememberImportFolder(target);
       if (res.errors.length > 0) {
         messageErr = true;
@@ -231,16 +252,35 @@
     if (files.length > 0) void stage(files);
   }
 
+  // Files dropped on the window (or a folder) wait here for review; they are
+  // never imported automatically, and the destination/network choice they
+  // carry is preserved.
   $effect(() => {
-    if (pendingFiles.files.length === 0 || busy) return;
+    if (pendingFiles.files.length === 0) return;
     const files = pendingFiles.files;
+    const folder = pendingFiles.folder;
+    const cdn = pendingFiles.allowCdn;
     pendingFiles.files = [];
-    void doImport(files);
+    pendingFiles.folder = undefined;
+    pendingFiles.allowCdn = undefined;
+    tab = "files";
+    if (folder !== undefined) destination = folder ?? "";
+    if (cdn !== undefined) {
+      allowCdn = cdn;
+      cdnTouched = true;
+    }
+    void stage(files);
   });
 
   onMount(() => {
     prevFocus = document.activeElement as HTMLElement | null;
     window.addEventListener("keydown", onKey);
+    void api
+      .networkSettings()
+      .then((s) => {
+        if (!cdnTouched) allowCdn = s.defaultAllowCdn;
+      })
+      .catch((e) => console.error(e));
     queueMicrotask(() => {
       if (!app.paletteOpen) dropBtn?.focus();
     });
@@ -313,6 +353,22 @@
         />
       </div>
     {/if}
+
+    <div class="cdn">
+      <div class="cdn-text">
+        <span class="cdn-label">{t("import.allowCdn")}</span>
+        <span class="cdn-hint">{t("import.allowCdnHint")}</span>
+      </div>
+      <Switch
+        checked={allowCdn}
+        label={t("import.allowCdn")}
+        disabled={busy}
+        onchange={(v) => {
+          allowCdn = v;
+          cdnTouched = true;
+        }}
+      />
+    </div>
 
     {#if tab === "files"}
       <div class="panel" role="tabpanel" id="panel-files" aria-labelledby="tab-files">
@@ -609,6 +665,31 @@
   .dest-label {
     font-size: var(--fs-xs);
     font-weight: 500;
+    color: var(--muted);
+  }
+
+  .cdn {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .cdn-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .cdn-label {
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .cdn-hint {
+    font-size: var(--fs-xs);
     color: var(--muted);
   }
 </style>
