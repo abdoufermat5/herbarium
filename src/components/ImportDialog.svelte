@@ -6,6 +6,7 @@
   import type { ImportFile } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
+  import { prefs, lastImportFolder, rememberImportFolder } from "../lib/prefs.svelte";
   import Select, { type SelectOption } from "./Select.svelte";
 
   type Tab = "files" | "paste";
@@ -19,8 +20,10 @@
   let message = $state("");
   let messageErr = $state(false);
 
-  // Destination folder; "" is the vault root. Starts on the folder being browsed.
-  let destination = $state(app.folderFilter ?? "");
+  // Destination folder; "" is the vault root. Where it starts is a setting.
+  let destination = $state(
+    prefs.importTarget === "root" ? "" : prefs.importTarget === "last" ? lastImportFolder() : (app.folderFilter ?? ""),
+  );
   // A folder that vanished since it was chosen (e.g. deleted on disk) falls back to the root.
   const target = $derived(app.folders.includes(destination) ? destination : "");
   const destOptions = $derived<SelectOption<string>[]>([
@@ -161,6 +164,7 @@
       const payload: ImportFile[] = [];
       for (const f of htmlFiles) payload.push({ name: f.name, content: await f.text() });
       const res = await api.importFiles(payload, target || null);
+      if (res.imported > 0) rememberImportFolder(target);
       if (res.errors.length > 0) {
         messageErr = true;
         message = t("import.partial", {
@@ -195,6 +199,7 @@
     messageErr = false;
     try {
       const res = await api.importFiles([{ name: null, content }], target || null);
+      if (res.imported > 0) rememberImportFolder(target);
       if (res.errors.length > 0) {
         messageErr = true;
         message = t("import.failed", { error: res.errors.join("\n") });

@@ -12,6 +12,7 @@ Your pages stay plain `.html` files in a folder you own, in the spirit of an vau
 - **Read** each page in a sandboxed viewer with scripts running.
 - **Review** pages on a schedule you configure: preset intervals in any mix of minutes, hours and days (1, 3, 7, 30 days by default), a "Done" button that picks the next date (step up the presets, multiply the interval, or repeat it), optional automatic scheduling of imports, and a cap on the "Review today" queue. Settings live in the vault (`.herbarium/review.json`).
 - **Command palette** (`Ctrl/⌘ K`) and keyboard shortcuts (`/` to search, `i` to import, `Esc` to go back).
+- **Settings** for the editor (font, size, wrapping, indentation, preview position), startup screen, import destination, review and more.
 - **Light and dark themes**, and an **English / French** interface (English by default).
 
 ## How it works

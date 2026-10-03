@@ -1,11 +1,20 @@
 <script lang="ts">
   import { app, setTheme, setLayout, setSort } from "../lib/state.svelte";
   import { t, i18n, setLocale, LOCALES } from "../lib/i18n.svelte";
+  import { prefs, setPref } from "../lib/prefs.svelte";
   import Icon from "../lib/Icon.svelte";
   import Select from "./Select.svelte";
   import SettingsSection from "./settings/SettingsSection.svelte";
   import SettingRow from "./settings/SettingRow.svelte";
+  import Switch from "./settings/Switch.svelte";
+  import EditorSettingsSection from "./settings/EditorSettingsSection.svelte";
   import ReviewSettingsSection from "./settings/ReviewSettingsSection.svelte";
+  import VaultSettingsSection from "./settings/VaultSettingsSection.svelte";
+
+  function setDetailsOpen(open: boolean) {
+    setPref("detailsOpen", open);
+    app.inspectorOpen = open;
+  }
 </script>
 
 <div class="settings">
@@ -83,19 +92,51 @@
           onchange={setSort}
         />
       </SettingRow>
+      <SettingRow title={t("settings.startView")} hint={t("settings.startViewHint")}>
+        <Select
+          fill
+          size="md"
+          align="right"
+          value={prefs.startView}
+          ariaLabel={t("settings.startView")}
+          options={[
+            { value: "list", label: t("sidebar.all") },
+            { value: "review", label: t("sidebar.review") },
+          ]}
+          onchange={(v) => setPref("startView", v)}
+        />
+      </SettingRow>
     </SettingsSection>
+
+    <SettingsSection id="settings-import" title={t("settings.import")}>
+      <SettingRow title={t("settings.importTarget")} hint={t("settings.importTargetHint")}>
+        <Select
+          fill
+          size="md"
+          align="right"
+          value={prefs.importTarget}
+          ariaLabel={t("settings.importTarget")}
+          options={[
+            { value: "browsing", label: t("settings.importBrowsing") },
+            { value: "last", label: t("settings.importLast") },
+            { value: "root", label: t("import.rootFolder") },
+          ]}
+          onchange={(v) => setPref("importTarget", v)}
+        />
+      </SettingRow>
+    </SettingsSection>
+
+    <SettingsSection id="settings-reader" title={t("settings.reader")}>
+      <SettingRow title={t("settings.detailsOpen")} hint={t("settings.detailsOpenHint")}>
+        <Switch checked={prefs.detailsOpen} label={t("settings.detailsOpen")} onchange={setDetailsOpen} />
+      </SettingRow>
+    </SettingsSection>
+
+    <EditorSettingsSection />
 
     <ReviewSettingsSection />
 
-    <SettingsSection id="settings-vault" title={t("settings.vault")}>
-      <div class="vault">
-        <p>{t("settings.vaultHint")}</p>
-        <div class="vault-path">
-          <span>{t("settings.vaultPath")}</span>
-          <code>{app.config?.vaultPath}</code>
-        </div>
-      </div>
-    </SettingsSection>
+    <VaultSettingsSection />
 
     <p class="save-hint"><Icon name="check" size={14} />{t("settings.saved")}</p>
   </div>
@@ -138,32 +179,6 @@
     color: var(--muted);
     font-size: 14px;
   }
-  .vault {
-    padding: 20px 28px 24px;
-  }
-  .vault p {
-    color: var(--muted);
-    font-size: 13px;
-  }
-  .vault-path {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin-top: 16px;
-    padding: 14px 16px;
-    background: var(--raised);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-  }
-  .vault-path span {
-    font-size: 11px;
-    color: var(--muted);
-  }
-  .vault-path code {
-    font-family: var(--mono);
-    font-size: 12px;
-    overflow-wrap: anywhere;
-  }
   .save-hint {
     display: flex;
     align-items: center;
@@ -176,9 +191,6 @@
   @container settings (max-width: 560px) {
     .settings-inner {
       gap: 32px;
-    }
-    .vault {
-      padding: 18px 20px 20px;
     }
   }
 </style>

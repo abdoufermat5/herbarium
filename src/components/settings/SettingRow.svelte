@@ -2,8 +2,9 @@
   import type { Snippet } from "svelte";
 
   // One labelled setting. The control sits in a fixed-width column on the
-  // right (controls fill it), or under the text when `stacked`; narrow
-  // containers always stack so nothing can overflow.
+  // right (controls fill it; small ones like a switch hug its right edge), or
+  // under the text when `stacked`; narrow containers always stack so nothing
+  // can overflow.
   let {
     title,
     hint,
@@ -46,7 +47,13 @@
     overflow-wrap: anywhere;
   }
   .control {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
     min-width: 0;
+  }
+  .stacked .control {
+    justify-content: flex-start;
   }
 
   @container settings (max-width: 560px) {
@@ -54,6 +61,9 @@
       grid-template-columns: minmax(0, 1fr);
       align-items: start;
       padding: 18px 20px;
+    }
+    .control {
+      justify-content: flex-start;
     }
   }
 </style>

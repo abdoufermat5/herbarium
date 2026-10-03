@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { i18n, t, LOCALES } from "./i18n.svelte";
+import { prefs } from "./prefs.svelte";
 import type { Config, PageMeta, ReviewSettings, TagCount } from "./types";
 
 type View = "list" | "review" | "settings";
@@ -94,7 +95,7 @@ export const app: AppState = $state({
   readId: null,
   busy: false,
   paletteOpen: false,
-  inspectorOpen: false,
+  inspectorOpen: prefs.detailsOpen,
   layout: storedLayout(),
   sort: storedSort(),
   theme: storedTheme(),
@@ -200,7 +201,7 @@ export async function reloadPages(quiet = false) {
 /** Pick up changes made while the window was in the background (agents over
  *  MCP, edits or sync tools touching the vault folder). */
 async function resync() {
-  if (!app.config?.vaultPath || app.busy) return;
+  if (!prefs.refreshOnFocus || !app.config?.vaultPath || app.busy) return;
   try {
     await api.rescan();
   } catch (e) {
@@ -208,6 +209,13 @@ async function resync() {
     return;
   }
   await reloadPages(true);
+}
+
+/** Re-read the vault from disk now and refresh every list. */
+export async function rescanVault() {
+  const report = await api.rescan();
+  await reloadPages(true);
+  return report;
 }
 
 export async function initApp() {
@@ -218,6 +226,7 @@ export async function initApp() {
     if (cfg.vaultPath) {
       await api.setVault(cfg.vaultPath);
       await reloadPages();
+      app.view = prefs.startView;
     }
   } catch (e) {
     app.initError = String(e);

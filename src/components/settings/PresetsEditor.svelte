@@ -69,6 +69,7 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+    width: 100%;
     min-width: 0;
   }
   .chips {

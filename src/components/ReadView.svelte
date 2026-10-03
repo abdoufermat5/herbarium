@@ -7,6 +7,8 @@
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
+  import { prefs } from "../lib/prefs.svelte";
+  import { indent, applyToTextarea } from "../lib/editor";
 
   let { id }: { id: string } = $props();
 
@@ -145,6 +147,10 @@
       // Leave the field instead of closing the page and losing the draft.
       e.stopPropagation();
       (e.target as HTMLElement).blur();
+    } else if (e.key === "Tab" && prefs.editorTabIndents && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      const ta = e.currentTarget as HTMLTextAreaElement;
+      applyToTextarea(ta, indent(ta.value, ta.selectionStart, ta.selectionEnd, prefs.editorTabSize, e.shiftKey));
     }
   }
 
@@ -377,8 +383,17 @@
           </div>
         {/if}
         {#if editing}
-          <div class="split">
-            <div class="editor">
+          <div class="split" class:below={prefs.editorPreview === "below"} class:solo={prefs.editorPreview === "off"}>
+            <div
+              class="editor"
+              style:--ed-font={prefs.editorFont === "system"
+                ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+                : "var(--mono)"}
+              style:--ed-size="{prefs.editorFontSize}px"
+              style:--ed-lh={prefs.editorLineHeight}
+              style:--ed-tab={prefs.editorTabSize}
+              style:--ed-wrap={prefs.editorWrap ? "pre-wrap" : "pre"}
+            >
               <div class="editor-bar">
                 <span class="eyebrow">{t("edit.source")}</span>
                 {#if sourceDirty}<span class="unsaved">· {t("edit.unsaved")}</span>{/if}
@@ -401,19 +416,21 @@
               <textarea
                 class="source"
                 aria-label={t("edit.source")}
-                spellcheck="false"
+                spellcheck={prefs.editorSpellcheck}
                 bind:value={source}
                 onkeydown={onSourceKey}
               ></textarea>
             </div>
-            <div class="frame-holder">
-              <iframe
-                class="ready"
-                title={t("edit.preview")}
-                src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
-                sandbox="allow-scripts"
-              ></iframe>
-            </div>
+            {#if prefs.editorPreview !== "off"}
+              <div class="frame-holder">
+                <iframe
+                  class="ready"
+                  title={t("edit.preview")}
+                  src={`herbarium://page/${page.meta.id}?v=${previewNonce}`}
+                  sandbox="allow-scripts"
+                ></iframe>
+              </div>
+            {/if}
           </div>
         {:else}
         <div class="frame-holder">
@@ -717,12 +734,26 @@
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
+  .split.below {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  }
+  .split.solo {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .editor {
     display: flex;
     flex-direction: column;
     min-width: 0;
     min-height: 0;
     border-right: 1px solid var(--border);
+  }
+  .below .editor {
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .solo .editor {
+    border-right: none;
   }
   .editor-bar {
     flex: none;
@@ -751,11 +782,12 @@
     padding: 14px 16px;
     background: var(--surface);
     color: var(--text);
-    font-family: var(--mono);
-    font-size: 12.5px;
-    line-height: 1.6;
-    tab-size: 2;
-    white-space: pre;
+    font-family: var(--ed-font, var(--mono));
+    font-size: var(--ed-size, 12.5px);
+    line-height: var(--ed-lh, 1.6);
+    tab-size: var(--ed-tab, 2);
+    white-space: var(--ed-wrap, pre);
+    overflow-wrap: anywhere;
     overflow: auto;
   }
 
