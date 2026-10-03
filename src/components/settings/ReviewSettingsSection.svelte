@@ -1,11 +1,13 @@
 <script lang="ts">
   import { app, saveReviewSettings, toast } from "../../lib/state.svelte";
+  import { prefs, setPref } from "../../lib/prefs.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { fmtDuration, plural } from "../../lib/format";
   import type { ReviewSettings, ReviewStrategy } from "../../lib/types";
   import Select, { type SelectOption } from "../Select.svelte";
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
+  import Switch from "./Switch.svelte";
   import PresetsEditor from "./PresetsEditor.svelte";
   import DurationField from "./DurationField.svelte";
 
@@ -115,6 +117,14 @@
       disabled={saving}
       options={importOptions}
       onchange={(m) => void update({ importReviewMinutes: m || null })}
+    />
+  </SettingRow>
+
+  <SettingRow title={t("review.cfg.notify")} hint={t("review.cfg.notifyHint")}>
+    <Switch
+      checked={prefs.reviewNotify}
+      label={t("review.cfg.notify")}
+      onchange={(v) => setPref("reviewNotify", v)}
     />
   </SettingRow>
 

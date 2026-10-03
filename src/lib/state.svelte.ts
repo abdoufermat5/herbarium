@@ -1,5 +1,6 @@
 import { api } from "./api";
 import { i18n, t, LOCALES } from "./i18n.svelte";
+import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
 import type { Config, PageMeta, ReviewSettings, TagCount } from "./types";
 
@@ -171,9 +172,28 @@ export async function refreshAll() {
     app.dueCount = due.length;
     app.library = library;
     app.review = review;
+    armDueTimer(library);
+    void notifyDue(due);
   } catch (e) {
     console.error(e);
   }
+}
+
+/** Interval of the background refresh; a review due sooner gets its own timer. */
+const POLL_MS = 60_000;
+let dueTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Refresh right when the next scheduled review comes due, so a 5-minute review
+ *  is announced on time instead of up to a poll late. */
+function armDueTimer(library: PageMeta[]) {
+  clearTimeout(dueTimer);
+  const now = Date.now();
+  let soonest = Infinity;
+  for (const p of library) {
+    if (p.nextReview && p.nextReview > now && p.nextReview < soonest) soonest = p.nextReview;
+  }
+  const wait = soonest - now;
+  if (wait <= POLL_MS) dueTimer = setTimeout(() => void refreshAll(), wait + 250);
 }
 
 /** Persist new review settings; on rejection the old ones stay and the error is thrown. */
@@ -236,7 +256,7 @@ export async function initApp() {
     // Reviews can be minutes long: keep the "due" badge current while the window sits open.
     setInterval(() => {
       if (app.config?.vaultPath && !app.busy) void refreshAll();
-    }, 60_000);
+    }, POLL_MS);
   }
 }
 

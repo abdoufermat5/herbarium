@@ -20,6 +20,8 @@ export interface Prefs {
   detailsOpen: boolean;
   /** Re-read the vault from disk when the window regains focus. */
   refreshOnFocus: boolean;
+  /** Desktop notification when a page becomes due for review. */
+  reviewNotify: boolean;
   editorFont: EditorFont;
   /** px */
   editorFontSize: number;
@@ -42,6 +44,7 @@ export const DEFAULT_PREFS: Prefs = {
   importTarget: "browsing",
   detailsOpen: false,
   refreshOnFocus: true,
+  reviewNotify: true,
   editorFont: "app",
   editorFontSize: 12.5,
   editorLineHeight: 1.6,
@@ -79,6 +82,7 @@ function sanitize(raw: unknown): Prefs {
     importTarget: oneOf(r.importTarget, ["browsing", "root", "last"], d.importTarget),
     detailsOpen: bool(r.detailsOpen, d.detailsOpen),
     refreshOnFocus: bool(r.refreshOnFocus, d.refreshOnFocus),
+    reviewNotify: bool(r.reviewNotify, d.reviewNotify),
     editorFont: oneOf(r.editorFont, ["app", "system"], d.editorFont),
     editorFontSize: oneOf(r.editorFontSize, EDITOR_FONT_SIZES, d.editorFontSize),
     editorLineHeight: oneOf(r.editorLineHeight, EDITOR_LINE_HEIGHTS, d.editorLineHeight),
