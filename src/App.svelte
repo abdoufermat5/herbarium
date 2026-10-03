@@ -1,6 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
-  import { app, pendingFiles, initApp, clearFilters } from "./lib/state.svelte";
+  import { app, pendingFiles, initApp, clearFilters, toggleSidebar } from "./lib/state.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
@@ -62,6 +62,11 @@
     if (mod && e.key.toLowerCase() === "k") {
       e.preventDefault();
       app.paletteOpen = !app.paletteOpen;
+      return;
+    }
+    if (mod && e.key.toLowerCase() === "b" && app.config?.vaultPath && !app.readId && !app.importOpen && !app.paletteOpen) {
+      e.preventDefault();
+      toggleSidebar();
       return;
     }
     if (mod && e.key === "," && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
@@ -177,8 +182,8 @@
     <ReadView id={app.readId} />
   {/key}
 {:else}
-  <div class="shell">
-    <Sidebar />
+  <div class="shell" class:collapsed={!app.sidebarOpen}>
+    {#if app.sidebarOpen}<Sidebar />{/if}
     <main class="main">
       {#if app.view === "review"}
         <ReviewView />
@@ -266,6 +271,9 @@
     display: grid;
     grid-template-columns: var(--sidebar-w) 1fr;
     height: 100%;
+  }
+  .shell.collapsed {
+    grid-template-columns: 1fr;
   }
   .main {
     display: flex;

@@ -4,13 +4,65 @@
   import { modKey } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import { slide } from "svelte/transition";
+  import type { PageMeta } from "../lib/types";
 
-  let foldersOpen = $state(true);
-  let tagsOpen = $state(true);
+  interface Branch {
+    name: string;
+    path: string;
+    folders: Branch[];
+    pages: PageMeta[];
+  }
+
+  const STORAGE_KEY = "herbarium.expanded";
+
+  function loadExpanded(): Set<string> {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  }
+
+  let expanded = $state(loadExpanded());
 
   const vaultName = $derived(
     app.config?.vaultPath?.split(/[\\/]/).filter(Boolean).pop() ?? "",
   );
+
+  /** Nested folders (including empty intermediate ones) with their pages. */
+  const tree = $derived.by(() => {
+    const root: Branch = { name: "", path: "", folders: [], pages: [] };
+    const byPath = new Map<string, Branch>([["", root]]);
+    const ensure = (path: string): Branch => {
+      const known = byPath.get(path);
+      if (known) return known;
+      const cut = path.lastIndexOf("/");
+      const parent = ensure(cut < 0 ? "" : path.slice(0, cut));
+      const node: Branch = { name: path.slice(cut + 1), path, folders: [], pages: [] };
+      parent.folders.push(node);
+      byPath.set(path, node);
+      return node;
+    };
+    for (const f of app.folders) ensure(f);
+    for (const p of app.library) ensure(p.folder ?? "").pages.push(p);
+    const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
+    for (const node of byPath.values()) {
+      node.folders.sort((a, b) => collator.compare(a.name, b.name));
+      node.pages.sort((a, b) => collator.compare(a.title, b.title));
+    }
+    return root;
+  });
+
+  function toggleFolder(path: string) {
+    const next = new Set(expanded);
+    if (!next.delete(path)) next.add(path);
+    expanded = next;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify([...next]));
+  }
+
+  function openPage(id: string) {
+    app.readId = id;
+  }
 
   function goAll() {
     app.view = "list";
@@ -20,19 +72,44 @@
   function goReview() {
     app.view = "review";
   }
-
-  function filterFolder(folder: string) {
-    app.folderFilter = app.folderFilter === folder ? null : folder;
-    app.tagFilter = null;
-    app.view = "list";
-  }
-
-  function toggleTag(tag: string) {
-    app.tagFilter = app.tagFilter === tag ? null : tag;
-    app.folderFilter = null;
-    app.view = "list";
-  }
 </script>
+
+{#snippet branch(node: Branch, depth: number)}
+  {#each node.folders as folder (folder.path)}
+    {@const open = expanded.has(folder.path)}
+    <button
+      class="nav-item tree-item"
+      style:padding-left="{10 + depth * 14}px"
+      role="treeitem"
+      aria-selected="false"
+      aria-expanded={open}
+      title={folder.path}
+      onclick={() => toggleFolder(folder.path)}
+    >
+      <span class="chev" class:open><Icon name="chevron-right" size={10} /></span>
+      <span class="nav-icon"><Icon name={open ? "folder-open" : "folder"} size={14} /></span>
+      <span class="nav-label ellipsis">{folder.name}</span>
+    </button>
+    {#if open}
+      <div role="group" transition:slide={{ duration: 120 }}>
+        {@render branch(folder, depth + 1)}
+      </div>
+    {/if}
+  {/each}
+  {#each node.pages as page (page.id)}
+    <button
+      class="nav-item tree-item tree-page"
+      style:padding-left="{10 + depth * 14 + 16}px"
+      role="treeitem"
+      aria-selected="false"
+      title={page.title}
+      onclick={() => openPage(page.id)}
+    >
+      <span class="nav-icon"><Icon name="file-text" size={14} /></span>
+      <span class="nav-label ellipsis">{page.title}</span>
+    </button>
+  {/each}
+{/snippet}
 
 <aside class="sidebar">
   <div class="brand">
@@ -71,66 +148,14 @@
       </button>
     </nav>
 
-    {#if app.folders.length > 0}
+    {#if app.library.length > 0}
       <div class="group">
-        <button
-          class="group-title"
-          aria-expanded={foldersOpen}
-          onclick={() => (foldersOpen = !foldersOpen)}
-        >
-          <span class="chev" class:open={foldersOpen}><Icon name="chevron-right" size={10} /></span>
-          {t("sidebar.folders")}
-        </button>
-        {#if foldersOpen}
-          <div class="list" transition:slide={{ duration: 140 }}>
-            {#each app.folders as folder (folder)}
-              <button
-                class="nav-item nav-sub"
-                class:active={app.view === "list" && app.folderFilter === folder}
-                aria-pressed={app.view === "list" && app.folderFilter === folder}
-                title={folder}
-                onclick={() => filterFolder(folder)}
-              >
-                <span class="nav-icon"><Icon name="folder" size={14} /></span>
-                <span class="nav-label ellipsis">{folder}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+        <div class="group-title static">{t("sidebar.files")}</div>
+        <div class="tree" role="tree" aria-label={t("sidebar.files")}>
+          {@render branch(tree, 0)}
+        </div>
       </div>
-    {/if}
-
-    {#if app.tags.length > 0}
-      <div class="group">
-        <button
-          class="group-title"
-          aria-expanded={tagsOpen}
-          onclick={() => (tagsOpen = !tagsOpen)}
-        >
-          <span class="chev" class:open={tagsOpen}><Icon name="chevron-right" size={10} /></span>
-          {t("sidebar.tags")}
-        </button>
-        {#if tagsOpen}
-          <div class="list" transition:slide={{ duration: 140 }}>
-            {#each app.tags as tg (tg.tag)}
-              <button
-                class="nav-item nav-sub"
-                class:active={app.view === "list" && app.tagFilter === tg.tag}
-                aria-pressed={app.view === "list" && app.tagFilter === tg.tag}
-                title={tg.tag}
-                onclick={() => toggleTag(tg.tag)}
-              >
-                <span class="nav-icon"><Icon name="hash" size={14} /></span>
-                <span class="nav-label ellipsis">{tg.tag}</span>
-                <span class="count">{tg.count}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
-    {/if}
-
-    {#if app.folders.length === 0 && app.tags.length === 0}
+    {:else}
       <div class="hint">
         <Icon name="info" size={14} />
         <span>{t("sidebar.hint")}</span>
@@ -260,17 +285,6 @@
   .nav-item .badge {
     margin-left: auto;
   }
-  .nav-sub {
-    font-size: 13px;
-    color: var(--muted);
-  }
-  .nav-sub .count {
-    margin-left: auto;
-    font-family: var(--mono);
-    font-size: 10.5px;
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-  }
 
   .group {
     display: flex;
@@ -300,10 +314,25 @@
   .chev.open {
     transform: rotate(90deg);
   }
-  .list {
+  .group-title.static {
+    cursor: default;
+  }
+  .group-title.static:hover {
+    color: var(--muted);
+  }
+  .tree {
     display: flex;
     flex-direction: column;
     gap: 1px;
+  }
+  .tree-item {
+    width: 100%;
+    font-size: 13px;
+    color: var(--text-soft);
+    gap: 6px;
+  }
+  .tree-page {
+    color: var(--muted);
   }
 
   .hint {

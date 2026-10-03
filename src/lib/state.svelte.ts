@@ -26,6 +26,9 @@ interface AppState {
   folders: string[];
   tags: TagCount[];
   dueCount: number;
+  /** Every page regardless of search, for the sidebar folder tree. */
+  library: PageMeta[];
+  sidebarOpen: boolean;
   search: string;
   folderFilter: string | null;
   tagFilter: string | null;
@@ -58,6 +61,10 @@ function storedSort(): SortKey {
   return v === "title" || v === "review" ? v : "recent";
 }
 
+function storedSidebar(): boolean {
+  return localStorage.getItem("herbarium.sidebar") !== "closed";
+}
+
 export const app: AppState = $state({
   initialized: false,
   initError: null,
@@ -66,6 +73,8 @@ export const app: AppState = $state({
   pages: [],
   folders: [],
   tags: [],
+  library: [],
+  sidebarOpen: storedSidebar(),
   dueCount: 0,
   search: "",
   folderFilter: null,
@@ -130,16 +139,23 @@ export function setSort(sort: SortKey) {
 
 /* ------------------------------------------------------------------- data */
 
+export function toggleSidebar() {
+  app.sidebarOpen = !app.sidebarOpen;
+  localStorage.setItem("herbarium.sidebar", app.sidebarOpen ? "open" : "closed");
+}
+
 export async function refreshAll() {
   try {
-    const [tags, folders, due] = await Promise.all([
+    const [tags, folders, due, library] = await Promise.all([
       api.tags(),
       api.folders(),
       api.reviewToday(),
+      api.listPages(),
     ]);
     app.tags = tags;
     app.folders = folders;
     app.dueCount = due.length;
+    app.library = library;
   } catch (e) {
     console.error(e);
   }
