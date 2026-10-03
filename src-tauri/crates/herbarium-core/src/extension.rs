@@ -57,8 +57,13 @@ impl Operation {
             input_schema,
             for_agents: true,
             handler: Box::new(move |ctx, args| {
-                let args = if args.is_null() { Value::Object(Default::default()) } else { args };
-                let args = serde_json::from_value(args).map_err(|e| format!("{op_name}: invalid arguments: {e}"))?;
+                let args = if args.is_null() {
+                    Value::Object(Default::default())
+                } else {
+                    args
+                };
+                let args = serde_json::from_value(args)
+                    .map_err(|e| format!("{op_name}: invalid arguments: {e}"))?;
                 let out = handler(ctx, args)?;
                 serde_json::to_value(out).map_err(|e| e.to_string())
             }),
@@ -118,7 +123,8 @@ impl Registry {
 
     /// Run `handler` after every successful operation that emits `event`.
     pub fn on(&mut self, event: &str, handler: impl Fn(&Store, &Event) + Send + Sync + 'static) {
-        self.subscribers.push((event.to_string(), Box::new(handler)));
+        self.subscribers
+            .push((event.to_string(), Box::new(handler)));
     }
 
     pub fn get(&self, name: &str) -> Option<&Operation> {
@@ -143,13 +149,18 @@ impl Registry {
 /// What an operation handler can touch: the open vault, plus an outbox of
 /// events delivered once the handler returns successfully.
 pub struct Ctx<'a> {
+    pub caller: Caller,
     pub store: &'a Store,
     events: Vec<Event>,
 }
 
 impl<'a> Ctx<'a> {
-    pub(crate) fn new(store: &'a Store) -> Self {
-        Ctx { store, events: Vec::new() }
+    pub(crate) fn new(store: &'a Store, caller: Caller) -> Self {
+        Ctx {
+            caller,
+            store,
+            events: Vec::new(),
+        }
     }
 
     pub(crate) fn into_events(self) -> Vec<Event> {
@@ -158,7 +169,10 @@ impl<'a> Ctx<'a> {
 
     pub fn emit(&mut self, name: &str, payload: impl Serialize) {
         let payload = serde_json::to_value(payload).unwrap_or(Value::Null);
-        self.events.push(Event { name: name.to_string(), payload });
+        self.events.push(Event {
+            name: name.to_string(),
+            payload,
+        });
     }
 
     pub fn page(&self, id: &str) -> OpResult<PageMeta> {
@@ -172,13 +186,15 @@ impl<'a> Ctx<'a> {
     /// `page.updated`.
     pub fn save(&mut self, meta: &PageMeta) -> OpResult<()> {
         vault::write_meta(&self.store.vault, meta)?;
-        let text = self.store.text_for(&meta.id).map_err(|e| e.to_string())?.unwrap_or_default();
-        let mtime = self
+        let text = self
             .store
-            .mtime_for(&meta.id)
+            .text_for(&meta.id)
             .map_err(|e| e.to_string())?
-            .unwrap_or_else(crate::time::now_secs);
-        self.store.upsert(meta, &text, mtime).map_err(|e| e.to_string())?;
+            .unwrap_or_default();
+        let mtime = vault::page_mtime(&self.store.vault, meta);
+        self.store
+            .upsert(meta, &text, mtime)
+            .map_err(|e| e.to_string())?;
         self.emit(events::PAGE_UPDATED, serde_json::json!({ "page": meta }));
         Ok(())
     }

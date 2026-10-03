@@ -3,16 +3,20 @@
 // automatic scheduling of imports, queue size). Every duration is in minutes,
 // so "30 minutes", "2 hours" and "3 days" are all the same kind of value.
 
+use std::collections::BTreeMap;
 use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 
+use chrono::{NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::{id_prop, object};
 use crate::extension::{Ctx, Extension, OpResult, Operation, Registry};
 use crate::models::PageMeta;
-use crate::time::{now_ms, MINUTE_MS};
+use crate::time::{DAY_MS, MINUTE_MS, now_ms};
+use crate::vault;
 
 pub(crate) struct Review;
 
@@ -21,6 +25,14 @@ const MAX_MINUTES: i64 = 3650 * 24 * 60;
 const MAX_PRESETS: usize = 12;
 /// Stored next to the index, inside the vault so it travels with it.
 const SETTINGS_FILE: &str = "review.json";
+/// Key of the review history in `PageMeta::ext`.
+const HISTORY_KEY: &str = "review";
+/// Most recent history entries kept per page.
+const MAX_LOG: usize = 100;
+/// Most recent days kept in the per-day review tally.
+const MAX_DAYS: usize = 400;
+/// Days covered by `review.stats` `upcoming`.
+const UPCOMING_DAYS: i64 = 14;
 
 /// How completing a review (`review.complete`) picks the next interval.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -69,10 +81,14 @@ impl ReviewSettings {
     /// Reject out-of-range values; normalise the preset list (sorted, unique).
     fn validate(mut self) -> OpResult<Self> {
         if self.presets.is_empty() || self.presets.len() > MAX_PRESETS {
-            return Err(format!("presets: provide between 1 and {MAX_PRESETS} values"));
+            return Err(format!(
+                "presets: provide between 1 and {MAX_PRESETS} values"
+            ));
         }
         if self.presets.iter().any(|m| !(1..=MAX_MINUTES).contains(m)) {
-            return Err(format!("presets: each value must be between 1 and {MAX_MINUTES} minutes"));
+            return Err(format!(
+                "presets: each value must be between 1 and {MAX_MINUTES} minutes"
+            ));
         }
         self.presets.sort_unstable();
         self.presets.dedup();
@@ -80,10 +96,17 @@ impl ReviewSettings {
             return Err("multiplier: must be between 1.1 and 10".into());
         }
         if !(1..=MAX_MINUTES).contains(&self.max_interval_minutes) {
-            return Err(format!("maxIntervalMinutes: must be between 1 and {MAX_MINUTES}"));
+            return Err(format!(
+                "maxIntervalMinutes: must be between 1 and {MAX_MINUTES}"
+            ));
         }
-        if self.import_review_minutes.is_some_and(|m| !(1..=MAX_MINUTES).contains(&m)) {
-            return Err(format!("importReviewMinutes: must be between 1 and {MAX_MINUTES}"));
+        if self
+            .import_review_minutes
+            .is_some_and(|m| !(1..=MAX_MINUTES).contains(&m))
+        {
+            return Err(format!(
+                "importReviewMinutes: must be between 1 and {MAX_MINUTES}"
+            ));
         }
         if self.queue_limit == Some(0) {
             return Err("queueLimit: must be at least 1 (or null for no limit)".into());
@@ -106,30 +129,217 @@ impl ReviewSettings {
     }
 }
 
-/// The vault's review settings; defaults when the file is missing or unusable.
+/// The vault's review settings. A missing file means defaults; an unreadable
+/// or invalid file is an error so it is never silently replaced.
+pub(crate) fn read_settings(vault: &Path) -> OpResult<ReviewSettings> {
+    let path = vault.join(".herbarium").join(SETTINGS_FILE);
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(ReviewSettings::default()),
+        Err(e) => {
+            return Err(format!(
+                "cannot read review settings (.herbarium/{SETTINGS_FILE}): {e}"
+            ));
+        }
+    };
+    serde_json::from_str::<ReviewSettings>(&raw)
+        .map_err(|e| e.to_string())
+        .and_then(ReviewSettings::validate)
+        .map_err(|e| {
+            format!("review settings file .herbarium/{SETTINGS_FILE} is invalid ({e}); save new settings to replace it")
+        })
+}
+
+/// Settings for callers that must keep working (imports, the queue): an
+/// invalid file is logged and defaults are used.
 pub(crate) fn load_settings(vault: &Path) -> ReviewSettings {
-    fs::read_to_string(vault.join(".herbarium").join(SETTINGS_FILE))
-        .ok()
-        .and_then(|raw| serde_json::from_str::<ReviewSettings>(&raw).ok())
-        .and_then(|s| s.validate().ok())
-        .unwrap_or_default()
+    read_settings(vault).unwrap_or_else(|e| {
+        eprintln!("herbarium: {e}");
+        ReviewSettings::default()
+    })
 }
 
 fn save_settings(vault: &Path, settings: &ReviewSettings) -> OpResult<()> {
     let dir = vault.join(".herbarium");
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create settings folder: {e}"))?;
     let json = serde_json::to_string_pretty(settings).map_err(|e| e.to_string())?;
-    fs::write(dir.join(SETTINGS_FILE), json).map_err(|e| format!("cannot write review settings: {e}"))
+    vault::write_atomic(&dir.join(SETTINGS_FILE), json.as_bytes())
+        .map_err(|e| format!("cannot write review settings: {e}"))
 }
 
-/// Set the next review `minutes` from now (at least one minute).
+/// Set the next review `minutes` from now (at least one minute). Does not
+/// touch `last_review`: scheduling is not reviewing.
 pub(crate) fn apply_schedule(meta: &mut PageMeta, minutes: i64) {
     let minutes = minutes.clamp(1, MAX_MINUTES);
     let now = now_ms();
     meta.interval_minutes = Some(minutes);
     meta.next_review = Some(now + minutes * MINUTE_MS);
-    meta.last_review = Some(now);
     meta.updated_at = now;
+}
+
+/// How a review went.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Grade {
+    /// Forgotten: start over at the first preset.
+    Again,
+    /// Remembered: the next interval follows the vault's strategy.
+    #[default]
+    Good,
+}
+
+/// One completed review, stored in `ext["review"].log`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct LogEntry {
+    at: i64,
+    grade: Grade,
+    interval_minutes: i64,
+}
+
+/// Review history kept in `ext["review"]`.
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[serde(default)]
+struct History {
+    count: u64,
+    log: Vec<LogEntry>,
+    /// Reviews completed per UTC day (key: that day's midnight in unix ms).
+    /// Unlike `log` this is not cut at `MAX_LOG`, so daily stats stay exact.
+    days: BTreeMap<i64, u64>,
+}
+
+impl History {
+    /// Reviews completed in the UTC day starting at `day`. Histories written
+    /// before `days` existed fall back to counting the log.
+    fn on_day(&self, day: i64) -> u64 {
+        let from_log = self
+            .log
+            .iter()
+            .filter(|e| utc_midnight(e.at) == day)
+            .count() as u64;
+        self.days.get(&day).copied().unwrap_or(0).max(from_log)
+    }
+}
+
+fn history(meta: &PageMeta) -> History {
+    meta.ext
+        .get(HISTORY_KEY)
+        .and_then(|v| serde_json::from_value::<History>(v.clone()).ok())
+        .map(|mut h| {
+            if h.count < h.log.len() as u64 {
+                h.count = h.log.len() as u64;
+            }
+            h
+        })
+        .unwrap_or_default()
+}
+
+/// Record a review now: next interval from the grade, `last_review = now`,
+/// and a history entry (last `MAX_LOG` kept).
+fn complete(meta: &mut PageMeta, settings: &ReviewSettings, grade: Grade) {
+    let minutes = match grade {
+        Grade::Good => settings.next_interval(meta.interval_minutes),
+        Grade::Again => settings.next_interval(None),
+    };
+    apply_schedule(meta, minutes);
+    let now = meta.updated_at;
+    meta.last_review = Some(now);
+    let mut h = history(meta);
+    let day = utc_midnight(now);
+    // Seed from the log so a pre-`days` history keeps its existing count.
+    let seeded = h.on_day(day);
+    h.days.insert(day, seeded + 1);
+    while h.days.len() > MAX_DAYS {
+        h.days.pop_first();
+    }
+    h.count += 1;
+    h.log.push(LogEntry {
+        at: now,
+        grade,
+        interval_minutes: minutes.clamp(1, MAX_MINUTES),
+    });
+    if h.log.len() > MAX_LOG {
+        let excess = h.log.len() - MAX_LOG;
+        h.log.drain(..excess);
+    }
+    meta.ext.insert(
+        HISTORY_KEY.into(),
+        serde_json::to_value(h).unwrap_or(Value::Null),
+    );
+}
+
+/// Start of the UTC day containing `ms`.
+fn utc_midnight(ms: i64) -> i64 {
+    ms.div_euclid(DAY_MS) * DAY_MS
+}
+
+fn day_label(ms: i64) -> String {
+    Utc.timestamp_millis_opt(ms)
+        .single()
+        .map(|d| d.date_naive())
+        .unwrap_or(NaiveDate::MIN)
+        .format("%Y-%m-%d")
+        .to_string()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DayCount {
+    day: String,
+    count: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Stats {
+    due_total: usize,
+    overdue: usize,
+    reviewed_today: usize,
+    upcoming: Vec<DayCount>,
+    total_reviews: u64,
+}
+
+fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
+    let now = fixed_now.unwrap_or_else(now_ms);
+    let today = utc_midnight(now);
+    let due_total = ctx.store.due_count(now).map_err(|e| e.to_string())?;
+    let mut upcoming: Vec<DayCount> = (0..UPCOMING_DAYS)
+        .map(|d| DayCount {
+            day: day_label(today + d * DAY_MS),
+            count: 0,
+        })
+        .collect();
+    let (mut overdue, mut reviewed_today, mut total_reviews) = (0, 0, 0);
+    for meta in ctx.store.all().map_err(|e| e.to_string())? {
+        if let Some(next) = meta.next_review {
+            if next < today {
+                overdue += 1;
+            } else if next > now {
+                let day = (next - today) / DAY_MS;
+                if let Some(slot) = upcoming.get_mut(day as usize) {
+                    slot.count += 1;
+                }
+            }
+        }
+        let h = history(&meta);
+        total_reviews += h.count;
+        reviewed_today += h.on_day(today) as usize;
+    }
+    Ok(Stats {
+        due_total,
+        overdue,
+        reviewed_today,
+        upcoming,
+        total_reviews,
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompleteArgs {
+    id: String,
+    #[serde(default)]
+    grade: Grade,
 }
 
 #[derive(Deserialize)]
@@ -142,6 +352,20 @@ struct ScheduleArgs {
 #[derive(Deserialize)]
 struct IdArgs {
     id: String,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DueArgs {
+    #[serde(default)]
+    now: Option<i64>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct StatsArgs {
+    #[serde(default)]
+    now: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -173,13 +397,18 @@ impl Extension for Review {
 
         r.add(Operation::new(
             "review.complete",
-            "Record that a page was reviewed and schedule the next review using the vault's strategy (repeat the same interval, step up the preset ladder, or multiply). A page that was not scheduled starts at the first preset.",
-            object(json!({ "id": id_prop() }), &["id"]),
-            |ctx: &mut Ctx, a: IdArgs| {
-                let settings = load_settings(&ctx.store.vault);
+            "Record that a page was reviewed now and schedule the next review. `grade` is `good` (default: the vault's strategy picks the next interval — repeat it, step up the preset ladder, or multiply) or `again` (forgotten: back to the first preset). A page that was not scheduled starts at the first preset. Each review is logged in the page's review history.",
+            object(
+                json!({
+                    "id": id_prop(),
+                    "grade": { "type": "string", "enum": ["again", "good"], "description": "How the review went; default `good`." }
+                }),
+                &["id"],
+            ),
+            |ctx: &mut Ctx, a: CompleteArgs| {
+                let settings = read_settings(&ctx.store.vault)?;
                 let mut meta = ctx.page(&a.id)?;
-                let minutes = settings.next_interval(meta.interval_minutes);
-                apply_schedule(&mut meta, minutes);
+                complete(&mut meta, &settings, a.grade);
                 ctx.save(&meta)?;
                 Ok(meta)
             },
@@ -187,13 +416,12 @@ impl Extension for Review {
 
         r.add(Operation::new(
             "review.clear",
-            "Remove a page from the review schedule.",
+            "Remove a page from the review schedule. The date of its last review and its history are kept.",
             object(json!({ "id": id_prop() }), &["id"]),
             |ctx: &mut Ctx, a: IdArgs| {
                 let mut meta = ctx.page(&a.id)?;
                 meta.interval_minutes = None;
                 meta.next_review = None;
-                meta.last_review = None;
                 meta.updated_at = now_ms();
                 ctx.save(&meta)?;
                 Ok(meta)
@@ -203,9 +431,15 @@ impl Extension for Review {
         r.add(Operation::new(
             "review.due",
             "Pages due for review now, earliest first (at most the vault's queue limit, if one is set).",
-            object(json!({}), &[]),
-            |ctx: &mut Ctx, _: NoArgs| {
-                let mut due = ctx.store.due(now_ms()).map_err(|e| e.to_string())?;
+            object(
+                json!({
+                    "now": { "type": ["integer", "null"], "description": "Reference timestamp in unix ms; defaults to now." }
+                }),
+                &[],
+            ),
+            |ctx: &mut Ctx, a: DueArgs| {
+                let now = a.now.unwrap_or_else(now_ms);
+                let mut due = ctx.store.due(now).map_err(|e| e.to_string())?;
                 if let Some(limit) = load_settings(&ctx.store.vault).queue_limit {
                     due.truncate(limit);
                 }
@@ -214,10 +448,21 @@ impl Extension for Review {
         ))?;
 
         r.add(Operation::new(
+            "review.stats",
+            "Review overview: `dueTotal` (every page due now, ignoring the queue limit), `overdue` (due before today, UTC), `reviewedToday` (reviews completed since UTC midnight), `upcoming` (pages coming due on each of the next 14 UTC days) and `totalReviews` (all completed reviews).",
+            object(
+                json!({
+                    "now": { "type": ["integer", "null"], "description": "Reference timestamp in unix ms; defaults to now." }
+                }),
+                &[],
+            ),
+            |ctx: &mut Ctx, a: StatsArgs| stats(ctx, a.now),
+        ))?;
+        r.add(Operation::new(
             "review.settings",
             "The vault's review settings: preset intervals in minutes, the strategy used by `review.complete`, and queue options.",
             object(json!({}), &[]),
-            |ctx: &mut Ctx, _: NoArgs| Ok(load_settings(&ctx.store.vault)),
+            |ctx: &mut Ctx, _: NoArgs| read_settings(&ctx.store.vault),
         ))?;
 
         r.add(
@@ -259,7 +504,10 @@ mod tests {
     const DAY: i64 = 1440;
 
     fn with(strategy: Strategy) -> ReviewSettings {
-        ReviewSettings { strategy, ..Default::default() }
+        ReviewSettings {
+            strategy,
+            ..Default::default()
+        }
     }
 
     #[test]
@@ -267,14 +515,25 @@ mod tests {
         let s = with(Strategy::Ladder);
         assert_eq!(s.next_interval(None), DAY);
         assert_eq!(s.next_interval(Some(DAY)), 3 * DAY);
-        assert_eq!(s.next_interval(Some(5 * DAY)), 7 * DAY, "a custom interval steps to the next preset above it");
+        assert_eq!(
+            s.next_interval(Some(5 * DAY)),
+            7 * DAY,
+            "a custom interval steps to the next preset above it"
+        );
         assert_eq!(s.next_interval(Some(30 * DAY)), 30 * DAY);
-        assert_eq!(s.next_interval(Some(45 * DAY)), 45 * DAY, "never shrinks past the top preset");
+        assert_eq!(
+            s.next_interval(Some(45 * DAY)),
+            45 * DAY,
+            "never shrinks past the top preset"
+        );
     }
 
     #[test]
     fn ladder_mixes_minutes_hours_and_days() {
-        let s = ReviewSettings { presets: vec![30, 120, DAY], ..with(Strategy::Ladder) };
+        let s = ReviewSettings {
+            presets: vec![30, 120, DAY],
+            ..with(Strategy::Ladder)
+        };
         assert_eq!(s.next_interval(None), 30);
         assert_eq!(s.next_interval(Some(30)), 120);
         assert_eq!(s.next_interval(Some(120)), DAY);
@@ -282,7 +541,11 @@ mod tests {
 
     #[test]
     fn multiply_grows_at_least_one_minute_and_respects_the_cap() {
-        let s = ReviewSettings { multiplier: 1.1, max_interval_minutes: 20, ..with(Strategy::Multiply) };
+        let s = ReviewSettings {
+            multiplier: 1.1,
+            max_interval_minutes: 20,
+            ..with(Strategy::Multiply)
+        };
         assert_eq!(s.next_interval(Some(1)), 2, "ceil(1.1) = 2");
         assert_eq!(s.next_interval(Some(3)), 4);
         assert_eq!(s.next_interval(Some(19)), 20);
@@ -296,21 +559,153 @@ mod tests {
 
     #[test]
     fn validation_normalises_presets_and_rejects_bad_values() {
-        let ok = ReviewSettings { presets: vec![30, 3, 3, 1], ..Default::default() }.validate().unwrap();
+        let ok = ReviewSettings {
+            presets: vec![30, 3, 3, 1],
+            ..Default::default()
+        }
+        .validate()
+        .unwrap();
         assert_eq!(ok.presets, vec![1, 3, 30]);
 
         for bad in [
-            ReviewSettings { presets: vec![], ..Default::default() },
-            ReviewSettings { presets: vec![0], ..Default::default() },
-            ReviewSettings { presets: vec![MAX_MINUTES + 1], ..Default::default() },
-            ReviewSettings { presets: (1..=13).collect(), ..Default::default() },
-            ReviewSettings { multiplier: 1.0, ..Default::default() },
-            ReviewSettings { multiplier: f64::NAN, ..Default::default() },
-            ReviewSettings { max_interval_minutes: 0, ..Default::default() },
-            ReviewSettings { import_review_minutes: Some(0), ..Default::default() },
-            ReviewSettings { queue_limit: Some(0), ..Default::default() },
+            ReviewSettings {
+                presets: vec![],
+                ..Default::default()
+            },
+            ReviewSettings {
+                presets: vec![0],
+                ..Default::default()
+            },
+            ReviewSettings {
+                presets: vec![MAX_MINUTES + 1],
+                ..Default::default()
+            },
+            ReviewSettings {
+                presets: (1..=13).collect(),
+                ..Default::default()
+            },
+            ReviewSettings {
+                multiplier: 1.0,
+                ..Default::default()
+            },
+            ReviewSettings {
+                multiplier: f64::NAN,
+                ..Default::default()
+            },
+            ReviewSettings {
+                max_interval_minutes: 0,
+                ..Default::default()
+            },
+            ReviewSettings {
+                import_review_minutes: Some(0),
+                ..Default::default()
+            },
+            ReviewSettings {
+                queue_limit: Some(0),
+                ..Default::default()
+            },
         ] {
             assert!(bad.clone().validate().is_err(), "{bad:?}");
         }
+    }
+}
+
+#[cfg(test)]
+mod history_tests {
+    use super::*;
+
+    #[test]
+    fn complete_logs_grades_and_keeps_the_last_hundred() {
+        let s = ReviewSettings::default();
+        let mut meta = PageMeta::new("p".into());
+        apply_schedule(&mut meta, 7 * 1440);
+        assert_eq!(meta.last_review, None, "scheduling is not a review");
+
+        complete(&mut meta, &s, Grade::Good);
+        assert_eq!(meta.interval_minutes, Some(30 * 1440));
+        assert_eq!(meta.last_review, Some(meta.updated_at));
+        complete(&mut meta, &s, Grade::Again);
+        assert_eq!(
+            meta.interval_minutes,
+            Some(1440),
+            "again goes back to the first preset"
+        );
+
+        let h = history(&meta);
+        assert_eq!(h.count, 2);
+        assert_eq!(
+            h.log.iter().map(|e| e.grade).collect::<Vec<_>>(),
+            vec![Grade::Good, Grade::Again]
+        );
+
+        for _ in 0..150 {
+            complete(&mut meta, &s, Grade::Good);
+        }
+        let h = history(&meta);
+        assert_eq!(h.count, 152);
+        assert_eq!(h.log.len(), MAX_LOG);
+        assert_eq!(
+            h.days.values().sum::<u64>(),
+            152,
+            "the daily tally is not cut with the log"
+        );
+    }
+
+    #[test]
+    fn day_tally_survives_log_truncation_and_legacy_histories() {
+        let day = 40 * DAY_MS;
+        let mut legacy = PageMeta::new("p".into());
+        legacy.ext.insert(
+            HISTORY_KEY.into(),
+            json!({ "count": 2, "log": [
+                { "at": day + 1, "grade": "good", "intervalMinutes": 1 },
+                { "at": day + 2, "grade": "good", "intervalMinutes": 1 }
+            ] }),
+        );
+        let h = history(&legacy);
+        assert_eq!(h.on_day(day), 2, "legacy log still counted");
+
+        let s = ReviewSettings::default();
+        let mut meta = PageMeta::new("q".into());
+        for _ in 0..(MAX_LOG + 25) {
+            complete(&mut meta, &s, Grade::Good);
+        }
+        let h = history(&meta);
+        assert_eq!(h.log.len(), MAX_LOG);
+        let total: u64 = h.days.values().sum();
+        assert_eq!(total, (MAX_LOG + 25) as u64);
+    }
+
+    #[test]
+    fn utc_days_are_labelled() {
+        assert_eq!(utc_midnight(DAY_MS + 5), DAY_MS);
+        assert_eq!(day_label(DAY_MS), "1970-01-02");
+    }
+
+    #[test]
+    fn utc_midnight_handles_boundaries_and_negative_epochs() {
+        assert_eq!(utc_midnight(0), 0);
+        assert_eq!(utc_midnight(DAY_MS - 1), 0);
+        assert_eq!(utc_midnight(DAY_MS), DAY_MS);
+        assert_eq!(utc_midnight(-1), -DAY_MS);
+        assert_eq!(utc_midnight(-DAY_MS), -DAY_MS);
+        assert_eq!(utc_midnight(-DAY_MS - 1), -2 * DAY_MS);
+    }
+
+    #[test]
+    fn history_tolerates_missing_count_and_bounds_count() {
+        let mut meta = PageMeta::new("p".into());
+        meta.ext.insert(
+            HISTORY_KEY.into(),
+            json!({
+                "log": [
+                    { "at": 1000, "grade": "good", "intervalMinutes": 1440 },
+                    { "at": 2000, "grade": "again", "intervalMinutes": 1440 }
+                ]
+            }),
+        );
+        let h = history(&meta);
+        assert_eq!(h.count, 2, "count defaulted to at least log.len()");
+        assert_eq!(h.log.len(), 2);
     }
 }

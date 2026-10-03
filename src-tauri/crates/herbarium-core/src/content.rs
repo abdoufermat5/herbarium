@@ -7,19 +7,21 @@ const MAX_TEXT: usize = 1_000_000;
 pub fn extract_title(html: &str) -> String {
     let doc = Html::parse_document(html);
     if let Ok(sel) = Selector::parse("title")
-        && let Some(el) = doc.select(&sel).next() {
-            let t = el.text().collect::<String>().trim().to_string();
-            if !t.is_empty() {
-                return t;
-            }
+        && let Some(el) = doc.select(&sel).next()
+    {
+        let t = el.text().collect::<String>().trim().to_string();
+        if !t.is_empty() {
+            return t;
         }
+    }
     if let Ok(sel) = Selector::parse("h1")
-        && let Some(el) = doc.select(&sel).next() {
-            let t = el.text().collect::<String>().trim().to_string();
-            if !t.is_empty() {
-                return t;
-            }
+        && let Some(el) = doc.select(&sel).next()
+    {
+        let t = el.text().collect::<String>().trim().to_string();
+        if !t.is_empty() {
+            return t;
         }
+    }
     String::new()
 }
 
@@ -57,7 +59,9 @@ mod html_sniff_tests {
 
     #[test]
     fn accepts_html() {
-        assert!(looks_like_html("<!DOCTYPE html><html><body><p>x</p></body></html>"));
+        assert!(looks_like_html(
+            "<!DOCTYPE html><html><body><p>x</p></body></html>"
+        ));
         assert!(looks_like_html("\u{feff}  <div class=\"a\">hi</div>"));
     }
 

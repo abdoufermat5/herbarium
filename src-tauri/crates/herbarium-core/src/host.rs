@@ -3,10 +3,10 @@
 
 use std::path::Path;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::builtin;
-use crate::extension::{events, Caller, Ctx, Extension, OpResult, Operation, Registry};
+use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::models::IndexReport;
 use crate::store::Store;
 use crate::vault;
@@ -35,7 +35,11 @@ impl Host {
                 .map_err(|e| format!("extension {}: {e}", ext.id()))?;
             extensions.push(ext.id().to_string());
         }
-        Ok(Host { registry, extensions, store: None })
+        Ok(Host {
+            registry,
+            extensions,
+            store: None,
+        })
     }
 
     /// Open (creating if needed) a vault and re-index it from disk.
@@ -62,7 +66,9 @@ impl Host {
 
     /// Operations visible to `caller`, sorted by name.
     pub fn operations(&self, caller: Caller) -> impl Iterator<Item = &Operation> {
-        self.registry.operations().filter(move |op| op.allows(caller))
+        self.registry
+            .operations()
+            .filter(move |op| op.allows(caller))
     }
 
     pub fn call(&self, caller: Caller, name: &str, args: Value) -> OpResult<Value> {
@@ -72,7 +78,7 @@ impl Host {
             .filter(|op| op.allows(caller))
             .ok_or_else(|| format!("unknown operation: {name}"))?;
         let store = self.store.as_ref().ok_or("no vault open")?;
-        let mut ctx = Ctx::new(store);
+        let mut ctx = Ctx::new(store, caller);
         let out = op.run(&mut ctx, args)?;
         self.registry.dispatch(store, &ctx.into_events());
         Ok(out)
@@ -86,11 +92,19 @@ impl Default for Host {
 }
 
 pub(crate) fn reindex(store: &Store) -> OpResult<IndexReport> {
-    let (indexed, removed) = vault::index_vault(store)?;
+    let outcome = vault::index_vault(store)?;
     let total = store.count().map_err(|e| e.to_string())?;
-    Ok(IndexReport { indexed, removed, total })
+    Ok(IndexReport {
+        indexed: outcome.indexed,
+        removed: outcome.removed,
+        total,
+        skipped: outcome.skipped,
+    })
 }
 
 pub(crate) fn indexed_event(report: &IndexReport) -> crate::extension::Event {
-    crate::extension::Event { name: events::VAULT_INDEXED.into(), payload: json!(report) }
+    crate::extension::Event {
+        name: events::VAULT_INDEXED.into(),
+        payload: json!(report),
+    }
 }

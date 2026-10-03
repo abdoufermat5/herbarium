@@ -19,6 +19,11 @@ pub struct PageMeta {
     pub schema_version: u32,
     pub id: String,
     pub title: String,
+    /// The `<title>` extracted from the HTML at its last write or index. While
+    /// `title` equals it, the user never renamed the page and the title follows
+    /// the document.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_title: Option<String>,
     pub tags: Vec<String>,
     pub folder: Option<String>,
     pub note: String,
@@ -46,6 +51,7 @@ impl PageMeta {
             schema_version: SCHEMA_VERSION,
             id,
             title: String::new(),
+            source_title: None,
             tags: Vec::new(),
             folder: None,
             note: String::new(),
@@ -55,7 +61,8 @@ impl PageMeta {
             legacy_interval_days: None,
             next_review: None,
             last_review: None,
-            allow_cdn: true,
+            // Pages found on disk without a sidecar are untrusted: network off.
+            allow_cdn: false,
             ext: BTreeMap::new(),
         }
     }
@@ -65,7 +72,8 @@ impl PageMeta {
     /// Bring metadata read from an older sidecar up to the current schema.
     pub(crate) fn upgrade(&mut self) {
         if let Some(days) = self.legacy_interval_days.take() {
-            self.interval_minutes.get_or_insert(days.saturating_mul(1440));
+            self.interval_minutes
+                .get_or_insert(days.saturating_mul(1440));
         }
         self.schema_version = SCHEMA_VERSION;
     }
@@ -94,7 +102,9 @@ pub struct MetaPatch {
 }
 
 /// Distinguishes an explicit `null` (Some(None)) from an absent field (None).
-fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
+fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(
+    d: D,
+) -> Result<Option<Option<T>>, D::Error> {
     Option::<T>::deserialize(d).map(Some)
 }
 
@@ -119,10 +129,41 @@ pub struct ImportResult {
     pub errors: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+/// A search result: the page plus, when the match is in the page text, a
+/// short excerpt with the matched terms wrapped in `[` `]`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchHit {
+    #[serde(flatten)]
+    pub meta: PageMeta,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub snippet: Option<String>,
+}
+
+/// A page sitting in the vault trash.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashEntry {
+    #[serde(flatten)]
+    pub meta: PageMeta,
+    /// When the page was trashed, in unix ms.
+    pub deleted_at: i64,
+}
+
+/// A file a rescan could not index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkippedFile {
+    /// Relative to the vault, `/`-separated.
+    pub path: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexReport {
     pub indexed: usize,
     pub removed: usize,
     pub total: usize,
+    pub skipped: Vec<SkippedFile>,
 }

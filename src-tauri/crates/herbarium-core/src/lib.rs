@@ -11,5 +11,5 @@ pub mod store;
 pub mod time;
 pub mod vault;
 
-pub use extension::{events, Caller, Ctx, Event, Extension, OpResult, Operation, Registry};
+pub use extension::{Caller, Ctx, Event, Extension, OpResult, Operation, Registry, events};
 pub use host::Host;
