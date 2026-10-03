@@ -215,7 +215,7 @@ TypeScript fails if a locale is missing a key that English defines.
 
 ## Scope
 
-Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included yet: sync, mobile, Markdown notes, page linking, a plugin loader (the extension API is in place; a WASM runtime will come later). Desktop only: the release workflow builds Linux (`.deb`, `.rpm`, AppImage), macOS and Windows bundles.
+Version 1 deliberately does one thing: save generated pages and bring them back for review. Not included yet: sync, mobile, Markdown notes, page linking, a plugin loader (the extension API is in place; a WASM runtime will come later). Desktop only: the release workflow builds Linux (`.deb`, `.rpm`, AppImage), macOS and Windows bundles. macOS bundles are unsigned and unnotarized until Apple credentials are set on the repository, so macOS warns on first launch; the in-app updater trust comes from its own signing key, not from Apple.
 
 ## License
 

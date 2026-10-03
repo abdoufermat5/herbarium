@@ -44,6 +44,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Known limitations
 - Desktop only: the release workflow builds Linux (`.deb`, `.rpm`, AppImage), macOS and Windows bundles, but there is no mobile or web build.
+- macOS bundles are unsigned and unnotarized until Apple credentials (`APPLE_CERTIFICATE`, `APPLE_SIGNING_IDENTITY`, notarization secrets) are configured on the repository; macOS will warn about the first launch. Updater signatures are independent of Apple code signing.
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 

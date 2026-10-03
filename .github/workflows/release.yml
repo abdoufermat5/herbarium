@@ -216,15 +216,40 @@ jobs:
             console.log("updater artifacts:", enabled, "->", process.env.UPDATER_CONFIG);
           '
 
+      - name: Configure macOS code signing
+        shell: bash
+        env:
+          CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          NOTARY_ID: ${{ secrets.APPLE_ID }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          NOTARY_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          # GitHub substitutes an unset secret with an empty string, and the
+          # bundler treats a present-but-empty APPLE_CERTIFICATE as a request to
+          # import a certificate (failing with "failed to import keychain
+          # certificate"). Pass the variables only when a certificate exists, so
+          # unsigned macOS bundles build cleanly without Apple credentials.
+          if [ -z "$CERTIFICATE" ]; then
+            echo "macOS code signing skipped: no APPLE_CERTIFICATE secret"
+            exit 0
+          fi
+          for pair in \
+            "APPLE_CERTIFICATE=$CERTIFICATE" \
+            "APPLE_CERTIFICATE_PASSWORD=$CERTIFICATE_PASSWORD" \
+            "APPLE_SIGNING_IDENTITY=$SIGNING_IDENTITY" \
+            "APPLE_ID=$NOTARY_ID" \
+            "APPLE_PASSWORD=$NOTARY_PASSWORD" \
+            "APPLE_TEAM_ID=$NOTARY_TEAM"; do
+            name="${pair%%=*}"
+            printf '%s<<APPLE_VALUE_EOF\n%s\nAPPLE_VALUE_EOF\n' "${name}" "${pair#*=}" >> "$GITHUB_ENV"
+          done
+          echo "macOS code signing enabled"
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
