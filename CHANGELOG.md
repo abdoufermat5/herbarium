@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-04
+
 ### Added
 - Pages keep their state: `localStorage` and the `window.storage` API used by Claude artifacts persist per page in its sidecar (up to 1 MiB), so quizzes, trackers and checklists remember where you left off. `sessionStorage` lasts for the visit. The draft preview never saves state, and the reader can reset a page's data.
 - Page history: every in-app or agent overwrite of a page's HTML first keeps the previous version in `.herbarium/history/` (newest 50 per page). The reader's History panel shows each version side by side with the current one and restores it. Agents get `history.list`, `history.get` and `history.restore`.
@@ -60,5 +62,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/abdoufermat5/herbarium/releases/tag/v0.1.0

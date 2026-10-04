@@ -1570,7 +1570,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "herbarium"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "dirs",
  "herbarium-core",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "herbarium-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -1608,7 +1608,7 @@ dependencies = [
 
 [[package]]
 name = "herbarium-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "herbarium-core",
  "serde_json",
