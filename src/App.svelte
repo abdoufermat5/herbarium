@@ -172,8 +172,10 @@
       if (app.importOpen || app.paletteOpen || shortcutsOpen) return;
       const a = document.activeElement;
       if (a && a !== document.body && a.isConnected && !a.closest("[inert]")) return;
+      // Stay in the view that was opened: falling back to the sidebar put the
+      // focus ring on "All pages" while another view was shown.
       document
-        .querySelector<HTMLElement>(app.readId ? ".main .bar button" : "#page-search, .shell button")
+        .querySelector<HTMLElement>(app.readId ? ".main .bar button" : ".main #page-search, .main button")
         ?.focus();
     });
   });
