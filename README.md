@@ -81,7 +81,7 @@ git push --follow-tags
 
 The tag builds every platform and publishes the release. In-app updates need the signing key pair on the repository: the `HERBARIUM_UPDATER_PUBLIC_KEY` variable and the `TAURI_SIGNING_PRIVATE_KEY` secret (create them with `pnpm tauri signer generate`).
 
-Optional channels — Windows code signing, Homebrew, WinGet, AUR and Flatpak — and the repository secrets that turn them on are documented in [`docs/distribution.md`](docs/distribution.md).
+Optional channels — Windows code signing, WinGet, Snap and Flatpak — and the repository secrets that turn them on are documented in [`docs/distribution.md`](docs/distribution.md).
 
 ## License
 

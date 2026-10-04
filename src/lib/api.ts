@@ -23,6 +23,7 @@ import type {
   StorageChange,
   TagCount,
   TrashEntry,
+  UpdateChannel,
   UpdateInfo,
 } from "./types";
 
@@ -269,6 +270,11 @@ export const api = {
   /** Download, verify and install exactly `version`, then restart the app. */
   installUpdate(version: string): Promise<void> {
     return invoke("install_update", { version });
+  },
+
+  /** `"snap"` when the Snap Store owns updates, otherwise null. */
+  updateManagedBy(): Promise<UpdateChannel | null> {
+    return invoke("update_managed_by");
   },
 
   /** Text editors installed on this system, best candidates first. */

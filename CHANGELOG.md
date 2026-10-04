@@ -5,6 +5,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Snap Store channel: a strict `herbarium` snap (amd64) built from the release `.deb` and published by the release workflow when `SNAPCRAFT_STORE_CREDENTIALS` is set; `gh workflow run snap.yml -f tag=vX.Y.Z` builds or publishes an existing release.
+
+### Changed
+- Installed from the Snap Store, Herbarium leaves updates to the store: the in-app updater never checks or installs, and Settings says so.
+
+### Removed
+- Homebrew and AUR publishing jobs and their templates.
+
 ## [0.2.0] - 2026-10-04
 
 ### Added

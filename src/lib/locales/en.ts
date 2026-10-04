@@ -653,6 +653,9 @@ export const en = {
 
   "settings.updates": "Updates",
   "settings.updatesHint": "Herbarium checks GitHub for a signed release and verifies its signature before installing.",
+  "settings.updatesSnapHint": "The Snap Store keeps Herbarium up to date.",
+  "settings.updatesSnapTitle": "Snap Store updates",
+  "settings.updatesSnapManaged": "Updates are installed by the Snap Store.",
   "settings.updatesCurrentVersion": "Current version {version}",
   "settings.checkUpdates": "Check for updates",
   "settings.checking": "Checking…",

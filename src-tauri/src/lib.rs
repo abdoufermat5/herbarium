@@ -176,6 +176,7 @@ pub fn run() {
             commands::open_external,
             updater::check_update,
             updater::install_update,
+            updater::update_managed_by,
         ])
         .run(context)
         .expect("error while running herbarium");

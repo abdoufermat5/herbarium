@@ -4,6 +4,12 @@
 // HERBARIUM_UPDATER_PUBLIC_KEY. Builds without it (local dev, forks) keep every
 // other feature but refuse to update, with an explicit error and before any
 // network request. There is no unsigned or default-key path.
+//
+// Inside a strict Snap the binary lives on read-only squashfs and the Snap
+// Store delivers updates, so the in-app updater is disabled entirely: the
+// plugin is never registered and both commands refuse before any network
+// request. Detection is a pure function over the environment (see
+// `snap_managed`) so it can be unit-tested.
 
 use std::time::Duration;
 
@@ -21,6 +27,25 @@ const INSTALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 const MISSING_KEY: &str = "updates are unavailable: this build has no updater public key \
 (HERBARIUM_UPDATER_PUBLIC_KEY was not set at compile time). Install a release build from GitHub.";
+
+// snapd sets `SNAP` (to `/snap/<name>/<rev>`) for every process it launches and
+// `SNAP_NAME` to the snap's name.
+const SNAP_NAME: &str = "herbarium";
+
+const SNAP_MANAGED: &str = "updates are installed by the Snap Store; the in-app updater is \
+disabled in the snap build.";
+
+/// True when the environment says this process runs from the Herbarium snap.
+/// Either `SNAP` (any non-blank value, snapd always sets it) or `SNAP_NAME`
+/// equal to `herbarium` is enough. Takes the lookup so it stays pure.
+fn snap_managed(env: impl Fn(&str) -> Option<String>) -> bool {
+    env("SNAP").is_some_and(|v| !v.trim().is_empty())
+        || env("SNAP_NAME").is_some_and(|v| v.trim() == SNAP_NAME)
+}
+
+fn snap_managed_now() -> bool {
+    snap_managed(|key| std::env::var(key).ok())
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -45,6 +70,11 @@ fn same_version(a: &str, b: &str) -> bool {
 pub fn plugin(
     context: &mut tauri::Context<tauri::Wry>,
 ) -> Option<tauri::plugin::TauriPlugin<tauri::Wry, Config>> {
+    // A snap cannot install into its read-only squashfs and the store owns
+    // updates: leave the updater unregistered so no endpoint is ever known.
+    if snap_managed_now() {
+        return None;
+    }
     let key = configured_key(PUBLIC_KEY)?;
     // The plugin deserializes its config before applying Builder overrides.
     context.config_mut().plugins.0.insert(
@@ -71,6 +101,9 @@ fn updater<R: Runtime>(
 /// Look for a newer signed release. `None` when this build is current.
 #[tauri::command]
 pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> {
+    if snap_managed_now() {
+        return Err(SNAP_MANAGED.to_string());
+    }
     let updater = updater(&app, CHECK_TIMEOUT)?;
     let update = updater.check().await.map_err(|e| e.to_string())?;
     Ok(update.map(|u| UpdateInfo {
@@ -86,6 +119,9 @@ pub async fn check_update(app: AppHandle) -> Result<Option<UpdateInfo>, String> 
 /// before installing; the app restarts afterwards.
 #[tauri::command]
 pub async fn install_update(app: AppHandle, version: String) -> Result<(), String> {
+    if snap_managed_now() {
+        return Err(SNAP_MANAGED.to_string());
+    }
     let updater = updater(&app, INSTALL_TIMEOUT)?;
     let update = updater
         .check()
@@ -103,6 +139,14 @@ pub async fn install_update(app: AppHandle, version: String) -> Result<(), Strin
         .await
         .map_err(|e| e.to_string())?;
     app.restart()
+}
+
+/// How this build receives updates: `"snap"` when the Snap Store owns them,
+/// `null` when the in-app updater applies. The Settings UI reads this once on
+/// mount to show the right message without ever hitting the update endpoint.
+#[tauri::command]
+pub fn update_managed_by() -> Option<&'static str> {
+    snap_managed_now().then_some("snap")
 }
 
 #[cfg(test)]
@@ -124,5 +168,35 @@ mod tests {
     fn version_match_ignores_leading_v() {
         assert!(same_version("v1.2.3", "1.2.3"));
         assert!(!same_version("1.2.4", "1.2.3"));
+    }
+
+    #[test]
+    fn snap_env_marks_updates_managed() {
+        // snapd sets both variables for the Herbarium snap.
+        let snap = |key: &str| match key {
+            "SNAP" => Some("/snap/herbarium/42".to_string()),
+            "SNAP_NAME" => Some(SNAP_NAME.to_string()),
+            _ => None,
+        };
+        assert!(snap_managed(snap));
+
+        // Either variable alone is enough.
+        assert!(snap_managed(|key| {
+            (key == "SNAP").then(|| "/snap/herbarium/42".to_string())
+        }));
+        assert!(snap_managed(|key| {
+            (key == "SNAP_NAME").then(|| SNAP_NAME.to_string())
+        }));
+
+        // A different snap, or blank values, do not count.
+        assert!(!snap_managed(|key| {
+            (key == "SNAP_NAME").then(|| "other".to_string())
+        }));
+        assert!(!snap_managed(|key| (key == "SNAP").then(String::new)));
+    }
+
+    #[test]
+    fn no_snap_env_leaves_updates_unmanaged() {
+        assert!(!snap_managed(|_| None));
     }
 }

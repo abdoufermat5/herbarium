@@ -17,9 +17,7 @@ jobs:
       updater_enabled: ${{ steps.updater.outputs.enabled }}
       prerelease: ${{ steps.version.outputs.prerelease }}
       macos_signed: ${{ steps.channels.outputs.macos_signed }}
-      homebrew_enabled: ${{ steps.channels.outputs.homebrew }}
       winget_enabled: ${{ steps.channels.outputs.winget }}
-      aur_enabled: ${{ steps.channels.outputs.aur }}
     steps:
       - uses: actions/checkout@v4
 
@@ -80,15 +78,11 @@ jobs:
         shell: bash
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
           WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
-          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
           for pair in \
             "macos_signed=$APPLE_CERTIFICATE" \
-            "homebrew=$HOMEBREW_TAP_TOKEN" \
-            "winget=$WINGET_TOKEN" \
-            "aur=$AUR_SSH_PRIVATE_KEY"; do
+            "winget=$WINGET_TOKEN"; do
             name="${pair%%=*}"
             if [ -n "${pair#*=}" ]; then
               echo "$name=true" >> "$GITHUB_OUTPUT"
@@ -381,98 +375,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  # Optional channels. Each is skipped (with a notice from the gate job) unless
-  # its secret is configured, and none of them run for prereleases.
-  homebrew:
-    name: Homebrew Cask
-    needs: [gate, publish]
-    if: needs.gate.outputs.prerelease == 'false' && needs.gate.outputs.homebrew_enabled == 'true'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download macOS bundles and checksums
-        run: |
-          mkdir -p assets
-          gh release download "${{ github.ref_name }}" --dir assets \
-            --pattern '*.dmg' --pattern 'SHA256SUMS'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # Render the tap cask from the release's own filenames and checksums, so
-      # the generated Casks/herbarium.rb can never disagree with what shipped.
-      - name: Render cask
-        shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
-          SIGNED: ${{ needs.gate.outputs.macos_signed }}
-        run: |
-          version="${TAG#v}"
-          file_x64="$(ls assets | grep -E '_x64\.dmg$')"
-          file_arm64="$(ls assets | grep -E '_aarch64\.dmg$')"
-          if [ -z "$file_x64" ] || [ -z "$file_arm64" ]; then
-            echo "::error::expected _x64.dmg and _aarch64.dmg release assets"
-            ls -1 assets
-            exit 1
-          fi
-          sha_x64="$(awk -v f="$file_x64" '$2 == f { print $1 }' assets/SHA256SUMS)"
-          sha_arm64="$(awk -v f="$file_arm64" '$2 == f { print $1 }' assets/SHA256SUMS)"
-          if [ -z "$sha_x64" ] || [ -z "$sha_arm64" ]; then
-            echo "::error::missing macOS checksums in SHA256SUMS"
-            exit 1
-          fi
-          # Homebrew downloads are never quarantined, so the cask installs
-          # xattr-free; only tell users about the Gatekeeper bypass when the
-          # bundles are in fact unsigned.
-          caveats=""
-          if [ "$SIGNED" != "true" ]; then
-            caveats="$(printf '%s\n' \
-              'caveats do' \
-              '  <<~EOS' \
-              '    Herbarium is not signed or notarized yet. If macOS refuses the first' \
-              '    launch, allow it under System Settings → Privacy & Security, or run:' \
-              '      xattr -dr com.apple.quarantine "#{appdir}/herbarium.app"' \
-              '  EOS' \
-              'end')"
-          fi
-          VERSION="$version" FILE_X64="$file_x64" FILE_ARM64="$file_arm64" \
-          SHA_X64="$sha_x64" SHA_ARM64="$sha_arm64" CAVEATS_BLOCK="$caveats" \
-          node -e '
-            const fs = require("fs");
-            const [tplPath, outPath] = process.argv.slice(1);
-            const out = fs
-              .readFileSync(tplPath, "utf8")
-              .replaceAll("__VERSION__", process.env.VERSION)
-              .replaceAll("__FILE_X64__", process.env.FILE_X64)
-              .replaceAll("__FILE_ARM64__", process.env.FILE_ARM64)
-              .replaceAll("__SHA_X64__", process.env.SHA_X64)
-              .replaceAll("__SHA_ARM64__", process.env.SHA_ARM64)
-              .replaceAll("__CAVEATS__", process.env.CAVEATS_BLOCK);
-            fs.writeFileSync(outPath, out);
-          ' src-tauri/packaging/homebrew/herbarium.rb.tmpl herbarium.rb
-          cat herbarium.rb
-
-      - name: Push cask to the tap
-        env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          TAG: ${{ github.ref_name }}
-        run: |
-          version="${TAG#v}"
-          git clone --depth 1 \
-            "https://x-access-token:${TAP_TOKEN}@github.com/abdoufermat5/homebrew-tap.git" tap
-          mkdir -p tap/Casks
-          cp herbarium.rb tap/Casks/herbarium.rb
-          cd tap
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Casks/herbarium.rb
-          if git diff --cached --quiet; then
-            echo "Cask already up to date"
-          else
-            git commit -m "herbarium ${version}"
-            git push
-          fi
-
+  # Optional channels. WinGet is skipped (with a notice from the gate job)
+  # unless its secret is configured, and never runs for prereleases. Snap runs
+  # for every release and publishes to the Snap Store when its credentials are
+  # configured; prereleases go to the `candidate` channel.
   winget:
     name: WinGet
     needs: [gate, publish]
@@ -480,7 +386,8 @@ jobs:
     runs-on: windows-latest
     steps:
       # winget-releaser updates an existing winget-pkgs package; the first
-      # submission for abdoufermat5.Herbarium must be made manually.
+      # submission for abdoufermat5.Herbarium is made by hand (see
+      # docs/distribution.md).
       - uses: vedantmgoyal9/winget-releaser@v2
         with:
           identifier: abdoufermat5.Herbarium
@@ -489,79 +396,15 @@ jobs:
           installers-regex: '-setup\.exe$|\.msi$'
           token: ${{ secrets.WINGET_TOKEN }}
 
-  aur:
-    name: AUR (herbarium-bin)
+  # Snap packages the published amd64 .deb and uploads it to the Snap Store.
+  # The reusable workflow resolves its own channel from the tag (stable for
+  # plain versions, candidate for prereleases) and skips publishing with a
+  # notice when SNAPCRAFT_STORE_CREDENTIALS is not configured. See snap.yml and
+  # docs/distribution.md.
+  snap:
+    name: Snap Store
     needs: [gate, publish]
-    if: needs.gate.outputs.prerelease == 'false' && needs.gate.outputs.aur_enabled == 'true'
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Linux bundles and checksums
-        run: |
-          mkdir -p assets
-          gh release download "${{ github.ref_name }}" --dir assets \
-            --pattern '*.deb' --pattern 'SHA256SUMS'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Render PKGBUILD
-        shell: bash
-        env:
-          TAG: ${{ github.ref_name }}
-        run: |
-          version="${TAG#v}"
-          file_x64="$(ls assets | grep -E '_amd64\.deb$')"
-          file_arm64="$(ls assets | grep -E '_arm64\.deb$')"
-          if [ -z "$file_x64" ] || [ -z "$file_arm64" ]; then
-            echo "::error::expected _amd64.deb and _arm64.deb release assets"
-            ls -1 assets
-            exit 1
-          fi
-          sha_x64="$(awk -v f="$file_x64" '$2 == f { print $1 }' assets/SHA256SUMS)"
-          sha_arm64="$(awk -v f="$file_arm64" '$2 == f { print $1 }' assets/SHA256SUMS)"
-          if [ -z "$sha_x64" ] || [ -z "$sha_arm64" ]; then
-            echo "::error::missing .deb checksums in SHA256SUMS"
-            exit 1
-          fi
-          VERSION="$version" FILE_X64="$file_x64" FILE_ARM64="$file_arm64" \
-          SHA_X64="$sha_x64" SHA_ARM64="$sha_arm64" \
-          node -e '
-            const fs = require("fs");
-            const [tplPath, outPath] = process.argv.slice(1);
-            let out = fs.readFileSync(tplPath, "utf8");
-            const values = {
-              __VERSION__: process.env.VERSION,
-              __FILE_X64__: process.env.FILE_X64,
-              __FILE_ARM64__: process.env.FILE_ARM64,
-              __SHA_X64__: process.env.SHA_X64,
-              __SHA_ARM64__: process.env.SHA_ARM64,
-            };
-            for (const [key, value] of Object.entries(values)) {
-              out = out.replaceAll(key, value);
-            }
-            fs.writeFileSync(outPath, out);
-          ' src-tauri/packaging/aur/PKGBUILD.tmpl PKGBUILD
-          cat PKGBUILD
-
-      - name: Generate .SRCINFO
-        run: |
-          docker run --rm -v "$PWD:/pkg" -w /pkg archlinux:base-devel bash -c '
-            set -e
-            useradd -m builder
-            chown -R builder /pkg
-            su builder -c "cd /pkg && makepkg --printsrcinfo > .SRCINFO"
-          '
-          cat .SRCINFO
-
-      - name: Publish to the AUR
-        uses: KSXGitHub/github-actions-deploy-aur@v4
-        with:
-          pkgname: herbarium-bin
-          pkgbuild: PKGBUILD
-          assets: |
-            .SRCINFO
-          commit_username: abdoufermat5
-          commit_email: abdoufermat5@users.noreply.github.com
-          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
-          commit_message: ${{ github.ref_name }}
+    uses: ./.github/workflows/snap.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

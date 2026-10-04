@@ -18,13 +18,13 @@ log.
 | In-app updater | `gate` | `TAURI_SIGNING_PRIVATE_KEY` secret **and** `HERBARIUM_UPDATER_PUBLIC_KEY` variable | Signed updater artifacts and `latest.json` |
 | macOS signing/notarization | `build` | `APPLE_CERTIFICATE` (+ password, identity, notarization secrets) | Signed and notarized `.dmg`/`.app` |
 | Windows signing | `build` | `WINDOWS_CERTIFICATE` + `WINDOWS_CERTIFICATE_PASSWORD` | Authenticode-signed `.msi`/`-setup.exe` |
-| Homebrew | `homebrew` | `HOMEBREW_TAP_TOKEN` | `Casks/herbarium.rb` in `abdoufermat5/homebrew-tap` |
 | WinGet | `winget` | `WINGET_TOKEN` | An update PR to `microsoft/winget-pkgs` |
-| AUR | `aur` | `AUR_SSH_PRIVATE_KEY` | `herbarium-bin` on the AUR |
+| Snap Store | `snap` | `SNAPCRAFT_STORE_CREDENTIALS` | An amd64 snap on the Snap Store (`stable`, or `candidate` for prereleases) |
 | Flatpak / Flathub | — (manual) | none | A PR to Flathub from the manifest in the repo |
 
-`homebrew`, `winget` and `aur` run only for stable releases: a tag with a
-pre-release suffix (`v0.2.0-rc.1`) skips them.
+`winget` runs only for stable releases: a tag with a pre-release suffix
+(`v0.2.0-rc.1`) skips it. Snap runs for every release and sends prereleases to
+the `candidate` channel instead of `stable`.
 
 ## Windows Authenticode signing
 
@@ -49,28 +49,6 @@ Missing either secret: the step logs `Windows code signing skipped` and the
 Windows bundles build unsigned, exactly as before. Windows will show a SmartScreen
 warning on first launch.
 
-## Homebrew cask
-
-The `homebrew` job downloads the two macOS `.dmg` assets, reads their SHA-256
-from the release's `SHA256SUMS`, renders
-`src-tauri/packaging/homebrew/herbarium.rb.tmpl`, and pushes
-`Casks/herbarium.rb` to `abdoufermat5/homebrew-tap`. The cask installs the
-`.app` from the `.dmg`; Homebrew never quarantines its downloads, so no `xattr`
-step is needed. When the builds are unsigned, the job adds a `caveats` block
-explaining the Gatekeeper bypass; signed builds get no caveats.
-
-One-time setup:
-
-1. Create the public repository `abdoufermat5/homebrew-tap`.
-2. Create a token that can push to it — a fine-grained PAT with **Contents:
-   Read and write** on that repository, or a classic token with the `repo`
-   scope — and store it as `HOMEBREW_TAP_TOKEN`.
-3. Optionally, add a `Casks/herbarium.rb` placeholder; the next release replaces
-   it.
-
-Missing `HOMEBREW_TAP_TOKEN`: the job is skipped and the tap is left untouched.
-Users can still install from the releases page.
-
 ## WinGet
 
 The `winget` job runs `vedantmgoyal9/winget-releaser`, which opens a PR against
@@ -80,36 +58,87 @@ The `winget` job runs `vedantmgoyal9/winget-releaser`, which opens a PR against
 
 One-time setup:
 
-1. Submit the **first** version of `abdoufermat5.Herbarium` to
-   `microsoft/winget-pkgs` manually (or with `wingetcreate`). winget-releaser
-   only *updates* a package that already exists, and fails early if it does not.
-2. Fork `microsoft/winget-pkgs` under the `abdoufermat5` account; the action
-   syncs and pushes to that fork.
-3. Create a PAT with the **`public_repo`** scope (classic) and store it as
-   `WINGET_TOKEN`.
+1. Submit the **first** version from Linux with
+   [`komac`](https://github.com/russellbanks/Komac). winget-releaser only
+   *updates* a package that already exists, and fails early if it does not:
+
+   ```bash
+   komac new abdoufermat5.Herbarium --version 0.2.0 \
+     --urls <herbarium_0.2.0_x64_en-US.msi-url> <herbarium_0.2.0_x64-setup.exe-url>
+   ```
+
+   `komac` forks `microsoft/winget-pkgs` under the `abdoufermat5` account on
+   its own and opens the PR from that fork — there is no need to create the
+   fork by hand.
+2. Create a classic PAT with the **`public_repo`** scope and store it as
+   `WINGET_TOKEN`; winget-releaser pushes updates to the existing fork.
 
 Missing `WINGET_TOKEN`: the job is skipped; the version simply is not submitted
 to WinGet.
 
-## AUR (`herbarium-bin`)
+## Snap Store
 
-The `aur` job renders `src-tauri/packaging/aur/PKGBUILD.tmpl` for the x86_64 and
-aarch64 `.deb` assets with their SHA-256s, generates `.SRCINFO`, and pushes both
-to the AUR with `KSXGitHub/github-actions-deploy-aur`. The PKGBUILD unpacks the
-release `.deb` payload into `$pkgdir`.
+The `snap` job calls the reusable `.github/workflows/snap.yml`, which downloads
+the amd64 `.deb` from the release for the tag being built, renders the
+`__VERSION__` token in `src-tauri/packaging/snap/snapcraft.yaml` (a `dump` part
+whose source is that `.deb`), builds the snap with `snapcore/action-build@v1`,
+and keeps it as a workflow artifact. When `SNAPCRAFT_STORE_CREDENTIALS` is set
+it then publishes with `snapcore/action-publish@v1` — plain versions to
+`stable`, a tag with a `-` in the version to `candidate`. Without the secret the
+build still runs, and a `::notice::` says publishing was skipped.
+
+Only amd64 is built: the arm64 `.deb` is produced on ubuntu-24.04 and needs
+glibc 2.39, while the `core22` snap base ships glibc 2.35, so the arm64 `.deb`
+cannot run inside the snap. An arm64 snap has to wait for an arm64 `.deb` built
+on a 22.04 runner.
 
 One-time setup:
 
-1. Create an AUR account and add an SSH public key to it.
-2. Register the `herbarium-bin` package by pushing an initial `PKGBUILD` +
-   `.SRCINFO` once (the AUR has no package-creation API; the repository must
-   exist before the action can clone it).
-3. Create a dedicated, passphrase-less SSH key for this repository and store the
-   **private** key (OpenSSH format, including the header and footer) as
-   `AUR_SSH_PRIVATE_KEY`.
+1. Create an account on [snapcraft.io](https://snapcraft.io) and register the
+   name. Snap names are global, so this also reserves `herbarium`:
 
-Missing `AUR_SSH_PRIVATE_KEY`: the job is skipped and the AUR package is left at
-its current version.
+   ```bash
+   sudo snap install snapcraft --classic   # if snapcraft is not installed yet
+   snapcraft login
+   snapcraft register herbarium
+   ```
+
+2. Export a login scoped to this snap and store it as the repository secret
+   `SNAPCRAFT_STORE_CREDENTIALS`:
+
+   ```bash
+   snapcraft export-login --snaps=herbarium \
+     --acls package_access,package_push,package_update,package_release - \
+     | gh secret set SNAPCRAFT_STORE_CREDENTIALS
+   ```
+
+3. To publish an already-released version (v0.2.0 shipped before the snap
+   channel existed), dispatch the workflow with its tag:
+
+   ```bash
+   gh workflow run snap.yml -f tag=v0.2.0
+   ```
+
+   This builds from the existing release assets and publishes them; the snap is
+   also kept as a workflow artifact either way.
+
+Users install with `sudo snap install herbarium`.
+
+Confinement notes:
+
+- Strict confinement remaps `$HOME`: the app's config (and the "vault last
+  opened" that the MCP server reads) lives under `~/snap/herbarium/`. Vaults the
+  user picks must be under a non-hidden directory of the real home (`home`
+  plug) or on removable media (`removable-media` plug); a path inside a hidden
+  directory such as `~/.local/share/...` is not reachable.
+- The in-app updater is disabled. Herbarium detects `SNAP`/`SNAP_NAME` and
+  reports that updates are installed by the Snap Store; update with
+  `sudo snap refresh herbarium`.
+- The desktop entry keeps `MimeType=x-scheme-handler/herbarium-app;`. snapd
+  preserves `MimeType` when it rewrites `Exec`, so `herbarium-app://` links open
+  the snap.
+- The CLI works unchanged: `/snap/bin/herbarium mcp` and
+  `/snap/bin/herbarium add <file>` dispatch before the GUI starts.
 
 ## Flatpak (Flathub)
 
@@ -160,7 +189,8 @@ git push --follow-tags
 ```
 
 The tag runs the gate checks, builds every platform, publishes the GitHub
-release, and then runs whichever optional channels are configured. The template
-files under `src-tauri/packaging/` carry `__PLACEHOLDER__` tokens and are **not**
-meant to be edited by hand — except the Flatpak manifest, whose version-pinned
-URLs and checksums are updated per release as described above.
+release, and then runs whichever optional channels are configured. The
+`src-tauri/packaging/` manifests carry `__PLACEHOLDER__` tokens and are **not**
+meant to be edited by hand: `snap/snapcraft.yaml`'s `__VERSION__` is rendered by
+`.github/workflows/snap.yml`, and the Flatpak manifest's version-pinned URLs and
+checksums are updated per release as described above.

@@ -1,0 +1,89 @@
+# Snap package for Herbarium.
+#
+# This repackages the .deb published on GitHub rather than rebuilding the app:
+# .github/workflows/snap.yml downloads the amd64 .deb for the tag being
+# released next to this file as herbarium.deb and replaces the __VERSION__ token
+# below with the tag without its leading "v". Building locally therefore needs
+# both done first. See docs/distribution.md.
+#
+# amd64 only: the amd64 .deb is built on ubuntu-22.04, whose glibc (2.35)
+# matches the core22 base, while the arm64 .deb is built on ubuntu-24.04 and
+# needs glibc 2.39, which core22 cannot provide.
+name: herbarium
+base: core22
+# amd64 only (see above): the arm64 .deb does not run on the core22 base.
+architectures: [amd64]
+version: "__VERSION__"
+summary: Reader for the HTML pages AI tools generate
+description: |
+  Herbarium is a desktop reader for the HTML pages AI tools generate. Save a
+  page, find it later, open it with its interactivity intact, and schedule it
+  for review so it comes back when you need it.
+
+  Your pages stay plain .html files in a folder you own. Herbarium also speaks
+  the Model Context Protocol, so coding agents can save, search and schedule
+  pages.
+grade: stable
+confinement: strict
+
+# webkit2gtk resolves its helper binaries and libraries from a fixed system
+# path; bind the staged copy there (Tauri's Snapcraft guide).
+layout:
+  /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.1:
+    bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.1
+
+# tauri-plugin-single-instance claims the session D-Bus name
+# "<bundle identifier>.SingleInstance", i.e. io.herbarium.desktop.SingleInstance
+# (see tauri-plugin-single-instance's platform_impl/linux.rs). A strict snap
+# must own that name via a slot and reach it via the matching plug, or the name
+# request fails and every second launch starts a new instance.
+slots:
+  single-instance:
+    interface: dbus
+    bus: session
+    name: io.herbarium.desktop.SingleInstance
+
+plugs:
+  single-instance-plug:
+    interface: dbus
+    bus: session
+    name: io.herbarium.desktop.SingleInstance
+
+apps:
+  herbarium:
+    command: usr/bin/herbarium
+    desktop: usr/share/applications/herbarium.desktop
+    # The gnome extension provides GTK and the desktop interfaces: the tray
+    # (StatusNotifier) and org.freedesktop.Notifications are part of `desktop`,
+    # so no separate tray or notification plug is needed.
+    extensions: [gnome]
+    plugs:
+      # Vaults are folders the user picks: under $HOME (app config lives in the
+      # snap's remapped home, ~/snap/herbarium) or on removable media.
+      - home
+      - removable-media
+      - network
+      - single-instance-plug
+    slots:
+      - single-instance
+
+parts:
+  herbarium:
+    plugin: dump
+    source: herbarium.deb
+    source-type: deb
+    # The .deb's runtime dependencies (its Depends: libayatana-appindicator3-1,
+    # libwebkit2gtk-4.1-0, libgtk-3-0). snapcraft also stages what these pull
+    # in, and the gnome extension supplies the desktop stack and the portals;
+    # this mirrors Tauri's Snapcraft guide plus the deb's declared deps.
+    stage-packages:
+      - libwebkit2gtk-4.1-0
+      - libgtk-3-0
+      - libayatana-appindicator3-1
+    override-build: |
+      craftctl default
+      # The .deb ships Icon=herbarium, which is not on the snap's icon path;
+      # point the desktop entry at the staged icon (Tauri's Snapcraft guide).
+      sed -i \
+        -e "s|Icon=herbarium|Icon=/usr/share/icons/hicolor/32x32/apps/herbarium.png|g" \
+        "$CRAFT_PART_INSTALL/usr/share/applications/herbarium.desktop"

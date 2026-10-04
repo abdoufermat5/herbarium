@@ -663,6 +663,9 @@ export const fr: Record<MessageKey, string> = {
 
   "settings.updates": "Mises à jour",
   "settings.updatesHint": "Herbarium vérifie sur GitHub la présence d'une version signée et vérifie sa signature avant l'installation.",
+  "settings.updatesSnapHint": "Le Snap Store tient Herbarium à jour.",
+  "settings.updatesSnapTitle": "Mises à jour Snap Store",
+  "settings.updatesSnapManaged": "Les mises à jour sont installées par le Snap Store.",
   "settings.updatesCurrentVersion": "Version actuelle {version}",
   "settings.checkUpdates": "Rechercher des mises à jour",
   "settings.checking": "Recherche…",

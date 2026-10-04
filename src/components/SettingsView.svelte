@@ -8,7 +8,7 @@
   import { confirmAction } from "../lib/confirm.svelte";
   import { t, i18n, setLocale, LOCALES } from "../lib/i18n.svelte";
   import { prefs, setPref } from "../lib/prefs.svelte";
-  import type { UpdateInfo } from "../lib/types";
+  import type { UpdateChannel, UpdateInfo } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import Select, { type SelectOption } from "./Select.svelte";
   import SettingsSection from "./settings/SettingsSection.svelte";
@@ -72,6 +72,10 @@
   let upToDate = $state(false);
   let updateError = $state("");
   let installing = $state(false);
+  // "snap" when the Snap Store owns updates; then the check/install button is
+  // replaced by an explanatory row and no endpoint is ever contacted.
+  let updateChannel = $state<UpdateChannel | null>(null);
+  const snapManaged = $derived(updateChannel === "snap");
 
   async function initMeta() {
     try {
@@ -85,12 +89,17 @@
       console.error(e);
       permission = "unsupported";
     }
+    try {
+      updateChannel = await api.updateManagedBy();
+    } catch (e) {
+      console.error(e);
+    }
   }
 
   onMount(() => void initMeta());
 
   async function checkForUpdates() {
-    if (checking) return;
+    if (checking || snapManaged) return;
     checking = true;
     updateError = "";
     upToDate = false;
@@ -110,7 +119,7 @@
   /** Confirm, then let the shared leave guards clear unsaved work before installing. */
   async function installUpdate() {
     const info = update;
-    if (!info || installing) return;
+    if (!info || installing || snapManaged) return;
     const confirmed = await confirmAction({
       title: t("settings.updateConfirmTitle", { version: info.version }),
       message: t("settings.updateConfirmMessage"),
@@ -266,28 +275,45 @@
       </SettingRow>
     </SettingsSection>
 
-    <SettingsSection id="settings-updates" title={t("settings.updates")} note={t("settings.updatesHint")}>
-      <SettingRow
-        title={t("settings.checkUpdates")}
-        hint={version ? t("settings.updatesCurrentVersion", { version }) : undefined}
-      >
-        <button class="btn" disabled={checking} onclick={checkForUpdates}>
-          <Icon name="refresh-cw" size={13} />
-          {checking ? t("settings.checking") : t("settings.checkUpdates")}
-        </button>
-      </SettingRow>
-      {#if update}
-        <div class="update">
-          <p class="update-available">{t("settings.updateAvailable", { version: update.version })}</p>
-          {#if update.notes}<pre class="notes">{update.notes}</pre>{/if}
-          <button class="btn btn-primary" disabled={installing} onclick={installUpdate}>
-            {installing ? t("settings.installing") : t("settings.updateInstall")}
+    <SettingsSection
+      id="settings-updates"
+      title={t("settings.updates")}
+      note={snapManaged ? t("settings.updatesSnapHint") : t("settings.updatesHint")}
+    >
+      {#if snapManaged}
+        <SettingRow
+          stacked
+          title={t("settings.updatesSnapTitle")}
+          hint={version ? t("settings.updatesCurrentVersion", { version }) : undefined}
+        >
+          <span class="managed">
+            <Icon name="circle-check" size={14} />
+            {t("settings.updatesSnapManaged")}
+          </span>
+        </SettingRow>
+      {:else}
+        <SettingRow
+          title={t("settings.checkUpdates")}
+          hint={version ? t("settings.updatesCurrentVersion", { version }) : undefined}
+        >
+          <button class="btn" disabled={checking} onclick={checkForUpdates}>
+            <Icon name="refresh-cw" size={13} />
+            {checking ? t("settings.checking") : t("settings.checkUpdates")}
           </button>
-        </div>
-      {:else if upToDate}
-        <p class="update-ok"><Icon name="circle-check" size={14} />{t("settings.updateUpToDate")}</p>
-      {:else if updateError}
-        <p class="update-err">{t("settings.updateCheckFailed", { detail: updateError })}</p>
+        </SettingRow>
+        {#if update}
+          <div class="update">
+            <p class="update-available">{t("settings.updateAvailable", { version: update.version })}</p>
+            {#if update.notes}<pre class="notes">{update.notes}</pre>{/if}
+            <button class="btn btn-primary" disabled={installing} onclick={installUpdate}>
+              {installing ? t("settings.installing") : t("settings.updateInstall")}
+            </button>
+          </div>
+        {:else if upToDate}
+          <p class="update-ok"><Icon name="circle-check" size={14} />{t("settings.updateUpToDate")}</p>
+        {:else if updateError}
+          <p class="update-err">{t("settings.updateCheckFailed", { detail: updateError })}</p>
+        {/if}
       {/if}
     </SettingsSection>
 
@@ -358,6 +384,13 @@
   }
   .status.on {
     color: var(--leaf);
+  }
+  .managed {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--leaf);
+    font-size: var(--fs-sm);
   }
 
   .update {

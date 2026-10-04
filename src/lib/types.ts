@@ -170,6 +170,9 @@ export interface UpdateInfo {
   notes: string | null;
 }
 
+/** Who owns updates for this build. `"snap"`: the Snap Store installs them. */
+export type UpdateChannel = "snap";
+
 export interface ImportResult {
   imported: number;
   errors: string[];
