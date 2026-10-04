@@ -14,7 +14,13 @@ base: core22
 # amd64 only (see above): the arm64 .deb does not run on the core22 base.
 architectures: [amd64]
 version: "__VERSION__"
+title: Herbarium
 summary: Reader for the HTML pages AI tools generate
+license: MIT
+contact: https://github.com/abdoufermat5/herbarium/issues
+issues: https://github.com/abdoufermat5/herbarium/issues
+source-code: https://github.com/abdoufermat5/herbarium
+website: https://github.com/abdoufermat5/herbarium
 description: |
   Herbarium is a desktop reader for the HTML pages AI tools generate. Save a
   page, find it later, open it with its interactivity intact, and schedule it
@@ -35,16 +41,11 @@ layout:
 # tauri-plugin-single-instance claims the session D-Bus name
 # "<bundle identifier>.SingleInstance", i.e. io.herbarium.desktop.SingleInstance
 # (see tauri-plugin-single-instance's platform_impl/linux.rs). A strict snap
-# must own that name via a slot and reach it via the matching plug, or the name
-# request fails and every second launch starts a new instance.
+# may only own that name through a `dbus` slot. There is deliberately no
+# matching plug: the store's base declaration denies `dbus` connections with a
+# name attribute, so a self-connecting plug sends every upload to manual review.
 slots:
   single-instance:
-    interface: dbus
-    bus: session
-    name: io.herbarium.desktop.SingleInstance
-
-plugs:
-  single-instance-plug:
     interface: dbus
     bus: session
     name: io.herbarium.desktop.SingleInstance
@@ -63,7 +64,6 @@ apps:
       - home
       - removable-media
       - network
-      - single-instance-plug
     slots:
       - single-instance
 
