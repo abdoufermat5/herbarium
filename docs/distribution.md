@@ -137,6 +137,12 @@ Confinement notes:
 - The desktop entry keeps `MimeType=x-scheme-handler/herbarium-app;`. snapd
   preserves `MimeType` when it rewrites `Exec`, so `herbarium-app://` links open
   the snap.
+- No single instance: owning the `io.herbarium.desktop.SingleInstance` D-Bus
+  name needs a `dbus` slot, which the store sends to manual review on every
+  upload. The snap ships without it, so a second launch or a `herbarium-app://`
+  link opens a new window rather than reusing the running one. Restoring it
+  means asking the store for a snap declaration for that name on
+  forum.snapcraft.io (category `store-requests`), then adding the slot back.
 - The CLI works unchanged: `/snap/bin/herbarium mcp` and
   `/snap/bin/herbarium add <file>` dispatch before the GUI starts.
 

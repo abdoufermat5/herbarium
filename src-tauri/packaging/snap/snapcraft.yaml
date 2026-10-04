@@ -40,17 +40,11 @@ layout:
   /usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.1:
     bind: $SNAP/usr/lib/$SNAPCRAFT_ARCH_TRIPLET/webkit2gtk-4.1
 
-# tauri-plugin-single-instance claims the session D-Bus name
-# "<bundle identifier>.SingleInstance", i.e. io.herbarium.desktop.SingleInstance
-# (see tauri-plugin-single-instance's platform_impl/linux.rs). A strict snap
-# may only own that name through a `dbus` slot. There is deliberately no
-# matching plug: the store's base declaration denies `dbus` connections with a
-# name attribute, so a self-connecting plug sends every upload to manual review.
-slots:
-  single-instance:
-    interface: dbus
-    bus: session
-    name: io.herbarium.desktop.SingleInstance
+# No `dbus` slot: the store sends any `dbus` slot or plug with a bus name to
+# manual review. Without one, tauri-plugin-single-instance cannot claim
+# io.herbarium.desktop.SingleInstance under confinement; it treats that as
+# "not taken" and the app starts normally, so in the snap each launch (and each
+# herbarium-app:// link) opens its own window instead of reusing the running one.
 
 apps:
   herbarium:
@@ -66,8 +60,6 @@ apps:
       - home
       - removable-media
       - network
-    slots:
-      - single-instance
 
 parts:
   herbarium:
