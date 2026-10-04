@@ -391,6 +391,11 @@
       return;
     }
     pageGone = false;
+    // A rescan runs every time the window regains focus; only a real change on
+    // disk may reload the frame (which resets the page's interactive state).
+    const htmlChanged = fresh.html !== p.html;
+    const metaChanged = JSON.stringify(fresh.meta) !== JSON.stringify(p.meta);
+    if (!htmlChanged && !metaChanged) return;
     if (sourceDirty || dirty) {
       if (announce) toast(t("read.changedOnDisk"), "info");
       return;
@@ -400,8 +405,10 @@
     source = fresh.html;
     syncDraft(fresh.meta);
     conflict = null;
-    previewNonce++;
-    if (announce) toast(t("read.reloaded"), "info");
+    if (htmlChanged) {
+      previewNonce++;
+      if (announce) toast(t("read.reloaded"), "info");
+    }
   }
 
   function markDeleted() {
