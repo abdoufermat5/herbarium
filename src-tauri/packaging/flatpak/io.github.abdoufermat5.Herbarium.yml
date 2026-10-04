@@ -1,0 +1,60 @@
+# Flatpak manifest for Herbarium.
+#
+# This manifest packages a release build: it downloads the Linux .deb for each
+# architecture from the GitHub release and the desktop entry from the tagged
+# source, then installs them under the application id. Update the URLs, the
+# release tag and the three `sha256` placeholders for every release and submit
+# the change as a pull request to Flathub; see docs/distribution.md.
+app-id: io.github.abdoufermat5.Herbarium
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: herbarium
+
+finish-args:
+  # Wayland with an X11 fallback, shared IPC and GPU access for webkit2gtk.
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  - --device=dri
+  # Pages may fetch pinned CDNs, and the app checks for updates.
+  - --share=network
+  # Vaults are ordinary folders the user picks anywhere under their home.
+  - --filesystem=home
+  # Review reminders and the tray icon.
+  - --talk-name=org.freedesktop.Notifications
+  - --talk-name=org.kde.StatusNotifierWatcher
+
+modules:
+  - name: herbarium
+    buildsystem: simple
+    build-commands:
+      # Unpack the .deb matching the architecture being built: the payload lives
+      # in data.tar.gz.
+      - ar x "herbarium-${FLATPAK_ARCH:-$(uname -m)}.deb"
+      - tar -xf data.tar.gz
+      - install -Dm755 usr/bin/herbarium /app/bin/herbarium
+      # The desktop entry comes from the tagged source so it carries the
+      # herbarium-app:// scheme handler; rename it to the application id and
+      # point Exec/Icon/StartupWMClass at the Flatpak names.
+      - install -Dm644 herbarium.desktop /app/share/applications/io.github.abdoufermat5.Herbarium.desktop
+      - sed -i -e 's|{{exec}}|herbarium|g' -e 's|{{icon}}|io.github.abdoufermat5.Herbarium|g' -e 's|^StartupWMClass=.*|StartupWMClass=io.github.abdoufermat5.Herbarium|' /app/share/applications/io.github.abdoufermat5.Herbarium.desktop
+      - install -Dm644 io.github.abdoufermat5.Herbarium.metainfo.xml /app/share/metainfo/io.github.abdoufermat5.Herbarium.metainfo.xml
+      - install -Dm644 usr/share/icons/hicolor/128x128/apps/herbarium.png /app/share/icons/hicolor/128x128/apps/io.github.abdoufermat5.Herbarium.png
+    sources:
+      - type: file
+        url: https://github.com/abdoufermat5/herbarium/releases/download/v0.2.0/herbarium_0.2.0_amd64.deb
+        sha256: __DEB_SHA256_X86_64__
+        dest-filename: herbarium-x86_64.deb
+        only-arches: [x86_64]
+      - type: file
+        url: https://github.com/abdoufermat5/herbarium/releases/download/v0.2.0/herbarium_0.2.0_arm64.deb
+        sha256: __DEB_SHA256_AARCH64__
+        dest-filename: herbarium-aarch64.deb
+        only-arches: [aarch64]
+      - type: file
+        url: https://raw.githubusercontent.com/abdoufermat5/herbarium/v0.2.0/src-tauri/packaging/herbarium.desktop
+        sha256: __DESKTOP_SHA256__
+        dest-filename: herbarium.desktop
+      - type: file
+        path: io.github.abdoufermat5.Herbarium.metainfo.xml

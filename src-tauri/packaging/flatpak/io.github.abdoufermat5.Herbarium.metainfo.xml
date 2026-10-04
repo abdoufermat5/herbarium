@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.abdoufermat5.Herbarium</id>
+
+  <name>Herbarium</name>
+  <summary>Reader for the HTML pages AI tools generate</summary>
+
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+
+  <description>
+    <p>
+      Herbarium is a desktop reader for the HTML pages AI tools generate. Save a
+      page, find it later, open it with its interactivity intact, and schedule it
+      for review so it comes back when you need it.
+    </p>
+    <p>
+      Pages stay plain .html files in a folder you own, with a small JSON sidecar
+      for titles, tags, notes and review dates. Every page runs in a sandbox that
+      cannot reach your files, the app or other pages; network access is a
+      per-page switch.
+    </p>
+    <p>
+      Includes full-text search, folders and tags, a keyboard-driven review
+      session, a command palette, light and dark themes, and an English and
+      French interface.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">io.github.abdoufermat5.Herbarium.desktop</launchable>
+
+  <url type="homepage">https://github.com/abdoufermat5/herbarium</url>
+  <url type="bugtracker">https://github.com/abdoufermat5/herbarium/issues</url>
+
+  <developer id="io.github.abdoufermat5">
+    <name>abdoufermat5</name>
+  </developer>
+
+  <categories>
+    <category>Education</category>
+    <category>Utility</category>
+  </categories>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.2.0" date="2026-10-04">
+      <description>
+        <p>
+          Pages now keep their own state across reloads, in-app edits have a
+          version history with a diff view, an `herbarium add` CLI and
+          herbarium-app:// deep links, and review scheduling is adaptive.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

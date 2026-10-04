@@ -1,0 +1,30 @@
+# Homebrew cask for Herbarium.
+#
+# This is a template: the release workflow renders the __PLACEHOLDER__ values and
+# pushes the result to abdoufermat5/homebrew-tap as Casks/herbarium.rb. Do not
+# edit that generated file by hand; see docs/distribution.md.
+cask "herbarium" do
+  version "__VERSION__"
+
+  on_intel do
+    sha256 "__SHA_X64__"
+    url "https://github.com/abdoufermat5/herbarium/releases/download/v#{version}/__FILE_X64__"
+  end
+  on_arm do
+    sha256 "__SHA_ARM64__"
+    url "https://github.com/abdoufermat5/herbarium/releases/download/v#{version}/__FILE_ARM64__"
+  end
+
+  name "Herbarium"
+  desc "Reader for the HTML pages AI tools generate"
+  homepage "https://github.com/abdoufermat5/herbarium"
+
+  livecheck do
+    url "https://github.com/abdoufermat5/herbarium"
+    strategy :github_latest
+  end
+
+  app "herbarium.app"
+
+  __CAVEATS__
+end
