@@ -1,9 +1,12 @@
 // Built-in features, written against the same `Extension` API a plugin uses.
 
+mod fsrs;
+mod history;
 mod library;
 mod network;
 mod pages;
 mod review;
+mod storage;
 
 use serde_json::{Map, Value, json};
 
@@ -14,7 +17,9 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(pages::Pages),
         Box::new(library::Library),
         Box::new(review::Review),
+        Box::new(storage::Storage),
         Box::new(network::Network),
+        Box::new(history::History),
     ]
 }
 

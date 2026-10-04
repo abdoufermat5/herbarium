@@ -12,7 +12,7 @@ use chrono::{NaiveDate, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use super::{id_prop, object};
+use super::{fsrs, id_prop, object};
 use crate::extension::{Ctx, Extension, OpResult, Operation, Registry};
 use crate::models::PageMeta;
 use crate::time::{DAY_MS, MINUTE_MS, now_ms};
@@ -23,6 +23,11 @@ pub(crate) struct Review;
 /// Longest interval any setting may use: ten years, in minutes.
 const MAX_MINUTES: i64 = 3650 * 24 * 60;
 const MAX_PRESETS: usize = 12;
+/// Minutes in a day, for turning FSRS's day intervals into stored intervals.
+const MINUTES_PER_DAY: f64 = 1440.0;
+/// Desired-retention bounds for the FSRS strategy.
+const MIN_RETENTION: f64 = 0.70;
+const MAX_RETENTION: f64 = 0.97;
 /// Stored next to the index, inside the vault so it travels with it.
 const SETTINGS_FILE: &str = "review.json";
 /// Key of the review history in `PageMeta::ext`.
@@ -41,10 +46,12 @@ pub enum Strategy {
     /// Repeat the interval the page already has.
     Same,
     /// Step up to the next preset interval, staying on the last one.
-    #[default]
     Ladder,
     /// Multiply the current interval by `multiplier`.
     Multiply,
+    /// Adaptive FSRS-6 scheduling from the page's memory state.
+    #[default]
+    Fsrs,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -58,6 +65,8 @@ pub struct ReviewSettings {
     pub multiplier: f64,
     /// Cap for intervals computed by `review.complete`, in minutes.
     pub max_interval_minutes: i64,
+    /// Target recall probability for the `fsrs` strategy (0.70..=0.97).
+    pub desired_retention: f64,
     /// Schedule imported pages for review this many minutes out; none = don't.
     pub import_review_minutes: Option<i64>,
     /// Show at most this many pages in the review queue; none = all due.
@@ -68,9 +77,10 @@ impl Default for ReviewSettings {
     fn default() -> Self {
         Self {
             presets: vec![1440, 3 * 1440, 7 * 1440, 30 * 1440],
-            strategy: Strategy::Ladder,
+            strategy: Strategy::Fsrs,
             multiplier: 2.0,
             max_interval_minutes: 365 * 1440,
+            desired_retention: 0.9,
             import_review_minutes: None,
             queue_limit: None,
         }
@@ -94,6 +104,11 @@ impl ReviewSettings {
         self.presets.dedup();
         if !(1.1..=10.0).contains(&self.multiplier) {
             return Err("multiplier: must be between 1.1 and 10".into());
+        }
+        if !(MIN_RETENTION..=MAX_RETENTION).contains(&self.desired_retention) {
+            return Err(format!(
+                "desiredRetention: must be between {MIN_RETENTION} and {MAX_RETENTION}"
+            ));
         }
         if !(1..=MAX_MINUTES).contains(&self.max_interval_minutes) {
             return Err(format!(
@@ -121,11 +136,32 @@ impl ReviewSettings {
             None => self.presets[0],
             Some(c) => match self.strategy {
                 Strategy::Same => c,
-                Strategy::Ladder => self.presets.iter().copied().find(|&m| m > c).unwrap_or(c),
+                // `complete` uses the memory model for FSRS; this coarse helper
+                // (used by the other strategies) falls back to the ladder.
+                Strategy::Ladder | Strategy::Fsrs => {
+                    self.presets.iter().copied().find(|&m| m > c).unwrap_or(c)
+                }
                 Strategy::Multiply => ((c as f64 * self.multiplier).ceil() as i64).max(c + 1),
             },
         };
         next.clamp(1, self.max_interval_minutes)
+    }
+
+    /// The next interval for a grade under a non-FSRS strategy: Again restarts
+    /// at the first preset, Hard repeats the current interval, Easy advances
+    /// twice, Good advances once.
+    fn non_fsrs_interval(&self, current: Option<i64>, grade: Grade) -> i64 {
+        match grade {
+            Grade::Again => self.next_interval(None),
+            Grade::Good => self.next_interval(current),
+            Grade::Hard => current
+                .unwrap_or(self.presets[0])
+                .clamp(1, self.max_interval_minutes),
+            Grade::Easy => {
+                let once = self.next_interval(current);
+                self.next_interval(Some(once))
+            }
+        }
     }
 }
 
@@ -183,9 +219,25 @@ pub(crate) fn apply_schedule(meta: &mut PageMeta, minutes: i64) {
 pub enum Grade {
     /// Forgotten: start over at the first preset.
     Again,
+    /// Recalled with difficulty.
+    Hard,
     /// Remembered: the next interval follows the vault's strategy.
     #[default]
     Good,
+    /// Recalled easily.
+    Easy,
+}
+
+impl Grade {
+    /// The grade as an FSRS rating: 1 again, 2 hard, 3 good, 4 easy.
+    fn rating(self) -> fsrs::Rating {
+        match self {
+            Grade::Again => 1,
+            Grade::Hard => 2,
+            Grade::Good => 3,
+            Grade::Easy => 4,
+        }
+    }
 }
 
 /// One completed review, stored in `ext["review"].log`.
@@ -206,9 +258,27 @@ struct History {
     /// Reviews completed per UTC day (key: that day's midnight in unix ms).
     /// Unlike `log` this is not cut at `MAX_LOG`, so daily stats stay exact.
     days: BTreeMap<i64, u64>,
+    /// FSRS memory state in days (`stability`) and on the 1..10 scale
+    /// (`difficulty`). Absent on pages last reviewed before adaptive scheduling
+    /// or under another strategy, in which case the next review initializes it.
+    stability: Option<f64>,
+    difficulty: Option<f64>,
 }
 
 impl History {
+    /// The page's FSRS memory state, when one has been recorded.
+    fn memory(&self) -> Option<fsrs::Memory> {
+        match (self.stability, self.difficulty) {
+            (Some(stability), Some(difficulty)) if stability > 0.0 && difficulty > 0.0 => {
+                Some(fsrs::Memory {
+                    stability,
+                    difficulty,
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Reviews completed in the UTC day starting at `day`. Histories written
     /// before `days` existed fall back to counting the log.
     fn on_day(&self, day: i64) -> u64 {
@@ -234,17 +304,57 @@ fn history(meta: &PageMeta) -> History {
         .unwrap_or_default()
 }
 
-/// Record a review now: next interval from the grade, `last_review = now`,
-/// and a history entry (last `MAX_LOG` kept).
-fn complete(meta: &mut PageMeta, settings: &ReviewSettings, grade: Grade) {
-    let minutes = match grade {
-        Grade::Good => settings.next_interval(meta.interval_minutes),
-        Grade::Again => settings.next_interval(None),
+/// The interval, in minutes, and the new FSRS memory state (if any) a review
+/// with `grade` would produce. Shared by `complete` and `review.preview`, so
+/// the previewed intervals are exactly what completing would schedule.
+fn schedule_after_review(
+    meta: &PageMeta,
+    settings: &ReviewSettings,
+    grade: Grade,
+    prior: &History,
+    now: i64,
+) -> (i64, Option<fsrs::Memory>) {
+    if settings.strategy != Strategy::Fsrs {
+        return (
+            settings.non_fsrs_interval(meta.interval_minutes, grade),
+            None,
+        );
+    }
+    // Whole days since the last review; 0 (including same-day reviews) uses the
+    // short-term stability update inside `fsrs::next_memory`.
+    let elapsed_days = meta
+        .last_review
+        .map(|t| ((now - t).max(0) as f64 / DAY_MS as f64).floor())
+        .unwrap_or(0.0);
+    let memory = fsrs::next_memory(prior.memory(), elapsed_days, grade.rating());
+    // Again is a relearning step: back to the first preset. The other grades
+    // use the interval that reaches the desired retention.
+    let minutes = if grade == Grade::Again {
+        settings.presets[0]
+    } else {
+        (fsrs::interval_days(memory.stability, settings.desired_retention) * MINUTES_PER_DAY)
+            .round() as i64
     };
+    (
+        minutes.clamp(1, settings.max_interval_minutes),
+        Some(memory),
+    )
+}
+
+/// Record a review now: next interval from the grade, `last_review = now`,
+/// and a history entry (last `MAX_LOG` kept). Under FSRS the page's memory
+/// state is updated too.
+fn complete(meta: &mut PageMeta, settings: &ReviewSettings, grade: Grade) {
+    let now = now_ms();
+    let mut h = history(meta);
+    let (minutes, memory) = schedule_after_review(meta, settings, grade, &h, now);
     apply_schedule(meta, minutes);
     let now = meta.updated_at;
     meta.last_review = Some(now);
-    let mut h = history(meta);
+    if let Some(m) = memory {
+        h.stability = Some(m.stability);
+        h.difficulty = Some(m.difficulty);
+    }
     let day = utc_midnight(now);
     // Seed from the log so a pre-`days` history keeps its existing count.
     let seeded = h.on_day(day);
@@ -266,6 +376,27 @@ fn complete(meta: &mut PageMeta, settings: &ReviewSettings, grade: Grade) {
         HISTORY_KEY.into(),
         serde_json::to_value(h).unwrap_or(Value::Null),
     );
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Preview {
+    again: i64,
+    hard: i64,
+    good: i64,
+    easy: i64,
+}
+
+/// Interval each grade would schedule if the page were reviewed now; no writes.
+fn preview(meta: &PageMeta, settings: &ReviewSettings, now: i64) -> Preview {
+    let h = history(meta);
+    let interval = |grade| schedule_after_review(meta, settings, grade, &h, now).0;
+    Preview {
+        again: interval(Grade::Again),
+        hard: interval(Grade::Hard),
+        good: interval(Grade::Good),
+        easy: interval(Grade::Easy),
+    }
 }
 
 /// Start of the UTC day containing `ms`.
@@ -397,11 +528,11 @@ impl Extension for Review {
 
         r.add(Operation::new(
             "review.complete",
-            "Record that a page was reviewed now and schedule the next review. `grade` is `good` (default: the vault's strategy picks the next interval — repeat it, step up the preset ladder, or multiply) or `again` (forgotten: back to the first preset). A page that was not scheduled starts at the first preset. Each review is logged in the page's review history.",
+            "Record that a page was reviewed now and schedule the next review. `grade` is `again`, `hard`, `good` (default) or `easy`. Under the adaptive (FSRS) strategy the vault's `desiredRetention` and the page's memory state set the interval; `again` goes back to the first preset. Under the other strategies `again` restarts the ladder, `hard` repeats the current interval, `good` advances once and `easy` advances twice. A page that was not scheduled starts at the first preset. Each review is logged in the page's review history; `review.preview` shows the intervals first.",
             object(
                 json!({
                     "id": id_prop(),
-                    "grade": { "type": "string", "enum": ["again", "good"], "description": "How the review went; default `good`." }
+                    "grade": { "type": "string", "enum": ["again", "hard", "good", "easy"], "description": "How the review went; default `good`." }
                 }),
                 &["id"],
             ),
@@ -411,6 +542,17 @@ impl Extension for Review {
                 complete(&mut meta, &settings, a.grade);
                 ctx.save(&meta)?;
                 Ok(meta)
+            },
+        ))?;
+
+        r.add(Operation::new(
+            "review.preview",
+            "The interval in minutes each grade (`again`, `hard`, `good`, `easy`) would schedule if this page were reviewed right now, using the vault's current strategy and settings. Reads only; `review.complete` applies one of them.",
+            object(json!({ "id": id_prop() }), &["id"]),
+            |ctx: &mut Ctx, a: IdArgs| {
+                let settings = read_settings(&ctx.store.vault)?;
+                let meta = ctx.page(&a.id)?;
+                Ok(preview(&meta, &settings, now_ms()))
             },
         ))?;
 
@@ -460,7 +602,7 @@ impl Extension for Review {
         ))?;
         r.add(Operation::new(
             "review.settings",
-            "The vault's review settings: preset intervals in minutes, the strategy used by `review.complete`, and queue options.",
+            "The vault's review settings: preset intervals in minutes, the strategy used by `review.complete` (adaptive FSRS with `desiredRetention` by default), and queue options.",
             object(json!({}), &[]),
             |ctx: &mut Ctx, _: NoArgs| read_settings(&ctx.store.vault),
         ))?;
@@ -478,9 +620,10 @@ impl Extension for Review {
                             "maxItems": MAX_PRESETS,
                             "description": "Preset intervals in minutes."
                         },
-                        "strategy": { "type": "string", "enum": ["same", "ladder", "multiply"] },
+                        "strategy": { "type": "string", "enum": ["same", "ladder", "multiply", "fsrs"], "description": "How `review.complete` picks the next interval; `fsrs` is the adaptive default." },
                         "multiplier": { "type": "number", "minimum": 1.1, "maximum": 10 },
                         "maxIntervalMinutes": { "type": "integer", "minimum": 1, "maximum": MAX_MINUTES },
+                        "desiredRetention": { "type": "number", "minimum": MIN_RETENTION, "maximum": MAX_RETENTION, "description": "Target recall probability for the `fsrs` strategy." },
                         "importReviewMinutes": { "type": ["integer", "null"], "minimum": 1, "maximum": MAX_MINUTES },
                         "queueLimit": { "type": ["integer", "null"], "minimum": 1 }
                     }),
@@ -558,14 +701,43 @@ mod tests {
     }
 
     #[test]
+    fn non_fsrs_hard_repeats_and_easy_advances_twice() {
+        let ladder = with(Strategy::Ladder);
+        assert_eq!(
+            ladder.non_fsrs_interval(Some(3 * DAY), Grade::Hard),
+            3 * DAY
+        );
+        assert_eq!(ladder.non_fsrs_interval(None, Grade::Hard), DAY);
+        assert_eq!(
+            ladder.non_fsrs_interval(Some(3 * DAY), Grade::Easy),
+            30 * DAY
+        );
+        assert_eq!(
+            ladder.non_fsrs_interval(Some(3 * DAY), Grade::Good),
+            7 * DAY
+        );
+        assert_eq!(ladder.non_fsrs_interval(Some(3 * DAY), Grade::Again), DAY);
+
+        let multiply = ReviewSettings {
+            strategy: Strategy::Multiply,
+            multiplier: 2.0,
+            ..Default::default()
+        };
+        assert_eq!(multiply.non_fsrs_interval(Some(1440), Grade::Hard), 1440);
+        assert_eq!(multiply.non_fsrs_interval(Some(1440), Grade::Easy), 5760);
+    }
+
+    #[test]
     fn validation_normalises_presets_and_rejects_bad_values() {
         let ok = ReviewSettings {
             presets: vec![30, 3, 3, 1],
+            desired_retention: MIN_RETENTION,
             ..Default::default()
         }
         .validate()
         .unwrap();
         assert_eq!(ok.presets, vec![1, 3, 30]);
+        assert_eq!(ReviewSettings::default().desired_retention, 0.9);
 
         for bad in [
             ReviewSettings {
@@ -597,6 +769,18 @@ mod tests {
                 ..Default::default()
             },
             ReviewSettings {
+                desired_retention: MIN_RETENTION - 0.01,
+                ..Default::default()
+            },
+            ReviewSettings {
+                desired_retention: MAX_RETENTION + 0.01,
+                ..Default::default()
+            },
+            ReviewSettings {
+                desired_retention: f64::NAN,
+                ..Default::default()
+            },
+            ReviewSettings {
                 import_review_minutes: Some(0),
                 ..Default::default()
             },
@@ -616,7 +800,10 @@ mod history_tests {
 
     #[test]
     fn complete_logs_grades_and_keeps_the_last_hundred() {
-        let s = ReviewSettings::default();
+        let s = ReviewSettings {
+            strategy: Strategy::Ladder,
+            ..Default::default()
+        };
         let mut meta = PageMeta::new("p".into());
         apply_schedule(&mut meta, 7 * 1440);
         assert_eq!(meta.last_review, None, "scheduling is not a review");

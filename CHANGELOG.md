@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Pages keep their state: `localStorage` and the `window.storage` API used by Claude artifacts persist per page in its sidecar (up to 1 MiB), so quizzes, trackers and checklists remember where you left off. `sessionStorage` lasts for the visit. The draft preview never saves state, and the reader can reset a page's data.
+- Page history: every in-app or agent overwrite of a page's HTML first keeps the previous version in `.herbarium/history/` (newest 50 per page). The reader's History panel shows each version side by side with the current one and restores it. Agents get `history.list`, `history.get` and `history.restore`.
+- `herbarium add <file|-|url>...` imports pages from the terminal into the last-opened vault (or `--vault`), with `--folder`, `--tag`, `--title` and `--network`/`--no-network`, and prints each page's link.
+- `herbarium-app://open/<id>` and `herbarium-app://review` links open the running app on a page or on Review; a second launch hands its link to the open window instead of starting another instance.
+- Adaptive review (FSRS-6): grade a review Again, Hard, Good or Easy (`1`–`4`), each button showing the interval it would set, and choose the retention you aim for (70–97 %). Agents get `review.preview`.
+- Release workflow: optional Windows code signing, and Homebrew, WinGet and AUR publishing, each enabled by its secret; a Flatpak manifest and AppStream metadata for Flathub. See `docs/distribution.md`.
+
+### Changed
+- Adaptive scheduling is the default review strategy; the preset ladder, repeat and multiply strategies remain in Settings, where Hard repeats the interval and Easy skips ahead.
+- Pages that use `window.storage` are no longer flagged as needing Claude; only `window.claude` is.
+
 ## [0.1.0] - 2026-10-03
 
 ### Added

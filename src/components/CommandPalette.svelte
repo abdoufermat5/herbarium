@@ -23,6 +23,7 @@
   } from "../lib/state.svelte";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { api } from "../lib/api";
+  import { confirmAction } from "../lib/confirm.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { fmtDuration } from "../lib/format";
   import Icon from "../lib/Icon.svelte";
@@ -101,6 +102,36 @@
       toast(t("edit.openedIn", { editor: name }), "success");
     } catch (e) {
       toast(`${t("edit.openFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  /** Whether the page saved anything (its `ext.storage` has at least one key). */
+  function hasStoredData(meta: PageMeta): boolean {
+    const raw = (meta.ext as Record<string, unknown> | undefined)?.["storage"];
+    if (!raw || typeof raw !== "object") return false;
+    for (const area of ["local", "personal", "shared"]) {
+      const map = (raw as Record<string, unknown>)[area];
+      if (map && typeof map === "object" && Object.keys(map).length > 0) return true;
+    }
+    return false;
+  }
+
+  async function resetStorage(page: PageMeta) {
+    const ok = await confirmAction({
+      title: t("read.resetStorageTitle"),
+      message: t("read.resetStorageMessage"),
+      confirmLabel: t("read.resetStorageConfirm"),
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await api.clearStorage(page.id);
+      // The reader watches `vaultRevision`; it reloads the open frame with the
+      // cleared state on the next refresh.
+      app.vaultRevision++;
+      toast(t("read.resetDone"), "success");
+    } catch (e) {
+      toast(`${t("read.resetFailed")}: ${errorMessage(e)}`, "error");
     }
   }
 
@@ -280,6 +311,15 @@
           run: () => openExternally(page),
         },
         {
+          key: "page-history",
+          group: pg,
+          label: t("palette.pageHistory"),
+          icon: "refresh-cw",
+          run: () => {
+            app.historyOpen = true;
+          },
+        },
+        {
           key: "page-good",
           group: pg,
           label: t("palette.reviewGood"),
@@ -301,6 +341,15 @@
           run: () => deletePages([page.id]),
         },
       );
+      if (hasStoredData(page)) {
+        list.push({
+          key: "page-reset-storage",
+          group: pg,
+          label: t("palette.resetStorage"),
+          icon: "trash-2",
+          run: () => resetStorage(page),
+        });
+      }
     }
     return list;
   });

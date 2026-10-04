@@ -151,7 +151,7 @@
   }
 
   function gradeLabel(grade: ReviewGrade): string {
-    return grade === "again" ? t("review.grade.again") : t("review.grade.good");
+    return t(`review.grade.${grade}`);
   }
 
   /** Format a UTC `YYYY-MM-DD` day as a locale date without timezone drift. */

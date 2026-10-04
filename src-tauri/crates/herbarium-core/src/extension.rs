@@ -29,6 +29,16 @@ pub enum Caller {
     Agent,
 }
 
+impl Caller {
+    /// Stable tag recorded with a history snapshot: `ui` or `agent`.
+    pub fn tag(self) -> &'static str {
+        match self {
+            Caller::Ui => "ui",
+            Caller::Agent => "agent",
+        }
+    }
+}
+
 pub struct Operation {
     /// Namespaced `area.verb`, e.g. `pages.create`.
     pub name: String,

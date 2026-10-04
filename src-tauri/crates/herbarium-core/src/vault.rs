@@ -10,10 +10,13 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use crate::content;
-use crate::models::{PageMeta, SkippedFile, TrashEntry};
+use crate::models::{HistoryEntry, PageMeta, SkippedFile, TrashEntry};
 use crate::store::Store;
 
 pub type VaultResult<T> = Result<T, String>;
+
+/// How many HTML versions are kept per page before the oldest are pruned.
+pub const HISTORY_LIMIT: usize = 50;
 
 struct TempFileGuard<'a> {
     path: &'a Path,
@@ -573,7 +576,11 @@ fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
             }
             if ft.is_dir() {
                 if name.starts_with('.') {
-                    skipped.push(name);
+                    // The vault's own `.herbarium` metadata directory is
+                    // expected: never index it, but don't report it as skipped.
+                    if !(name == ".herbarium" && dir == base) {
+                        skipped.push(name);
+                    }
                     continue;
                 }
                 if !is_within_vault(&path, vault_canonical) {
@@ -749,9 +756,10 @@ pub fn disk_updated_at(vault: &Path, meta: &PageMeta) -> Option<i64> {
     }
 }
 
-/// A page id usable as a trash directory name: exactly one normal path
-/// component (no separators, `.`, `..`, drive prefixes, or empty string).
-fn checked_trash_id(id: &str) -> VaultResult<&str> {
+/// A page id usable as a single directory name in the vault's internal store
+/// (`.herbarium/trash/<id>`, `.herbarium/history/<id>`): exactly one normal
+/// path component (no separators, `.`, `..`, drive prefixes, or empty string).
+pub(crate) fn checked_page_id(id: &str) -> VaultResult<&str> {
     use std::path::Component;
     let mut components = Path::new(id).components();
     match (components.next(), components.next()) {
@@ -762,6 +770,11 @@ fn checked_trash_id(id: &str) -> VaultResult<&str> {
         }
         _ => Err(format!("invalid page id: {id:?}")),
     }
+}
+
+/// A page id usable as a trash directory name (see [`checked_page_id`]).
+fn checked_trash_id(id: &str) -> VaultResult<&str> {
+    checked_page_id(id)
 }
 
 /// Move both page files to `<vault>/.herbarium/trash/<id>/`. Replaces existing entry if present.
@@ -1050,6 +1063,8 @@ pub fn purge_trash(vault: &Path, id: Option<&str>) -> VaultResult<usize> {
                 return Err(format!("trash entry escapes vault: {id}"));
             }
             fs::remove_dir_all(&entry_dir).map_err(|e| format!("cannot purge trash: {e}"))?;
+            // The page is gone for good, so its snapshots go too.
+            delete_history(vault, id)?;
             Ok(1)
         } else {
             Ok(0)
@@ -1059,13 +1074,193 @@ pub fn purge_trash(vault: &Path, id: Option<&str>) -> VaultResult<usize> {
         for entry in fs::read_dir(&trash_root).map_err(|e| e.to_string())? {
             let entry = entry.map_err(|e| e.to_string())?;
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                let id = entry.file_name().to_string_lossy().into_owned();
                 fs::remove_dir_all(entry.path())
                     .map_err(|e| format!("cannot purge trash entry: {e}"))?;
+                if checked_page_id(&id).is_ok() {
+                    delete_history(vault, &id)?;
+                }
                 count += 1;
             }
         }
         Ok(count)
     }
+}
+
+/// The internal directory holding one page's version snapshots.
+fn history_dir(vault: &Path, id: &str) -> VaultResult<PathBuf> {
+    let id = checked_page_id(id)?;
+    Ok(vault.join(".herbarium").join("history").join(id))
+}
+
+/// True when `id` has a page sitting in the trash. New pages must not be given
+/// such an id (see `new_page_id`), so a leftover history directory without a
+/// trash entry is stale and safe to clear.
+pub fn trash_entry_exists(vault: &Path, id: &str) -> bool {
+    match checked_page_id(id) {
+        Ok(id) => vault.join(".herbarium").join("trash").join(id).exists(),
+        Err(_) => false,
+    }
+}
+
+/// A snapshot filename: `<at>.<ui|agent>.html`.
+fn history_file_name(at: i64, caller: &str) -> String {
+    format!("{at}.{caller}.html")
+}
+
+/// Parse a snapshot filename into `(at, caller)`, ignoring anything else.
+fn parse_history_name(name: &str) -> Option<(i64, &str)> {
+    let stem = name.strip_suffix(".html")?;
+    let (at, caller) = stem.split_once('.')?;
+    if caller != "ui" && caller != "agent" {
+        return None;
+    }
+    Some((at.parse().ok()?, caller))
+}
+
+/// True when a snapshot for `at` already exists (any caller).
+fn history_at_taken(dir: &Path, at: i64) -> bool {
+    let prefix = format!("{at}.");
+    fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with(&prefix))
+        })
+        .unwrap_or(false)
+}
+
+/// Keep only the newest [`HISTORY_LIMIT`] snapshots in `dir`.
+fn prune_history(dir: &Path) -> VaultResult<()> {
+    let mut files: Vec<(i64, PathBuf)> = Vec::new();
+    for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if let Some((at, _)) = parse_history_name(&name) {
+            files.push((at, entry.path()));
+        }
+    }
+    if files.len() <= HISTORY_LIMIT {
+        return Ok(());
+    }
+    // Newest first, so everything past the cap is obsolete.
+    files.sort_by_key(|f| std::cmp::Reverse(f.0));
+    for (_, path) in files.into_iter().skip(HISTORY_LIMIT) {
+        fs::remove_file(&path).map_err(|e| format!("cannot prune history: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Save a page's current on-disk HTML as a version before it is overwritten,
+/// unless the file is missing or already identical to `new_html`. `caller` is
+/// `ui` or `agent`. Returns whether a snapshot was written. Prunes to
+/// [`HISTORY_LIMIT`] newest versions. Never follows a symlink out of the vault.
+pub fn snapshot_history(
+    vault: &Path,
+    id: &str,
+    folder: Option<&str>,
+    new_html: &str,
+    caller: &str,
+) -> VaultResult<bool> {
+    let id = checked_page_id(id)?;
+    let src = html_path(vault, id, folder);
+    if !src.exists() {
+        return Ok(false);
+    }
+    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
+    if !is_within_vault(&src, &vault_canonical) {
+        return Err("page file escapes vault".to_string());
+    }
+    let current = decode_html(&fs::read(&src).map_err(|e| format!("cannot read page: {e}"))?);
+    if current == new_html {
+        return Ok(false);
+    }
+
+    let dir = history_dir(vault, id)?;
+    fs::create_dir_all(&dir).map_err(|e| format!("cannot create history directory: {e}"))?;
+    if !is_within_vault(&dir, &vault_canonical) {
+        return Err("history directory escapes vault".to_string());
+    }
+
+    let caller = if caller == "agent" { "agent" } else { "ui" };
+    let mut at = crate::time::now_ms();
+    while history_at_taken(&dir, at) {
+        at += 1;
+    }
+    write_atomic(&dir.join(history_file_name(at, caller)), current.as_bytes())?;
+    prune_history(&dir)?;
+    Ok(true)
+}
+
+/// Every saved version of a page, newest first.
+pub fn list_history(vault: &Path, id: &str) -> VaultResult<Vec<HistoryEntry>> {
+    let dir = history_dir(vault, id)?;
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
+    if !is_within_vault(&dir, &vault_canonical) {
+        return Err("history directory escapes vault".to_string());
+    }
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some((at, caller)) = parse_history_name(&name) else {
+            continue;
+        };
+        let bytes = entry.metadata().map(|m| m.len() as usize).unwrap_or(0);
+        out.push(HistoryEntry {
+            at,
+            caller: caller.to_string(),
+            bytes,
+        });
+    }
+    out.sort_by_key(|e| std::cmp::Reverse(e.at));
+    Ok(out)
+}
+
+/// Read one saved version's HTML.
+pub fn read_history(vault: &Path, id: &str, at: i64) -> VaultResult<String> {
+    let dir = history_dir(vault, id)?;
+    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
+    if !is_within_vault(&dir, &vault_canonical) {
+        return Err("history directory escapes vault".to_string());
+    }
+    if dir.exists() {
+        let prefix = format!("{at}.");
+        for entry in fs::read_dir(&dir).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with(&prefix) && name.ends_with(".html") {
+                let path = entry.path();
+                if !is_within_vault(&path, &vault_canonical) {
+                    return Err("history file escapes vault".to_string());
+                }
+                return fs::read_to_string(&path).map_err(|e| format!("cannot read version: {e}"));
+            }
+        }
+    }
+    Err(format!("version not found: {at}"))
+}
+
+/// Remove every snapshot for a page id. A missing directory is fine.
+pub fn delete_history(vault: &Path, id: &str) -> VaultResult<()> {
+    let dir = history_dir(vault, id)?;
+    if !dir.exists() {
+        return Ok(());
+    }
+    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
+    if !is_within_vault(&dir, &vault_canonical) {
+        return Err("history directory escapes vault".to_string());
+    }
+    fs::remove_dir_all(&dir).map_err(|e| format!("cannot delete history: {e}"))
 }
 
 /// Rename a folder and update the folder field of every sidecar under it.

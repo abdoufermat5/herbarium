@@ -31,6 +31,13 @@
       "dangerousDisableAssetCspModification": ["style-src"]
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["herbarium-app"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

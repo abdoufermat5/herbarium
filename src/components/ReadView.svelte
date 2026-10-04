@@ -15,20 +15,25 @@
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
-  import { fmtDate, fmtDateTime, timeAgo, fmtDuration, dueInfo, modKey } from "../lib/format";
+  import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
-  import type { Page, PageMeta, ReviewGrade } from "../lib/types";
+  import type { Page, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
   import HtmlEditor from "./HtmlEditor.svelte";
+  import HistoryPanel from "./HistoryPanel.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
+  // Single source of truth for the page storage shim, shared with the Rust
+  // reader via `include_str!` in `src-tauri/src/protocol.rs`.
+  import storageShimJs from "../../src-tauri/src/storage_shim.js?raw";
 
   let { id }: { id: string } = $props();
 
+  // `localStorage` and `window.storage` are supported by the reader's shim, so
+  // they no longer indicate a Claude-only page; `window.claude` still does.
   const CLAUDE_MARKERS = [
-    "window.storage",
     "window.claude",
     "claude.ai",
     "webui.chat",
@@ -44,8 +49,62 @@
   const DRAFT_CSP_ALLOW =
     "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' herbarium: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com; style-src 'unsafe-inline' herbarium: https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src herbarium: data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; img-src herbarium: https: data: blob:; media-src herbarium: https: data: blob:; connect-src herbarium: https://fonts.googleapis.com https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com https://esm.sh; worker-src blob: herbarium:; frame-src 'none'; object-src 'none'; form-action 'none'";
 
+  /** Namespaces a page's saved state lives in. */
+  const STORAGE_AREAS = ["local", "personal", "shared"] as const;
+  const EMPTY_STORAGE: PageStorage = { local: {}, personal: {}, shared: {} };
+
+  /** The page's saved state, tolerating a hand-edited sidecar. */
+  function storageOf(meta: PageMeta): PageStorage {
+    const raw = (meta.ext as Record<string, unknown> | undefined)?.["storage"];
+    const out: PageStorage = { local: {}, personal: {}, shared: {} };
+    if (raw && typeof raw === "object") {
+      for (const area of STORAGE_AREAS) {
+        const map = (raw as Record<string, unknown>)[area];
+        if (map && typeof map === "object") {
+          for (const [key, value] of Object.entries(map)) {
+            if (typeof value === "string") out[area][key] = value;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  function storageCount(state: PageStorage): number {
+    return STORAGE_AREAS.reduce((n, area) => n + Object.keys(state[area]).length, 0);
+  }
+
+  /** Canonical form of the saved state, so writes only reload when values differ. */
+  function storageSignature(meta: PageMeta): string {
+    const state = storageOf(meta);
+    return JSON.stringify(
+      STORAGE_AREAS.map((area) =>
+        Object.keys(state[area])
+          .sort()
+          .map((key) => [key, state[area][key]]),
+      ),
+    );
+  }
+
+  /** Metadata comparison that ignores the page's saved state. */
+  function metaSignature(meta: PageMeta): string {
+    const ext = { ...(meta.ext ?? {}) } as Record<string, unknown>;
+    delete ext.storage;
+    return JSON.stringify({ ...meta, ext });
+  }
+
+  /** Escape JSON for an inline script: `<` can close it early, U+2028/9 are illegal. */
+  function escapeScriptJson(json: string): string {
+    return json
+      .replace(/</g, "\\u003c")
+      .replace(/\u2028/g, "\\u2028")
+      .replace(/\u2029/g, "\\u2029");
+  }
+
   let page = $state<Page | null>(null);
   let error = $state<string | null>(null);
+  /** Intervals each grade would schedule for the open page (review session only). */
+  let preview = $state<ReviewPreview | null>(null);
   let frameReady = $state(false);
   let saving = $state(false);
   let deleting = $state(false);
@@ -70,6 +129,7 @@
   );
   const due = $derived(page ? dueInfo(page.meta.nextReview) : null);
   const dirty = $derived(isDirty());
+  const hasStorageData = $derived(page ? storageCount(storageOf(page.meta)) > 0 : false);
 
   function sameTags(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -91,6 +151,134 @@
     dTags = [...meta.tags];
     dNote = meta.note;
     tagInput = "";
+  }
+
+  /* -------------------------------------------------------------- page state */
+
+  // Writes flow one way: the served iframe posts batches of changes, the reader
+  // validates them, debounces, and persists them under its own page id. The
+  // page's state is then applied locally so a rescan never mistakes the write
+  // for an external edit and reloads the frame.
+  interface StorageBatch {
+    id: string;
+    changes: StorageChange[];
+  }
+
+  let servedFrame: HTMLIFrameElement | undefined = $state();
+  let pendingStorage: StorageBatch | null = null;
+  let storageTimer: ReturnType<typeof setTimeout> | undefined;
+  let storageChain: Promise<void> = Promise.resolve();
+
+  function applyStorageState(id: string, state: PageStorage) {
+    if (page && page.meta.id === id) {
+      page = {
+        ...page,
+        meta: { ...page.meta, ext: { ...(page.meta.ext ?? {}), storage: state } },
+      };
+    }
+    // Keep the library copies in step so the palette can offer "Reset page data".
+    for (const list of [app.library, app.pages]) {
+      const meta = list.find((m) => m.id === id);
+      if (meta) meta.ext = { ...(meta.ext ?? {}), storage: state };
+    }
+  }
+
+  /** Validate one `herbarium:storage` message; the page id never comes from it. */
+  function sanitizeChanges(raw: unknown): StorageChange[] {
+    if (!Array.isArray(raw)) return [];
+    const out: StorageChange[] = [];
+    for (const entry of raw) {
+      if (out.length >= 10_000) break;
+      if (!entry || typeof entry !== "object") continue;
+      const { area, key, value } = entry as Record<string, unknown>;
+      if (typeof area !== "string") continue;
+      if (area !== "local" && area !== "personal" && area !== "shared") continue;
+      if (typeof key !== "string") continue;
+      const keyChars = Array.from(key).length;
+      if (keyChars < 1 || keyChars > 200) continue;
+      let stringValue: string | null;
+      if (value === null) stringValue = null;
+      else if (typeof value === "string") stringValue = value;
+      else continue;
+      out.push({ area, key, value: stringValue });
+    }
+    return out;
+  }
+
+  function enqueueStorage(id: string, changes: StorageChange[]) {
+    if (pendingStorage && pendingStorage.id !== id) void flushStorage();
+    if (!pendingStorage) pendingStorage = { id, changes: [] };
+    pendingStorage.changes.push(...changes);
+    clearTimeout(storageTimer);
+    storageTimer = setTimeout(() => void flushStorage(), 300);
+  }
+
+  /**
+   * Persist queued changes in order; safe to call with nothing queued. Resolves
+   * once every queued write for the page has reached the backend, so callers
+   * that are about to reload the frame can await it first. Write failures are
+   * logged and never reject, so a failed flush cannot block the reload.
+   */
+  function flushStorage(): Promise<void> {
+    clearTimeout(storageTimer);
+    const batch = pendingStorage;
+    pendingStorage = null;
+    if (!batch) return storageChain;
+    storageChain = storageChain.then(async () => {
+      try {
+        applyStorageState(batch.id, await api.writeStorage(batch.id, batch.changes));
+      } catch (e) {
+        console.error("storage write failed", e);
+      }
+    });
+    return storageChain;
+  }
+
+  /** Best effort: persist queued state when the window is closed. */
+  const onPageHide = () => void flushStorage();
+
+  function onStorageMessage(event: MessageEvent) {
+    const p = page;
+    const frame = servedFrame;
+    if (!p || !frame || event.source !== frame.contentWindow) return;
+    const data = event.data as { type?: unknown; changes?: unknown } | null;
+    if (!data || data.type !== "herbarium:storage") return;
+    const changes = sanitizeChanges(data.changes);
+    if (changes.length > 0) enqueueStorage(p.meta.id, changes);
+  }
+
+  /** Discard a page's saved state and reload its frame with an empty shim. */
+  async function resetStorage() {
+    const p = page;
+    if (!p || pageGone) return;
+    const ok = await confirmAction({
+      title: t("read.resetStorageTitle"),
+      message: t("read.resetStorageMessage"),
+      confirmLabel: t("read.resetStorageConfirm"),
+      danger: true,
+    });
+    if (!ok) return;
+    // A reset discards everything, including writes still waiting to be sent.
+    pendingStorage = null;
+    clearTimeout(storageTimer);
+    try {
+      // Let any write already in flight land before the clear, so it cannot
+      // reappear in the state the reloaded frame reads.
+      await storageChain;
+      applyStorageState(p.meta.id, await api.clearStorage(p.meta.id));
+      // The old frame may queue more writes while the clear runs; drop them so
+      // they cannot repopulate the state the page just reset.
+      // `pendingStorage` may have been set by a message during the awaits above.
+      const queued = pendingStorage as StorageBatch | null;
+      if (queued && queued.id === p.meta.id) {
+        pendingStorage = null;
+        clearTimeout(storageTimer);
+      }
+      previewNonce++;
+      toast(t("read.resetDone"), "success");
+    } catch (e) {
+      toast(`${t("read.resetFailed")}: ${errorMessage(e)}`, "error");
+    }
   }
 
   /* ------------------------------------------------------------------ tags */
@@ -140,6 +328,7 @@
     conflict = null;
     frameReady = false;
     try {
+      await flushStorage();
       const loaded = await api.getPage(id);
       page = loaded;
       baseUpdatedAt = loaded.meta.updatedAt;
@@ -148,6 +337,17 @@
       previewNonce++;
       clearTimeout(frameTimer);
       frameTimer = setTimeout(() => (frameReady = true), 1200);
+      if (app.reviewSession) {
+        // Label the grade buttons with what each one would schedule now.
+        void api
+          .previewReview(id)
+          .then((value) => {
+            if (page?.meta.id === id) preview = value;
+          })
+          .catch((e) => console.error(e));
+      } else {
+        preview = null;
+      }
     } catch (e) {
       error = errorMessage(e);
     }
@@ -168,7 +368,9 @@
     try {
       p.meta = await api.setNetwork(p.meta.id, !p.meta.allowCdn);
       baseUpdatedAt = p.meta.updatedAt;
-      // The CSP is chosen when the page is served: reload so it applies now.
+      // The CSP is chosen when the page is served: flush queued state, then
+      // reload so the new CSP and fresh state apply together.
+      await flushStorage();
       previewNonce++;
       toast(
         p.meta.allowCdn ? t("read.netEnabled") : t("read.netDisabled"),
@@ -211,6 +413,7 @@
     p.meta = { ...p.meta, ...fresh };
     baseUpdatedAt = p.meta.updatedAt;
     if (!dirty) syncDraft(p.meta);
+    await flushStorage();
     previewNonce++;
   }
 
@@ -288,6 +491,7 @@
       baseUpdatedAt = p.meta.updatedAt;
       p.html = draft;
       conflict = null;
+      await flushStorage();
       previewNonce++;
       toast(t("edit.saved"), "success");
       void reloadPages(true);
@@ -342,6 +546,30 @@
     if (page) syncDraft(page.meta);
   }
 
+  /* ------------------------------------------------------ version history */
+
+  /**
+   * Restore `at` from the page history. Unsaved source or inspector edits get
+   * the same confirmation as leaving the page, since the reload drops them.
+   * Returns whether the reader reloaded the restored page.
+   */
+  async function restoreVersion(at: number): Promise<boolean> {
+    const p = page;
+    if (!p || pageGone) return false;
+    if (!(await confirmDiscardUnsaved())) return false;
+    try {
+      await api.restoreHistory(p.meta.id, at, baseUpdatedAt);
+      await load();
+      void reloadPages(true);
+      toast(t("history.restored"), "success");
+      return true;
+    } catch (e) {
+      const msg = errorMessage(e);
+      toast(`${t("history.restoreFailed")}: ${msg}`, "error");
+      return false;
+    }
+  }
+
   /* ------------------------------------------------------ conflict handling */
 
   function keepEditing() {
@@ -379,6 +607,11 @@
   /* ------------------------------------------------------ external revisions */
 
   async function refreshFromDisk(announce: boolean) {
+    if (!page) return;
+    // Land queued writes first: they are the page's own state, so they must
+    // reach the sidecar before the comparison below (and before any reload it
+    // triggers), or they would look like an external change and be lost.
+    await flushStorage();
     const p = page;
     if (!p) return;
     let fresh: Page;
@@ -393,9 +626,13 @@
     pageGone = false;
     // A rescan runs every time the window regains focus; only a real change on
     // disk may reload the frame (which resets the page's interactive state).
+    // Page state is compared separately: the page's own writes apply locally,
+    // so they never look external, and only a reset from elsewhere (which
+    // leaves the stored state different from the local copy) reloads the frame.
     const htmlChanged = fresh.html !== p.html;
-    const metaChanged = JSON.stringify(fresh.meta) !== JSON.stringify(p.meta);
-    if (!htmlChanged && !metaChanged) return;
+    const metaChanged = metaSignature(fresh.meta) !== metaSignature(p.meta);
+    const storageChanged = storageSignature(fresh.meta) !== storageSignature(p.meta);
+    if (!htmlChanged && !metaChanged && !storageChanged) return;
     if (sourceDirty || dirty) {
       if (announce) toast(t("read.changedOnDisk"), "info");
       return;
@@ -405,9 +642,9 @@
     source = fresh.html;
     syncDraft(fresh.meta);
     conflict = null;
-    if (htmlChanged) {
+    if (htmlChanged || storageChanged) {
       previewNonce++;
-      if (announce) toast(t("read.reloaded"), "info");
+      if (htmlChanged && announce) toast(t("read.reloaded"), "info");
     }
   }
 
@@ -441,10 +678,20 @@
   let draftDoc = $state("");
   let draftTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function buildDraftDoc(html: string, pageId: string, allowCdn: boolean): string {
+  function buildDraftDoc(
+    html: string,
+    pageId: string,
+    allowCdn: boolean,
+    storage: PageStorage,
+  ): string {
+    // The draft gets the same API and current values as the served page, but
+    // with persistence off: `window.__herbariumPersist = false` stops the shim
+    // from ever posting to the reader, so a draft never writes to the vault.
+    const shim = `<script>window.__herbariumState=${escapeScriptJson(JSON.stringify(storage))};window.__herbariumPersist=false;${storageShimJs}<\/script>`;
     const head =
       `<base href="herbarium://page/${encodeURIComponent(pageId)}/">` +
-      `<meta http-equiv="Content-Security-Policy" content="${allowCdn ? DRAFT_CSP_ALLOW : DRAFT_CSP_BLOCK}">`;
+      `<meta http-equiv="Content-Security-Policy" content="${allowCdn ? DRAFT_CSP_ALLOW : DRAFT_CSP_BLOCK}">` +
+      shim;
     const lower = html.toLowerCase();
     const headAt = lower.indexOf("<head");
     const insertAt = headAt >= 0 ? lower.indexOf(">", headAt) + 1 : -1;
@@ -457,13 +704,14 @@
     const src = source;
     const open = editing;
     const allow = p?.meta.allowCdn ?? false;
+    const storage = p ? storageOf(p.meta) : EMPTY_STORAGE;
     clearTimeout(draftTimer);
     if (!open || !p) {
       draftDoc = "";
       return;
     }
     draftTimer = setTimeout(() => {
-      draftDoc = buildDraftDoc(src, p.meta.id, allow);
+      draftDoc = buildDraftDoc(src, p.meta.id, allow, storage);
     }, 300);
   });
 
@@ -535,6 +783,11 @@
     await goView(app.view);
   }
 
+  /** " · 3d" suffix showing what a grade would schedule now, when known. */
+  function previewLabel(grade: ReviewGrade): string {
+    return preview ? ` · ${fmtDurationShort(preview[grade])}` : "";
+  }
+
   /* --------------------------------------------------------------- shortcuts */
 
   function isTypingTarget(target: EventTarget | null): boolean {
@@ -553,14 +806,12 @@
     if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
     if (isTypingTarget(e.target)) return;
     const key = e.key;
-    if (key === "1") {
+    const graded: ReviewGrade | null =
+      key === "1" ? "again" : key === "2" ? "hard" : key === "3" ? "good" : key === "4" ? "easy" : null;
+    if (graded) {
       e.preventDefault();
       e.stopPropagation();
-      void grade("again");
-    } else if (key === "2") {
-      e.preventDefault();
-      e.stopPropagation();
-      void grade("good");
+      void grade(graded);
     } else if (key === "s" || key === "S") {
       e.preventDefault();
       e.stopPropagation();
@@ -574,36 +825,52 @@
 
   let unregisterGuard: (() => void) | undefined;
 
+  /**
+   * Ask before dropping unsaved source or inspector edits. Used by the leave
+   * guard and by restoring a version, which replaces the current page.
+   */
+  async function confirmDiscardUnsaved(): Promise<boolean> {
+    if (!sourceDirty && !dirty) return true;
+    const message =
+      sourceDirty && dirty
+        ? t("read.leave.messageBoth")
+        : sourceDirty
+          ? t("read.leave.messageSource")
+          : t("read.leave.messageMeta");
+    return confirmAction({
+      title: t("read.leave.title"),
+      message,
+      confirmLabel: t("read.leave.discard"),
+      danger: true,
+    });
+  }
+
   onMount(() => {
     void load();
+    app.historyOpen = false;
     window.addEventListener("focus", onFocus);
     window.addEventListener("keydown", onSessionKey, true);
-    // Nothing leaves this page (navigation, close, delete) without the user
-    // choosing to discard unsaved source or inspector edits. Cancel is the safe default.
+    window.addEventListener("message", onStorageMessage);
+    window.addEventListener("pagehide", onPageHide);
+    // Nothing leaves this page (navigation, close, delete) without flushing the
+    // page's queued state, then the user choosing to discard unsaved source or
+    // inspector edits. Cancel is the safe default.
     unregisterGuard = registerLeaveGuard(async () => {
-      if (!sourceDirty && !dirty) return true;
-      const message =
-        sourceDirty && dirty
-          ? t("read.leave.messageBoth")
-          : sourceDirty
-            ? t("read.leave.messageSource")
-            : t("read.leave.messageMeta");
-      return confirmAction({
-        title: t("read.leave.title"),
-        message,
-        confirmLabel: t("read.leave.discard"),
-        danger: true,
-      });
+      await flushStorage();
+      return confirmDiscardUnsaved();
     });
     return () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("keydown", onSessionKey, true);
+      window.removeEventListener("message", onStorageMessage);
+      window.removeEventListener("pagehide", onPageHide);
     };
   });
 
   onDestroy(() => {
     clearTimeout(frameTimer);
     clearTimeout(draftTimer);
+    void flushStorage();
     unregisterGuard?.();
   });
 </script>
@@ -667,6 +934,28 @@
           <Icon name="info" size={14} />
           {t("read.details")}
         </button>
+        {#if hasStorageData}
+          <button
+            class="btn btn-sm"
+            onclick={resetStorage}
+            disabled={pageGone}
+            title={t("read.resetStorageHint")}
+          >
+            <Icon name="trash-2" size={14} />
+            {t("read.resetStorage")}
+          </button>
+        {/if}
+        <button
+          class="btn btn-sm details-btn"
+          class:active={app.historyOpen}
+          aria-pressed={app.historyOpen}
+          onclick={() => (app.historyOpen = !app.historyOpen)}
+          disabled={pageGone}
+          title={t("read.historyHint")}
+        >
+          <Icon name="refresh-cw" size={14} />
+          {t("history.title")}
+        </button>
       </div>
     {/if}
   </header>
@@ -720,7 +1009,15 @@
             disabled={saving || pageGone}
             title={t("read.session.againHint")}
           >
-            1 · {t("review.again")}
+            1 · {t("review.again")}{previewLabel("again")}
+          </button>
+          <button
+            class="btn btn-xs"
+            onclick={() => grade("hard")}
+            disabled={saving || pageGone}
+            title={t("read.session.hardHint")}
+          >
+            2 · {t("review.hard")}{previewLabel("hard")}
           </button>
           <button
             class="btn btn-xs btn-primary"
@@ -728,7 +1025,15 @@
             disabled={saving || pageGone}
             title={t("read.session.goodHint")}
           >
-            2 · {t("review.good")}
+            3 · {t("review.good")}{previewLabel("good")}
+          </button>
+          <button
+            class="btn btn-xs"
+            onclick={() => grade("easy")}
+            disabled={saving || pageGone}
+            title={t("read.session.easyHint")}
+          >
+            4 · {t("review.easy")}{previewLabel("easy")}
           </button>
           <button
             class="btn btn-xs"
@@ -866,6 +1171,7 @@
             src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
             sandbox="allow-scripts allow-popups"
             onload={markReady}
+            bind:this={servedFrame}
           ></iframe>
         </div>
         {/if}
@@ -1002,6 +1308,15 @@
         </aside>
       {/if}
     </div>
+
+    {#if app.historyOpen}
+      <HistoryPanel
+        pageId={page.meta.id}
+        currentHtml={page.html}
+        onRestore={restoreVersion}
+        onClose={() => (app.historyOpen = false)}
+      />
+    {/if}
   {:else}
     <div class="load">
       <span class="spinner"></span>

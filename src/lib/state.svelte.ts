@@ -80,6 +80,8 @@ interface AppState {
   busy: boolean;
   paletteOpen: boolean;
   inspectorOpen: boolean;
+  /** The reader's version-history panel is open. */
+  historyOpen: boolean;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -93,9 +95,10 @@ interface AppState {
 
 const DEFAULT_REVIEW: ReviewSettings = {
   presets: [1440, 4320, 10080, 43200],
-  strategy: "ladder",
+  strategy: "fsrs",
   multiplier: 2,
   maxIntervalMinutes: 525600,
+  desiredRetention: 0.9,
   importReviewMinutes: null,
   queueLimit: null,
 };
@@ -154,6 +157,7 @@ export const app: AppState = $state({
   busy: false,
   paletteOpen: false,
   inspectorOpen: prefs.detailsOpen,
+  historyOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -398,6 +402,7 @@ export function resetWorkspace() {
   app.tagFilter = null;
   app.readId = null;
   app.reviewSession = false;
+  app.historyOpen = false;
   app.createRequest = null;
   app.loadError = null;
   app.reviewError = null;

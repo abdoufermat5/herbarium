@@ -1,0 +1,432 @@
+// `herbarium add` and deep-link parsing.
+//
+// `add` runs in-process against a vault, like `herbarium mcp` (design 0.2,
+// decision 9), and writes each input through the `pages.create` operation —
+// the same `create` path `pages.import` uses — so the CLI rejects exactly the
+// HTML the app's importer would reject, with the same reason. It is an
+// operation call rather than a direct vault write so validation, id slugging,
+// indexing and events all stay in core.
+//
+// Deep links are parsed here too: `herbarium-app://open/<percent-encoded id>`
+// and `herbarium-app://review`; anything else is ignored.
+
+use std::io::Read;
+use std::time::Duration;
+
+use serde::Serialize;
+use serde_json::{Map, Value, json};
+
+use herbarium_core::{Caller, Host};
+
+/// Event the desktop app emits for the frontend to act on a deep link.
+pub const DEEP_LINK_EVENT: &str = "deep-link";
+
+/// Prefix of the clickable link printed for every saved page.
+pub const LINK_PREFIX: &str = "herbarium-app://open/";
+
+/// Largest response `herbarium add` will fetch from a URL.
+const FETCH_LIMIT: u64 = 20 * 1024 * 1024;
+
+/// A parsed deep link. Serializes to `{kind:"open", id}` / `{kind:"review"}`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum DeepLink {
+    Open { id: String },
+    Review,
+}
+
+/// Arguments of a `herbarium add` invocation.
+#[derive(Debug, Default, PartialEq)]
+pub struct AddArgs {
+    pub vault: Option<String>,
+    pub folder: Option<String>,
+    pub tags: Vec<String>,
+    pub title: Option<String>,
+    /// `--network` / `--no-network`; absent follows the vault default.
+    pub network: Option<bool>,
+    pub inputs: Vec<String>,
+}
+
+pub const USAGE: &str = "Herbarium — keep generated HTML pages in a local vault.
+
+usage:
+  herbarium                              open the desktop app
+  herbarium add [options] <file|-|url>…  save pages into the vault
+  herbarium mcp [--vault <path>]         serve the MCP protocol on stdin/stdout
+  herbarium help                         show this help
+
+Run `herbarium add --help` for the add options.";
+
+pub const ADD_USAGE: &str = "usage: herbarium add [options] <file|-|url>…
+
+Save one or more pages into the vault and print `<id>\\t<link>` for each.
+Accepts local HTML files, `-` for stdin, and http(s) URLs.
+
+options:
+  --vault <path>    vault to write to (default: HERBARIUM_VAULT, then the app's last vault)
+  --folder <path>   destination folder such as rust/cargo (default: the vault root)
+  --tag <tag>       add a tag; repeat for several
+  --title <title>   page title; only with a single input (default: the page's <title>)
+  --network         allow the page to load from allowlisted CDNs
+  --no-network      block all network access for the page (default: the vault setting)
+  -h, --help        show this help
+
+Fetched URLs time out after 30 s and are capped at 20 MiB.
+Exit status: 0 on success, 1 when any input failed, 2 on a usage error.";
+
+/// Resolve the vault the way every front end does: `--vault`, then
+/// `HERBARIUM_VAULT`, then the vault last opened in the Herbarium app.
+pub fn resolve_vault(explicit: Option<String>) -> Result<String, String> {
+    explicit
+        .or_else(|| std::env::var("HERBARIUM_VAULT").ok().filter(|v| !v.is_empty()))
+        .or(crate::config::load()?.vault_path)
+        .ok_or_else(|| {
+            "no vault: pass --vault <path>, set HERBARIUM_VAULT, or open a vault in the Herbarium app first"
+                .to_string()
+        })
+}
+
+/// Parse the arguments after `add`. `Ok(None)` means `--help` was asked for.
+pub fn parse_add(args: &[String]) -> Result<Option<AddArgs>, String> {
+    let mut parsed = AddArgs::default();
+    let mut only_inputs = false;
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
+        if only_inputs {
+            parsed.inputs.push(arg.clone());
+            i += 1;
+            continue;
+        }
+        match arg.as_str() {
+            "--help" | "-h" => return Ok(None),
+            "--" => only_inputs = true,
+            "--vault" => {
+                parsed.vault = Some(take_value(args, &mut i, "--vault")?);
+                continue;
+            }
+            "--folder" => {
+                parsed.folder = Some(take_value(args, &mut i, "--folder")?);
+                continue;
+            }
+            "--tag" => {
+                parsed.tags.push(take_value(args, &mut i, "--tag")?);
+                continue;
+            }
+            "--title" => {
+                parsed.title = Some(take_value(args, &mut i, "--title")?);
+                continue;
+            }
+            "--network" => parsed.network = Some(true),
+            "--no-network" => parsed.network = Some(false),
+            other if other.starts_with('-') && other != "-" => {
+                return Err(format!("unknown option `{other}`"));
+            }
+            other => parsed.inputs.push(other.to_string()),
+        }
+        i += 1;
+    }
+
+    if parsed.inputs.is_empty() {
+        return Err("no input: pass one or more files, `-` for stdin, or an http(s) URL".into());
+    }
+    if parsed.title.is_some() && parsed.inputs.len() != 1 {
+        return Err("--title is only valid with a single input".into());
+    }
+    Ok(Some(parsed))
+}
+
+/// Consume the value of `flag` and advance past it.
+fn take_value(args: &[String], i: &mut usize, flag: &str) -> Result<String, String> {
+    *i += 1;
+    let value = args
+        .get(*i)
+        .ok_or_else(|| format!("{flag} needs a value"))?
+        .clone();
+    *i += 1;
+    Ok(value)
+}
+
+/// Parse a deep link; `None` for anything we do not handle.
+pub fn parse_deep_link(url: &str) -> Option<DeepLink> {
+    const SCHEME: &str = "herbarium-app://";
+    let rest = url.strip_prefix(SCHEME)?;
+    // Drop any query/fragment, then a single trailing slash.
+    let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    if rest == "review" {
+        return Some(DeepLink::Review);
+    }
+    let raw_id = rest.strip_prefix("open/")?;
+    if raw_id.is_empty() {
+        return None;
+    }
+    let id = percent_encoding::percent_decode_str(raw_id)
+        .decode_utf8()
+        .ok()?
+        .into_owned();
+    // Ids are single path segments; a decoded slash is not one.
+    if id.is_empty() || id.contains('/') {
+        return None;
+    }
+    Some(DeepLink::Open { id })
+}
+
+/// Process exit code for `herbarium add …`.
+pub fn run_add(args: &[String]) -> i32 {
+    let parsed = match parse_add(args) {
+        Ok(Some(parsed)) => parsed,
+        Ok(None) => {
+            println!("{ADD_USAGE}");
+            return 0;
+        }
+        Err(e) => {
+            eprintln!("herbarium add: {e}\n");
+            eprintln!("{ADD_USAGE}");
+            return 2;
+        }
+    };
+    match add(&parsed) {
+        Ok(failed) => {
+            if failed {
+                1
+            } else {
+                0
+            }
+        }
+        Err(e) => {
+            eprintln!("herbarium add: {e}");
+            1
+        }
+    }
+}
+
+/// Resolve the vault, then import every input. Returns true if any failed.
+fn add(args: &AddArgs) -> Result<bool, String> {
+    let vault = resolve_vault(args.vault.clone())?;
+    let mut host = Host::new();
+    host.open_vault(&vault)?;
+
+    let mut failed = false;
+    for input in &args.inputs {
+        match import_one(&host, args, input) {
+            Ok(id) => println!("{id}\t{LINK_PREFIX}{id}"),
+            Err(reason) => {
+                eprintln!("herbarium add: {input}: {reason}");
+                failed = true;
+            }
+        }
+    }
+    Ok(failed)
+}
+
+/// Import one input (file, `-`, or URL) and return the new page id.
+fn import_one(host: &Host, args: &AddArgs, input: &str) -> Result<String, String> {
+    let html = if input == "-" {
+        let body = read_capped(std::io::stdin().lock(), "input")?;
+        String::from_utf8(body).map_err(|_| "input is not valid UTF-8".to_string())?
+    } else if input.starts_with("http://") || input.starts_with("https://") {
+        fetch(input)?
+    } else {
+        std::fs::read_to_string(input).map_err(|e| e.to_string())?
+    };
+
+    let mut op = Map::new();
+    op.insert("html".into(), Value::String(html));
+    if let Some(folder) = &args.folder {
+        op.insert("folder".into(), Value::String(folder.clone()));
+    }
+    if !args.tags.is_empty() {
+        op.insert("tags".into(), json!(args.tags));
+    }
+    if let Some(title) = &args.title {
+        op.insert("title".into(), Value::String(title.clone()));
+    }
+    if let Some(network) = args.network {
+        op.insert("allowCdn".into(), Value::Bool(network));
+    }
+
+    // The user is invoking this directly, so the CLI counts as the UI; the
+    // operation is the same `create` path `pages.import` runs per file.
+    let page = host.call(Caller::Ui, "pages.create", Value::Object(op))?;
+    page.get("id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| "page created without an id".to_string())
+}
+
+/// Read at most [`FETCH_LIMIT`] bytes from `reader`, erroring if there is more.
+/// `what` names the source in messages ("response", "input").
+fn read_capped<R: Read>(reader: R, what: &str) -> Result<Vec<u8>, String> {
+    let mut body = Vec::new();
+    reader
+        .take(FETCH_LIMIT + 1)
+        .read_to_end(&mut body)
+        .map_err(|e| format!("could not read {what}: {e}"))?;
+    if body.len() as u64 > FETCH_LIMIT {
+        return Err(format!("{what} larger than 20 MiB"));
+    }
+    Ok(body)
+}
+
+/// Fetch a page over HTTP(S) with a 30 s timeout and a 20 MiB cap.
+fn fetch(url: &str) -> Result<String, String> {
+    // `rustls-no-provider` hands provider setup to us; the app's updater also
+    // uses the ring provider, so nothing new is pulled in.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("could not create HTTP client: {e}"))?;
+    let resp = client
+        .get(url)
+        .send()
+        .map_err(|e| format!("request failed: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        return Err(format!("HTTP {status}"));
+    }
+    if resp.content_length().is_some_and(|len| len > FETCH_LIMIT) {
+        return Err("response larger than 20 MiB".into());
+    }
+    let body = read_capped(resp, "response")?;
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_every_option() {
+        let parsed = parse_add(&args(&[
+            "--vault",
+            "/v",
+            "--folder",
+            "rust/cargo",
+            "--tag",
+            "rust",
+            "--tag",
+            "cargo",
+            "--title",
+            "T",
+            "--network",
+            "page.html",
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            parsed,
+            AddArgs {
+                vault: Some("/v".into()),
+                folder: Some("rust/cargo".into()),
+                tags: vec!["rust".into(), "cargo".into()],
+                title: Some("T".into()),
+                network: Some(true),
+                inputs: vec!["page.html".into()],
+            }
+        );
+    }
+
+    #[test]
+    fn no_network_and_multiple_inputs() {
+        let parsed = parse_add(&args(&["--no-network", "a.html", "-"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.network, Some(false));
+        assert_eq!(parsed.inputs, vec!["a.html".to_string(), "-".to_string()]);
+    }
+
+    #[test]
+    fn title_requires_a_single_input() {
+        let err = parse_add(&args(&["--title", "T", "a.html", "b.html"])).unwrap_err();
+        assert!(err.contains("--title"), "{err}");
+    }
+
+    #[test]
+    fn rejects_unknown_option_and_missing_value() {
+        assert!(parse_add(&args(&["--nope", "a.html"])).is_err());
+        assert!(parse_add(&args(&["--folder"])).is_err());
+    }
+
+    #[test]
+    fn requires_an_input() {
+        assert!(parse_add(&args(&["--folder", "x"])).is_err());
+    }
+
+    #[test]
+    fn double_dash_treats_the_rest_as_inputs() {
+        let parsed = parse_add(&args(&["--", "--network", "-"]))
+            .unwrap()
+            .unwrap();
+        assert_eq!(parsed.network, None);
+        assert_eq!(
+            parsed.inputs,
+            vec!["--network".to_string(), "-".to_string()]
+        );
+    }
+
+    #[test]
+    fn help_is_not_a_run() {
+        assert_eq!(parse_add(&args(&["--help"])).unwrap(), None);
+        assert_eq!(parse_add(&args(&["-h"])).unwrap(), None);
+    }
+
+    #[test]
+    fn parses_open_deep_link() {
+        assert_eq!(
+            parse_deep_link("herbarium-app://open/rust-cargo"),
+            Some(DeepLink::Open {
+                id: "rust-cargo".into()
+            })
+        );
+        assert_eq!(
+            parse_deep_link("herbarium-app://open/a%20b"),
+            Some(DeepLink::Open { id: "a b".into() })
+        );
+        // A trailing slash and query are tolerated.
+        assert_eq!(
+            parse_deep_link("herbarium-app://open/x/?a=1"),
+            Some(DeepLink::Open { id: "x".into() })
+        );
+        // A decoded slash would escape the id segment.
+        assert_eq!(parse_deep_link("herbarium-app://open/a%2Fb"), None);
+        assert_eq!(parse_deep_link("herbarium-app://open/"), None);
+    }
+
+    #[test]
+    fn parses_review_deep_link() {
+        assert_eq!(
+            parse_deep_link("herbarium-app://review"),
+            Some(DeepLink::Review)
+        );
+        assert_eq!(
+            parse_deep_link("herbarium-app://review/"),
+            Some(DeepLink::Review)
+        );
+    }
+
+    #[test]
+    fn ignores_other_urls() {
+        assert_eq!(parse_deep_link("herbarium-app://other/x"), None);
+        assert_eq!(parse_deep_link("herbarium://page/x"), None);
+        assert_eq!(parse_deep_link("https://example.com/open/x"), None);
+        assert_eq!(parse_deep_link(""), None);
+    }
+
+    #[test]
+    fn deep_link_serializes_for_the_frontend() {
+        assert_eq!(
+            serde_json::to_value(DeepLink::Open { id: "x".into() }).unwrap(),
+            serde_json::json!({ "kind": "open", "id": "x" })
+        );
+        assert_eq!(
+            serde_json::to_value(DeepLink::Review).unwrap(),
+            serde_json::json!({ "kind": "review" })
+        );
+    }
+}

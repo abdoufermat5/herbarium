@@ -36,12 +36,17 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   on default pages without network, use data: URLs or vault-relative files.
 - Links open in the user's browser only after they confirm; pages cannot \
   navigate their own frame elsewhere.
-- Pages run in a sandbox: no fetch/XHR to arbitrary hosts, no forms, no \
-  same-origin storage, no window.claude or window.storage APIs.
+- Pages run in a sandbox: no fetch/XHR to arbitrary hosts, no forms, and no \
+  window.claude API. Pages may keep state between sessions: `localStorage` and \
+  the Claude-artifact `window.storage` API (async `get`/`set`/`delete`/`list`, \
+  with an optional `shared` flag) are persisted per page in the vault, capped \
+  at 1 MiB per page. Use them for progress, preferences and small saved inputs.
 - Prefer existing folders and tags (folders_list, tags_list) over new ones.
 
 Library behaviour:
 - pages_list and pages_search return at most 50 results unless you pass `limit`.
+- To point the user at a saved page, give them the clickable link \
+  `herbarium-app://open/<id>`; opening it focuses Herbarium on that page.
 - pages_delete, pages_bulk_delete and folders_delete with `withPages` move pages \
   to the trash; pages_trash lists it and pages_restore brings a page back.";
 
@@ -108,11 +113,19 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ),
     ("review.schedule", "Schedule review", Effect::Additive),
     ("review.complete", "Complete review", Effect::Additive),
+    (
+        "review.preview",
+        "Preview review intervals",
+        Effect::ReadOnly,
+    ),
     ("review.clear", "Clear review", Effect::Idempotent),
     ("review.due", "Pages due for review", Effect::ReadOnly),
     ("review.settings", "Review settings", Effect::ReadOnly),
     ("review.stats", "Review statistics", Effect::ReadOnly),
     ("review.configure", "Configure review", Effect::Idempotent),
+    ("history.list", "List page versions", Effect::ReadOnly),
+    ("history.get", "Read page version", Effect::ReadOnly),
+    ("history.restore", "Restore page version", Effect::Mutating),
 ];
 
 /// MCP tool annotations for an operation. Operations missing from

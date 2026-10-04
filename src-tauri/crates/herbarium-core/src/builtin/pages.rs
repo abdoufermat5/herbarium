@@ -239,6 +239,12 @@ fn effective_limit(caller: Caller, limit: Option<usize>) -> usize {
 /// are removed again if indexing fails, so disk and index stay in step.
 fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
     let store = ctx.store;
+    // `new_page_id` never reuses a trashed id, so an id with snapshots but no
+    // trash entry was left behind by a page that is gone for good: a brand-new
+    // page must not inherit its history.
+    if !vault::trash_entry_exists(&store.vault, &meta.id) {
+        vault::delete_history(&store.vault, &meta.id)?;
+    }
     vault::write_page(&store.vault, meta, html)?;
     // The bytes are on disk now; keep the returned `updatedAt` at least their
     // mtime so a caller can save again with it as `baseUpdatedAt`.
@@ -331,6 +337,52 @@ fn bulk_edit(
     meta.tags = clean_tags(tags);
     meta.updated_at = now_ms();
     ctx.save(&meta)?;
+    Ok(meta)
+}
+
+/// Replace a page's HTML: the one code path shared by `pages.set_html` and
+/// `history.restore`. Snapshots the current on-disk HTML first (unless the new
+/// bytes are identical), enforces the same `baseUpdatedAt` conflict rule, keeps
+/// the title following the document unless the user renamed the page, and
+/// emits `page.updated`.
+pub(crate) fn overwrite_html(
+    ctx: &mut Ctx,
+    id: &str,
+    html: &str,
+    base_updated_at: Option<i64>,
+) -> OpResult<PageMeta> {
+    ensure_html(html)?;
+    let mut meta = ctx.page(id)?;
+    check_base(&ctx.store.vault, &meta, base_updated_at)?;
+    let new_source = extract_title(html);
+    if !new_source.is_empty()
+        && (meta.source_title.as_deref() == Some(meta.title.as_str()) || meta.title.is_empty())
+    {
+        meta.title = new_source.clone();
+    }
+    meta.source_title = Some(new_source);
+    meta.updated_at = now_ms();
+    let store = ctx.store;
+    // Keep the bytes being replaced recoverable before they are overwritten.
+    vault::snapshot_history(
+        &store.vault,
+        &meta.id,
+        meta.folder.as_deref(),
+        html,
+        ctx.caller.tag(),
+    )?;
+    vault::write_page(&store.vault, &meta, html)?;
+    // The optimistic check compares `updatedAt` with the HTML's mtime, so the
+    // value we hand back must not be older than the file just written.
+    refresh_updated_at(&store.vault, &mut meta)?;
+    store
+        .upsert(
+            &meta,
+            &extract_text(html),
+            vault::page_mtime(&store.vault, &meta),
+        )
+        .map_err(|e| e.to_string())?;
+    ctx.emit(events::PAGE_UPDATED, json!({ "page": meta }));
     Ok(meta)
 }
 
@@ -519,29 +571,7 @@ impl Extension for Pages {
                 }),
                 &["id", "html"],
             ),
-            |ctx: &mut Ctx, a: SetHtmlArgs| {
-                ensure_html(&a.html)?;
-                let mut meta = ctx.page(&a.id)?;
-                check_base(&ctx.store.vault, &meta, a.base_updated_at)?;
-                let new_source = extract_title(&a.html);
-                if !new_source.is_empty()
-                    && (meta.source_title.as_deref() == Some(meta.title.as_str()) || meta.title.is_empty())
-                {
-                    meta.title = new_source.clone();
-                }
-                meta.source_title = Some(new_source);
-                meta.updated_at = now_ms();
-                let store = ctx.store;
-                vault::write_page(&store.vault, &meta, &a.html)?;
-                // The optimistic check compares `updatedAt` with the HTML's mtime, so
-                // the value we hand back must not be older than the file just written.
-                refresh_updated_at(&store.vault, &mut meta)?;
-                store
-                    .upsert(&meta, &extract_text(&a.html), vault::page_mtime(&store.vault, &meta))
-                    .map_err(|e| e.to_string())?;
-                ctx.emit(events::PAGE_UPDATED, json!({ "page": meta }));
-                Ok(meta)
-            },
+            |ctx: &mut Ctx, a: SetHtmlArgs| overwrite_html(ctx, &a.id, &a.html, a.base_updated_at),
         ))?;
 
         r.add(Operation::new(

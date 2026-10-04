@@ -96,6 +96,7 @@ fn complete_good_climbs_and_again_resets_with_history() {
     let vault = temp_vault("complete");
     let host = open(&vault);
     let id = create(&host, "Complete");
+    call(&host, "review.configure", json!({ "strategy": "ladder" }));
 
     call(
         &host,
@@ -148,7 +149,7 @@ fn complete_good_climbs_and_again_resets_with_history() {
         .call(
             Caller::Ui,
             "review.complete",
-            json!({ "id": id, "grade": "hard" }),
+            json!({ "id": id, "grade": "nope" }),
         )
         .unwrap_err();
     assert!(!err.is_empty());
@@ -408,5 +409,205 @@ fn missing_settings_mean_defaults() {
         settings["presets"],
         json!([DAY, 3 * DAY, 7 * DAY, 30 * DAY])
     );
+    assert_eq!(
+        settings["strategy"], "fsrs",
+        "adaptive review is the default"
+    );
+    assert_eq!(settings["desiredRetention"].as_f64().unwrap(), 0.9);
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+/// Rewrite a page's sidecar on disk (pushing its mtime forward) and rescan, so
+/// the change is picked up. Used to simulate sidecars written by other versions.
+fn write_sidecar(host: &Host, vault: &Path, id: &str, meta: &Value) {
+    let path = vault.join(format!("{id}.json"));
+    std::fs::write(&path, serde_json::to_string(meta).unwrap()).unwrap();
+    let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+    file.set_modified(SystemTime::now() + Duration::from_secs(10))
+        .unwrap();
+    call(host, "vault.rescan", json!({}));
+}
+
+fn preview(host: &Host, id: &str) -> Value {
+    call(host, "review.preview", json!({ "id": id }))
+}
+
+#[test]
+fn fsrs_default_preview_orders_grades_and_matches_complete() {
+    let vault = temp_vault("fsrs");
+    let host = open(&vault);
+    let id = create(&host, "Adaptive");
+
+    let p = preview(&host, &id);
+    let again = p["again"].as_i64().unwrap();
+    let hard = p["hard"].as_i64().unwrap();
+    let good = p["good"].as_i64().unwrap();
+    let easy = p["easy"].as_i64().unwrap();
+    assert!(again < hard, "again < hard: {p}");
+    assert!(hard <= good && good <= easy, "hard <= good <= easy: {p}");
+    assert_eq!(again, DAY, "again is the first preset (relearning step)");
+
+    let done = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "good" }),
+    );
+    assert_eq!(done["intervalMinutes"], good, "complete matches preview");
+    let h = &done["ext"]["review"];
+    let stability = h["stability"].as_f64().unwrap();
+    assert!(stability > 0.0, "{h}");
+    let difficulty = h["difficulty"].as_f64().unwrap();
+    assert!((1.0..=10.0).contains(&difficulty), "{h}");
+
+    // A same-day follow-up still matches the fresh preview and does not shrink.
+    let p2 = preview(&host, &id);
+    let done2 = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "easy" }),
+    );
+    assert_eq!(
+        done2["intervalMinutes"], p2["easy"],
+        "matches preview after a review"
+    );
+    let h2 = &done2["ext"]["review"];
+    assert!(h2["stability"].as_f64().unwrap() >= stability, "{h2}");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn higher_desired_retention_shortens_the_interval() {
+    let vault = temp_vault("retention-order");
+    let host = open(&vault);
+    let id = create(&host, "Retention");
+
+    call(
+        &host,
+        "review.configure",
+        json!({ "desiredRetention": 0.90 }),
+    );
+    let relaxed = preview(&host, &id)["good"].as_i64().unwrap();
+    call(
+        &host,
+        "review.configure",
+        json!({ "desiredRetention": 0.97 }),
+    );
+    let strict = preview(&host, &id)["good"].as_i64().unwrap();
+    assert!(strict < relaxed, "0.97 ({strict}) < 0.90 ({relaxed})");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn desired_retention_is_validated() {
+    let vault = temp_vault("retention-bounds");
+    let host = open(&vault);
+    for bad in [0.69, 0.98, 0.0, -1.0] {
+        let err = host
+            .call(
+                Caller::Ui,
+                "review.configure",
+                json!({ "desiredRetention": bad }),
+            )
+            .unwrap_err();
+        assert!(!err.is_empty(), "accepted {bad}");
+    }
+    for ok in [0.70, 0.90, 0.97] {
+        let saved = call(&host, "review.configure", json!({ "desiredRetention": ok }));
+        assert_eq!(saved["desiredRetention"].as_f64().unwrap(), ok);
+    }
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn legacy_sidecar_without_memory_loads_and_completes() {
+    let vault = temp_vault("legacy-fsrs");
+    let host = open(&vault);
+    let id = create(&host, "Legacy");
+
+    // A 0.1 sidecar: history entries with no stability/difficulty.
+    let path = vault.join(format!("{id}.json"));
+    let mut meta: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    meta["nextReview"] = json!(now_ms() + DAY_MS);
+    meta["intervalMinutes"] = json!(DAY);
+    meta["ext"] = json!({
+        "review": {
+            "count": 2,
+            "log": [
+                { "at": 1000, "grade": "good", "intervalMinutes": 1440 },
+                { "at": 2000, "grade": "again", "intervalMinutes": 1440 }
+            ]
+        }
+    });
+    write_sidecar(&host, &vault, &id, &meta);
+
+    let p = preview(&host, &id);
+    assert!(p["good"].as_i64().unwrap() > 0, "{p}");
+    let done = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "good" }),
+    );
+    assert_eq!(
+        done["intervalMinutes"], p["good"],
+        "initialized from the grade"
+    );
+    let h = &done["ext"]["review"];
+    assert_eq!(h["count"], 3, "the old history is kept");
+    assert!(h["stability"].as_f64().unwrap() > 0.0, "{h}");
+    assert!(h["difficulty"].as_f64().unwrap() >= 1.0, "{h}");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn non_fsrs_hard_and_easy_interval_rules() {
+    let vault = temp_vault("non-fsrs-grades");
+    let host = open(&vault);
+    let id = create(&host, "Ladder");
+    call(&host, "review.configure", json!({ "strategy": "ladder" }));
+    call(
+        &host,
+        "review.schedule",
+        json!({ "id": id, "intervalMinutes": 3 * DAY }),
+    );
+
+    // Hard repeats the current interval and records no FSRS state.
+    let hard = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "hard" }),
+    );
+    assert_eq!(hard["intervalMinutes"], 3 * DAY);
+    assert!(
+        hard["ext"]["review"]
+            .get("stability")
+            .is_none_or(Value::is_null),
+        "ladder scheduling leaves the memory state alone: {hard}"
+    );
+
+    // Easy advances twice: 3 days -> 7 days -> 30 days.
+    let easy = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "easy" }),
+    );
+    assert_eq!(easy["intervalMinutes"], 30 * DAY);
+
+    // Again restarts at the first preset; Good advances once.
+    let again = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "again" }),
+    );
+    assert_eq!(again["intervalMinutes"], DAY);
+    let good = call(
+        &host,
+        "review.complete",
+        json!({ "id": id, "grade": "good" }),
+    );
+    assert_eq!(good["intervalMinutes"], 3 * DAY);
+
     let _ = std::fs::remove_dir_all(&vault);
 }

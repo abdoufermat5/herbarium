@@ -36,12 +36,25 @@
     if (!ok) input.value = String(app.review.multiplier);
   }
 
+  /** The retention field is edited as a percent; settings store 0..1. */
+  function retentionPercent(): number {
+    return Math.round(app.review.desiredRetention * 100);
+  }
+
+  async function commitRetention(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const pct = Number(input.value);
+    const ok = input.value.trim() !== "" && (await update({ desiredRetention: pct / 100 }));
+    if (!ok) input.value = String(retentionPercent());
+  }
+
   /** `current` stays selectable even when it is not one of the usual choices. */
   function withCurrent(values: number[], current: number | null): number[] {
     return current && !values.includes(current) ? [...values, current].sort((a, b) => a - b) : values;
   }
 
   const strategyOptions = $derived<SelectOption<ReviewStrategy>[]>([
+    { value: "fsrs", label: t("review.cfg.strategyFsrs") },
     { value: "ladder", label: t("review.cfg.strategyLadder") },
     { value: "multiply", label: t("review.cfg.strategyMultiply") },
     { value: "same", label: t("review.cfg.strategySame") },
@@ -80,6 +93,21 @@
       onchange={(strategy) => void update({ strategy })}
     />
   </SettingRow>
+
+  {#if app.review.strategy === "fsrs"}
+    <SettingRow title={t("review.cfg.retention")} hint={t("review.cfg.retentionHint")}>
+      <input
+        type="number"
+        min="70"
+        max="97"
+        step="1"
+        value={retentionPercent()}
+        aria-label={t("review.cfg.retention")}
+        disabled={saving}
+        onchange={commitRetention}
+      />
+    </SettingRow>
+  {/if}
 
   {#if app.review.strategy === "multiply"}
     <SettingRow title={t("review.cfg.multiplier")} hint={t("review.cfg.multiplierHint")}>

@@ -109,8 +109,10 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "multiSelect", section: "navigation", context: "list", action: "shortcuts.action.multiSelect", keys: [{ click: "mod" }] },
 
   // Review session
-  { id: "reviewGood", section: "review", context: "review", action: "shortcuts.action.reviewGood", keys: ["2"] },
   { id: "reviewAgain", section: "review", context: "review", action: "shortcuts.action.reviewAgain", keys: ["1"] },
+  { id: "reviewHard", section: "review", context: "review", action: "shortcuts.action.reviewHard", keys: ["2"] },
+  { id: "reviewGood", section: "review", context: "review", action: "shortcuts.action.reviewGood", keys: ["3"] },
+  { id: "reviewEasy", section: "review", context: "review", action: "shortcuts.action.reviewEasy", keys: ["4"] },
   { id: "reviewSkip", section: "review", context: "review", action: "shortcuts.action.reviewSkip", keys: ["S"] },
   { id: "exitReview", section: "review", context: "review", action: "shortcuts.action.exitReview", keys: ["Esc"] },
 

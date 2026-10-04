@@ -140,6 +140,17 @@ pub struct SearchHit {
     pub snippet: Option<String>,
 }
 
+/// One saved version of a page's HTML, under `.herbarium/history/<id>/`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    /// When the snapshot was taken, in unix ms (also its filename stem).
+    pub at: i64,
+    /// Who made the change the snapshot preserved: `ui` or `agent`.
+    pub caller: String,
+    pub bytes: usize,
+}
+
 /// A page sitting in the vault trash.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

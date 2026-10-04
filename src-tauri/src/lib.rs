@@ -1,3 +1,4 @@
+pub mod cli;
 mod commands;
 mod config;
 mod editors;
@@ -11,6 +12,7 @@ use herbarium_core::Host;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Emitter, Manager};
+use tauri_plugin_deep_link::DeepLinkExt;
 
 pub use commands::AppState;
 
@@ -20,10 +22,38 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+/// Deep links that arrived before the frontend registered its listener
+/// (a URL the app was launched with). Owned from the `take_deep_links` command.
+#[derive(Default)]
+pub struct PendingDeepLinks(parking_lot::Mutex<Vec<cli::DeepLink>>);
+
+/// Hand the frontend the deep links received at cold start and clear them.
+#[tauri::command]
+fn take_deep_links(state: tauri::State<'_, PendingDeepLinks>) -> Vec<cli::DeepLink> {
+    std::mem::take(&mut *state.0.lock())
+}
+
+/// Raise the (possibly tray-hidden) main window. A second launch and a deep
+/// link both land here.
+fn focus_main<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.unminimize();
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut context = tauri::generate_context!();
-    let mut builder = tauri::Builder::default();
+    // Single-instance first, so a second launch is decided before any other
+    // plugin runs. A second launch forwards its arguments (which may be a deep
+    // link) and must raise the running window, not start another app.
+    let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            focus_main(app);
+        }))
+        .plugin(tauri_plugin_deep_link::init());
     if let Some(plugin) = updater::plugin(&mut context) {
         builder = builder.plugin(plugin);
     }
@@ -35,10 +65,49 @@ pub fn run() {
         .manage(AppState {
             host: Mutex::new(Host::new()),
         })
+        .manage(PendingDeepLinks::default())
         .setup(|app| {
             let win = navigation::build_main_window(app)?;
             // Window icon for platforms/WMs that read it from the window itself.
             let _ = win.set_icon(tauri::include_image!("icons/128x128.png"));
+
+            // Deep links: live URLs (a second launch forwarded by the
+            // single-instance plugin, or macOS `Opened`) arrive on the
+            // plugin's `deep-link://new-url`. A URL present at cold start was
+            // emitted before this listener existed, so hold it for the
+            // frontend to pick up instead.
+            let handle = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    if let Some(link) = cli::parse_deep_link(url.as_str()) {
+                        // A link can arrive while the window is hidden in the tray.
+                        focus_main(&handle);
+                        let _ = handle.emit(cli::DEEP_LINK_EVENT, link);
+                    }
+                }
+            });
+            let mut startup: Vec<cli::DeepLink> = std::env::args()
+                .filter_map(|a| cli::parse_deep_link(&a))
+                .collect();
+            if startup.is_empty()
+                && let Ok(Some(urls)) = app.deep_link().get_current()
+            {
+                startup = urls
+                    .iter()
+                    .filter_map(|u| cli::parse_deep_link(u.as_str()))
+                    .collect();
+            }
+            if !startup.is_empty() {
+                app.state::<PendingDeepLinks>().0.lock().extend(startup);
+            }
+            #[cfg(target_os = "linux")]
+            {
+                // An AppImage or a dev run is not installed, so the scheme is
+                // registered at runtime for the OS to route links here.
+                if app.env().appimage.is_some() || cfg!(debug_assertions) {
+                    let _ = app.deep_link().register_all();
+                }
+            }
 
             let open_item = MenuItem::with_id(app, "open", "Open Herbarium", true, None::<&str>)?;
             let review_item = MenuItem::with_id(app, "review", "Review today", true, None::<&str>)?;
@@ -91,6 +160,7 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol("herbarium", protocol::handle)
         .invoke_handler(tauri::generate_handler![
             quit_app,
+            take_deep_links,
             commands::get_config,
             commands::set_vault,
             commands::create_vault,
@@ -128,10 +198,7 @@ pub fn run_mcp(args: &[String]) -> Result<(), String> {
         }
         _ => return Err(MCP_USAGE.into()),
     };
-    let vault = vault
-        .or_else(|| std::env::var("HERBARIUM_VAULT").ok().filter(|v| !v.is_empty()))
-        .or(config::load()?.vault_path)
-        .ok_or("no vault: pass --vault <path>, set HERBARIUM_VAULT, or open a vault in the Herbarium app first")?;
+    let vault = cli::resolve_vault(vault)?;
 
     let mut host = Host::new();
     let report = host.open_vault(&vault)?;

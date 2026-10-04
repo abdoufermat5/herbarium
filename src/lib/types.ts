@@ -39,9 +39,35 @@ export interface TrashEntry extends PageMeta {
   deletedAt: number;
 }
 
+/** One saved version of a page's HTML (`.herbarium/history/<id>/`). */
+export interface HistoryEntry {
+  /** When the snapshot was taken, unix ms (its `at` key for get/restore). */
+  at: number;
+  /** Who made the change the snapshot preserved. */
+  caller: "ui" | "agent";
+  bytes: number;
+}
+
 export interface Page {
   meta: PageMeta;
   html: string;
+}
+
+/** Namespace of a page's saved state; `localStorage` uses `local`. */
+export type StorageArea = "local" | "personal" | "shared";
+
+/** One `storage.write` change; `value: null` deletes the key. */
+export interface StorageChange {
+  area: StorageArea;
+  key: string;
+  value: string | null;
+}
+
+/** The state an interactive page saved for itself, keyed by namespace. */
+export interface PageStorage {
+  local: Record<string, string>;
+  personal: Record<string, string>;
+  shared: Record<string, string>;
 }
 
 export interface TagCount {
@@ -90,7 +116,15 @@ export interface NetworkSettings {
   defaultAllowCdn: boolean;
 }
 
-export type ReviewGrade = "again" | "good";
+export type ReviewGrade = "again" | "hard" | "good" | "easy";
+
+/** Interval (minutes) each grade would schedule right now, from `review.preview`. */
+export interface ReviewPreview {
+  again: number;
+  hard: number;
+  good: number;
+  easy: number;
+}
 
 /** One completed review in `meta.ext.review.log`. */
 export interface ReviewLogEntry {
@@ -99,10 +133,14 @@ export interface ReviewLogEntry {
   intervalMinutes: number;
 }
 
-/** `meta.ext.review`: the last 100 reviews and the lifetime count. */
+/** `meta.ext.review`: the last 100 reviews and the lifetime count, plus the
+ *  FSRS memory state (`stability` in days, `difficulty` 1..10) when adaptive
+ *  scheduling has run. */
 export interface ReviewHistory {
   count: number;
   log: ReviewLogEntry[];
+  stability?: number | null;
+  difficulty?: number | null;
 }
 
 export interface ReviewDay {
@@ -138,7 +176,7 @@ export interface ImportResult {
 }
 
 /** How completing a review picks the next interval. */
-export type ReviewStrategy = "same" | "ladder" | "multiply";
+export type ReviewStrategy = "same" | "ladder" | "multiply" | "fsrs";
 
 /** Every duration is in minutes. */
 export interface ReviewSettings {
@@ -147,6 +185,8 @@ export interface ReviewSettings {
   strategy: ReviewStrategy;
   multiplier: number;
   maxIntervalMinutes: number;
+  /** Target recall probability for the `fsrs` strategy (0.70..=0.97). */
+  desiredRetention: number;
   /** Schedule imports for review this many minutes out; null = don't. */
   importReviewMinutes: number | null;
   /** Cap on the review queue; null = show everything due. */

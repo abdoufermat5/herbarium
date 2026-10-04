@@ -2,7 +2,8 @@
   import { onMount, tick } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, toast, errorMessage } from "./lib/state.svelte";
+  import { invoke } from "@tauri-apps/api/core";
+  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage } from "./lib/state.svelte";
   import { navigate } from "./lib/navigation.svelte";
   import { folderPickerState } from "./lib/folder-picker.svelte";
   import { api } from "./lib/api";
@@ -180,6 +181,58 @@
     });
   });
 
+  // Deep links (`herbarium-app://`): the backend emits `deep-link` with
+  // {kind:"open", id} or {kind:"review"}. Live links arrive while the window
+  // runs; links the app was launched with are drained on mount. Both wait for
+  // the vault to finish loading and go through the existing leave guards.
+  interface DeepLinkPayload {
+    kind: "open" | "review";
+    id?: string;
+  }
+
+  const deepLinkQueue: DeepLinkPayload[] = [];
+  let deepLinksReady = false;
+  let deepLinkDraining = false;
+
+  async function handleDeepLink(link: DeepLinkPayload) {
+    if (!app.config?.vaultPath) return;
+    if (link.kind === "review") {
+      await goView("review");
+      return;
+    }
+    const id = link.id;
+    if (!id) return;
+    const known = () =>
+      app.library.some((p) => p.id === id) || app.pages.some((p) => p.id === id);
+    // The page may have just been added on disk by `herbarium add`.
+    if (!known()) await reloadPages(true);
+    if (known()) await openPage(id);
+    else toast(t("deepLink.notFound"), "error");
+  }
+
+  async function drainDeepLinks() {
+    if (!deepLinksReady || deepLinkDraining) return;
+    deepLinkDraining = true;
+    try {
+      while (deepLinkQueue.length > 0) await handleDeepLink(deepLinkQueue.shift()!);
+    } finally {
+      deepLinkDraining = false;
+    }
+  }
+
+  function queueDeepLink(link: DeepLinkPayload) {
+    deepLinkQueue.push(link);
+    void drainDeepLinks();
+  }
+
+  // Only act once the library is loaded; anything queued before then is kept.
+  $effect(() => {
+    if (app.initialized && !deepLinksReady) {
+      deepLinksReady = true;
+      void drainDeepLinks();
+    }
+  });
+
   // Native close and tray quit both use the same serialized leave guards as
   // navigation. The backend never hides the window ahead of a draft prompt.
   let closing = false;
@@ -228,6 +281,16 @@
         void goView("review");
       }),
     );
+
+    // Deep links from the backend, and any the app was launched with (the
+    // matching event fired before this listener existed, so ask for them).
+    keep(listen<DeepLinkPayload>("deep-link", (event) => queueDeepLink(event.payload)));
+    void invoke<DeepLinkPayload[]>("take_deep_links")
+      .then((links) => {
+        if (disposed) return;
+        for (const link of links) queueDeepLink(link);
+      })
+      .catch((e) => console.error(e));
 
     return () => {
       disposed = true;

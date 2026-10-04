@@ -6,6 +6,7 @@ import type {
   BulkUpdateResult,
   Config,
   EditorInfo,
+  HistoryEntry,
   ImportFile,
   ImportResult,
   IndexReport,
@@ -13,10 +14,13 @@ import type {
   NetworkSettings,
   Page,
   PageMeta,
+  PageStorage,
   ReviewGrade,
+  ReviewPreview,
   ReviewSettings,
   ReviewStats,
   SearchHit,
+  StorageChange,
   TagCount,
   TrashEntry,
   UpdateInfo,
@@ -89,9 +93,15 @@ export const api = {
     return op("review.clear", { id });
   },
 
-  /** Record a review (`good` follows the vault strategy, `again` restarts the ladder). */
+  /** Record a review. Under FSRS `hard`/`good`/`easy` follow the memory model;
+   *  `again` restarts at the first preset. `review.preview` shows the intervals. */
   completeReview(id: string, grade: ReviewGrade = "good"): Promise<PageMeta> {
     return op("review.complete", { id, grade });
+  },
+
+  /** Interval in minutes each grade would schedule right now; no writes. */
+  previewReview(id: string): Promise<ReviewPreview> {
+    return op("review.preview", { id });
   },
 
   reviewSettings(): Promise<ReviewSettings> {
@@ -142,6 +152,21 @@ export const api = {
     return op("pages.purge", { id });
   },
 
+  /** Saved HTML versions for a page, newest first. */
+  listHistory(id: string): Promise<HistoryEntry[]> {
+    return op("history.list", { id });
+  },
+
+  /** One saved version's HTML. */
+  getHistory(id: string, at: number): Promise<{ html: string }> {
+    return op("history.get", { id, at });
+  },
+
+  /** Restore a saved version; `expectedUpdatedAt` rejects a stale overwrite with `conflict:`. */
+  restoreHistory(id: string, at: number, expectedUpdatedAt?: number): Promise<PageMeta> {
+    return op("history.restore", { id, at, expectedUpdatedAt });
+  },
+
   duplicatePage(id: string): Promise<PageMeta> {
     return op("pages.duplicate", { id });
   },
@@ -174,6 +199,21 @@ export const api = {
   /** `baseUpdatedAt` makes a stale write fail with a `conflict:` error. */
   setPageHtml(id: string, html: string, baseUpdatedAt?: number): Promise<PageMeta> {
     return op("pages.set_html", { id, html, baseUpdatedAt });
+  },
+
+  /** The state an interactive page saved for itself (`localStorage`/`window.storage`). */
+  getStorage(id: string): Promise<PageStorage> {
+    return op("storage.get", { id });
+  },
+
+  /** Apply page-state changes atomically; resolves to the page's new state. */
+  writeStorage(id: string, changes: StorageChange[]): Promise<PageStorage> {
+    return op("storage.write", { id, changes });
+  },
+
+  /** Erase everything an interactive page saved for itself. */
+  clearStorage(id: string): Promise<PageStorage> {
+    return op("storage.clear", { id });
   },
 
   createFolder(path: string): Promise<string> {

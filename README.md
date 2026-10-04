@@ -20,19 +20,19 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 
 ## Features
 
-- **Import** by drag and drop, file picker or paste.
+- **Import** by drag and drop, file picker, paste, or `herbarium add <file|-|url>` from a terminal.
 - **Search** titles, tags, notes and page text.
 - **Organize** with folders, tags and notes; move or edit many pages at once.
-- **Read** each page in a sandboxed viewer, scripts included.
-- **Edit** the HTML in the app or in your own editor.
-- **Review** pages on a schedule you choose, with reminders and a keyboard-driven review session.
+- **Read** each page in a sandboxed viewer, scripts included. Pages that save progress with `localStorage` or `window.storage` keep it between visits.
+- **Edit** the HTML in the app or in your own editor. Every in-app or agent edit keeps the previous version, which you can compare and restore.
+- **Review** pages with adaptive scheduling (FSRS): grade each review Again, Hard, Good or Easy and pick the retention you want, with reminders and a keyboard-driven review session.
 - **Trash** with restore and undo.
 - **Command palette** (`Ctrl/⌘ K`); press `?` for all shortcuts.
 - Light and dark themes, English and French.
 
 ## Your vault
 
-A vault is an ordinary folder. Each page is an `.html` file with a `.json` file next to it for its title, tags, note and review dates. Folders are real directories. Back it up, sync it or edit it with any tool; Herbarium picks up changes when you come back to the window.
+A vault is an ordinary folder. Each page is an `.html` file with a `.json` file next to it for its title, tags, note, review dates and saved page state. Folders are real directories; earlier versions of edited pages are kept in `.herbarium/history/`. Back it up, sync it or edit it with any tool; Herbarium picks up changes when you come back to the window.
 
 ## Safety
 
@@ -49,6 +49,8 @@ claude mcp add herbarium -- herbarium mcp
 ```
 
 Then ask, for example, *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. It uses the vault last opened in the app (or `--vault <path>`).
+
+Pages open from links like `herbarium-app://open/<page-id>`, which `herbarium add` prints and agents can hand you.
 
 ## Development
 
@@ -72,6 +74,8 @@ git push --follow-tags
 ```
 
 The tag builds every platform and publishes the release. In-app updates need the signing key pair on the repository: the `HERBARIUM_UPDATER_PUBLIC_KEY` variable and the `TAURI_SIGNING_PRIVATE_KEY` secret (create them with `pnpm tauri signer generate`).
+
+Optional channels — Windows code signing, Homebrew, WinGet, AUR and Flatpak — and the repository secrets that turn them on are documented in [`docs/distribution.md`](docs/distribution.md).
 
 ## License
 

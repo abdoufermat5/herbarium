@@ -443,7 +443,8 @@ fn review_settings_persist_validate_and_drive_completion_and_the_queue() {
         .call(Caller::Agent, "review.settings", json!({}))
         .unwrap();
     assert_eq!(defaults["presets"], json!([1440, 4320, 10080, 43200]));
-    assert_eq!(defaults["strategy"], "ladder");
+    assert_eq!(defaults["strategy"], "fsrs");
+    assert_eq!(defaults["desiredRetention"].as_f64().unwrap(), 0.9);
     assert!(
         !host
             .operations(Caller::Agent)
@@ -467,7 +468,7 @@ fn review_settings_persist_validate_and_drive_completion_and_the_queue() {
     host.call(
         Caller::Ui,
         "review.configure",
-        json!({ "presets": [5, 2, 2, 10], "queueLimit": 1 }),
+        json!({ "presets": [5, 2, 2, 10], "queueLimit": 1, "strategy": "ladder" }),
     )
     .unwrap();
     let page = create(&host, json!({ "html": DOC }));

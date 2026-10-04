@@ -249,6 +249,65 @@ pub fn inject_base_tag(html: &str, base_href: &str) -> String {
     format!("{base_tag}\n{html}")
 }
 
+/// Escape a JSON document for embedding inside an inline `<script>`. Only `<`
+/// can end the script early; U+2028/U+2029 are valid JSON but illegal in
+/// JavaScript source, so all three become `\uXXXX` escapes.
+fn escape_script_json(json: &str) -> String {
+    json.replace('<', "\\u003c")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+/// The state a page may read, normalised to `{local, personal, shared}` string
+/// maps. Unknown areas and non-string values are dropped.
+fn storage_state_json(storage: Option<&serde_json::Value>) -> String {
+    let mut out = serde_json::Map::new();
+    for area in ["local", "personal", "shared"] {
+        let mut map = serde_json::Map::new();
+        if let Some(entries) = storage
+            .and_then(|v| v.get(area))
+            .and_then(|v| v.as_object())
+        {
+            for (key, value) in entries {
+                if let Some(value) = value.as_str() {
+                    map.insert(key.clone(), serde_json::Value::String(value.to_string()));
+                }
+            }
+        }
+        out.insert(area.to_string(), serde_json::Value::Object(map));
+    }
+    serde_json::to_string(&serde_json::Value::Object(out)).unwrap_or_else(|_| "{}".into())
+}
+
+/// Client-side shim injected into every served page, right after the base tag
+/// and before any page script. It exposes a Storage-compatible `localStorage`,
+/// a memory-only `sessionStorage`, and the Claude-artifact `window.storage`
+/// API, backed by the state embedded in `window.__herbariumState`. Writes are
+/// coalesced per microtask and posted to the reader, which owns the page id
+/// and persists them into the sidecar.
+const SHIM_JS: &str = include_str!("storage_shim.js");
+
+/// Inject the storage shim immediately after the base tag. `state_json` is the
+/// normalised page state (see [`storage_state_json`]).
+fn inject_storage_shim(html: &str, state_json: &str) -> String {
+    let script = format!(
+        "<script>window.__herbariumState={};window.__herbariumPersist=true;{SHIM_JS}</script>",
+        escape_script_json(state_json)
+    );
+    if let Some(base_at) = html.find("<base ")
+        && let Some(rel) = html[base_at..].find('>')
+    {
+        let at = base_at + rel + 1;
+        let mut out = String::with_capacity(html.len() + script.len() + 1);
+        out.push_str(&html[..at]);
+        out.push('\n');
+        out.push_str(&script);
+        out.push_str(&html[at..]);
+        return out;
+    }
+    format!("{script}\n{html}")
+}
+
 fn percent_encode_segment(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, FRAGMENT).to_string()
 }
@@ -278,12 +337,17 @@ fn serve<R: tauri::Runtime>(
             return not_found();
         };
         match store.get_meta(&parsed.page_id) {
-            Ok(Some(meta)) => Some((store.vault.clone(), meta.folder.clone(), meta.allow_cdn)),
+            Ok(Some(meta)) => Some((
+                store.vault.clone(),
+                meta.folder.clone(),
+                meta.allow_cdn,
+                meta.ext.get("storage").cloned(),
+            )),
             Ok(None) => None,
             Err(_) => return not_found(),
         }
     }; // host lock dropped HERE, before disk I/O!
-    let (vault, folder, allow_cdn) = match lookup_result {
+    let (vault, folder, allow_cdn, storage) = match lookup_result {
         Some(info) => info,
         None => return not_found(),
     };
@@ -335,6 +399,7 @@ fn serve<R: tauri::Runtime>(
             )
         };
         let html = inject_base_tag(&raw_html, &base_href);
+        let html = inject_storage_shim(&html, &storage_state_json(storage.as_ref()));
 
         let csp = if allow_cdn { CSP_ALLOW } else { CSP_BLOCK };
 
@@ -511,6 +576,63 @@ mod tests {
         let html_no_head = "<div>Snippet</div>";
         let injected_no_head = inject_base_tag(html_no_head, "herbarium://page/my-page/");
         assert!(injected_no_head.starts_with("<base href=\"herbarium://page/my-page/\">"));
+    }
+
+    #[test]
+    fn storage_shim_runs_after_the_base_tag() {
+        let html = inject_base_tag(
+            "<html><head><title>t</title></head><body>x</body></html>",
+            "herbarium://page/p/",
+        );
+        let out = inject_storage_shim(&html, r#"{"local":{},"personal":{},"shared":{}}"#);
+        let base_at = out.find("<base ").expect("base tag");
+        let script_at = out
+            .find("<script>window.__herbariumState=")
+            .expect("shim script");
+        assert!(
+            base_at < script_at,
+            "the shim must come after the base tag, before page scripts"
+        );
+        assert!(out.contains("window.__herbariumPersist=true"));
+    }
+
+    #[test]
+    fn storage_shim_escapes_script_breaks_and_line_separators() {
+        let state = "{\"local\":{\"a\":\"</script><img>\",\"b\":\"x\u{2028}y\u{2029}z\"},\"personal\":{},\"shared\":{}}";
+        let out = inject_storage_shim("<base href=\"herbarium://page/p/\">", state);
+        assert!(!out.contains("</script><img>"), "raw `<` must be escaped");
+        assert!(out.contains("\\u003c/script>"));
+        assert!(!out.contains('\u{2028}'));
+        assert!(!out.contains('\u{2029}'));
+        assert!(out.contains("\\u2028"));
+        assert!(out.contains("\\u2029"));
+        // The document still ends with our own closing script tag.
+        assert!(out.trim_end().ends_with("</script>"));
+    }
+
+    #[test]
+    fn storage_state_json_keeps_only_string_maps_in_known_areas() {
+        let ext = serde_json::json!({
+            "local": { "a": "1", "n": 2 },
+            "personal": {},
+            "shared": { "c": "3" },
+            "other": { "x": "y" }
+        });
+        let parsed: serde_json::Value =
+            serde_json::from_str(&storage_state_json(Some(&ext))).unwrap();
+        assert_eq!(parsed["local"]["a"], "1");
+        assert!(
+            parsed["local"].get("n").is_none(),
+            "non-strings are dropped"
+        );
+        assert_eq!(parsed["shared"]["c"], "3");
+        assert!(parsed.get("other").is_none());
+
+        let empty: serde_json::Value = serde_json::from_str(&storage_state_json(None)).unwrap();
+        assert_eq!(
+            empty,
+            serde_json::json!({ "local": {}, "personal": {}, "shared": {} })
+        );
     }
 
     #[test]
