@@ -181,7 +181,7 @@ Missing nothing: Flatpak publishing does not depend on a repository secret.
 
 ## Cutting a release
 
-`docs/0.2-design.md` and the main README describe the normal flow:
+The main README describes the normal flow:
 
 ```bash
 pnpm release patch   # or minor | major | x.y.z
