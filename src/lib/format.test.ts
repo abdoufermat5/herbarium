@@ -55,6 +55,15 @@ describe("fmtDurationShort", () => {
     expect(fmtDurationShort(1440)).toBe("1d");
     expect(fmtDurationShort(2880)).toBe("2d");
   });
+
+  it("rounds computed intervals of a day or more to whole days", () => {
+    expect(fmtDurationShort(1862)).toBe("1d");
+    expect(fmtDurationShort(3321)).toBe("2d");
+    expect(fmtDurationShort(11946)).toBe("8d");
+    expect(fmtDuration(1862)).toBe("1 day");
+    // Below a day nothing is rounded: a 90-minute preset stays exact.
+    expect(fmtDurationShort(90)).toBe("90m");
+  });
 });
 
 describe("plural", () => {

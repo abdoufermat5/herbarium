@@ -14,6 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Removed
 - Homebrew and AUR publishing jobs and their templates.
 
+### Fixed
+- Intervals set by adaptive review show in whole days ("2d", "2 days") on the grade buttons, in toasts and in review history, instead of raw minutes such as "3321m".
+- The "unchanged lines" bar in the page-history diff follows the theme instead of staying white in dark mode.
+
 ## [0.2.0] - 2026-10-04
 
 ### Added

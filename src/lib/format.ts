@@ -70,15 +70,24 @@ export function splitDuration(minutes: number): { n: number; unit: DurationUnit 
   return { n: minutes, unit: "minute" };
 }
 
+/** What to display for a duration: the exact unit when one divides it, and
+ * otherwise (intervals computed by adaptive review, e.g. 1862 minutes) whole
+ * days from one day up. Editing still uses `splitDuration`, which never rounds. */
+function displayDuration(minutes: number): { n: number; unit: DurationUnit } {
+  const exact = splitDuration(minutes);
+  if (exact.unit !== "minute" || minutes < UNIT_MINUTES.day) return exact;
+  return { n: Math.round(minutes / UNIT_MINUTES.day), unit: "day" };
+}
+
 /** "30 minutes", "2 hours", "3 days". */
 export function fmtDuration(minutes: number): string {
-  const { n, unit } = splitDuration(minutes);
+  const { n, unit } = displayDuration(minutes);
   return plural(n, unit);
 }
 
 /** Compact form for buttons: "30m", "2h", "3d". */
 export function fmtDurationShort(minutes: number): string {
-  const { n, unit } = splitDuration(minutes);
+  const { n, unit } = displayDuration(minutes);
   return t(`duration.short.${unit}`, { n });
 }
 

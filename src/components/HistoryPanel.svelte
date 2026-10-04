@@ -70,6 +70,11 @@
       color: "var(--muted)",
       border: "none",
     },
+    // @codemirror/merge paints this bar with a hard-coded light gradient.
+    ".cm-collapsedLines": {
+      background: "var(--raised)",
+      color: "var(--muted)",
+    },
   });
 
   function side(doc: string) {
