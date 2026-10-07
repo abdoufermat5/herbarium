@@ -45,6 +45,11 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   the Claude-artifact `window.storage` API (async `get`/`set`/`delete`/`list`, \
   with an optional `shared` flag) are persisted per page in the vault, capped \
   at 1 MiB per page. Use them for progress, preferences and small saved inputs.
+- Make pages reviewable: mark the answer to a recall question with the \
+  `data-herbarium-recall` attribute, optionally holding the question, e.g. \
+  `<p data-herbarium-recall=\"What does Cargo.lock pin?\">Exact versions…</p>`. \
+  During review sessions (or when the user turns on \"Quiz me\") those elements \
+  are hidden until the user reveals them; mark answers, not whole sections.
 - Pass `source` to pages_create: `tool` (what you are, e.g. \"Claude Code\"), \
   `prompt` (the user's request, briefly) and `url` when the page came from the \
   web. The user sees it with the page and can search it.

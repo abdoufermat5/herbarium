@@ -437,6 +437,11 @@
   let source = $state("");
   let savingSource = $state(false);
   let previewNonce = $state(0);
+
+  /** Answers the page marks with `data-herbarium-recall`, hidden in quiz mode. */
+  const recallCount = $derived(page ? (page.html.match(/\bdata-herbarium-recall\b/gi) ?? []).length : 0);
+  /** Quiz mode hides those answers until revealed; review sessions start in it. */
+  let quizMode = $state(app.reviewSession);
   let openingExternal = $state(false);
   /** Set after the file was handed to another editor: reload it when we regain focus. */
   let externalPending = false;
@@ -1013,6 +1018,18 @@
             {t("read.resetStorage")}
           </button>
         {/if}
+        {#if recallCount > 0}
+          <button
+            class="btn btn-sm details-btn"
+            class:active={quizMode}
+            aria-pressed={quizMode}
+            onclick={() => (quizMode = !quizMode)}
+            title={t("read.quizHint", { count: recallCount })}
+          >
+            <Icon name="circle-check" size={14} />
+            {t("read.quiz")}
+          </button>
+        {/if}
         <button
           class="btn btn-sm details-btn"
           class:active={app.historyOpen}
@@ -1251,7 +1268,7 @@
           <iframe
             class:ready={frameReady}
             title={t("read.preview")}
-            src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
+            src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}${quizMode && recallCount > 0 ? "&recall=1" : ""}`}
             sandbox="allow-scripts allow-popups"
             onload={markReady}
             bind:this={servedFrame}

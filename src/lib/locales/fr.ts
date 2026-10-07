@@ -438,6 +438,8 @@ export const fr: Record<MessageKey, string> = {
   "read.reviewCleared": "Révision effacée.",
   "read.clearFailed": "Impossible d'effacer la révision.",
   "read.scheduleFailed": "Impossible de planifier la révision.",
+  "read.quiz": "M'interroger",
+  "read.quizHint": "Masquer les {count} réponses marquées de cette page jusqu'à ce que vous les affichiez",
   "read.historyHint": "Versions enregistrées de cette page",
   "history.title": "Historique de la page",
   "history.loading": "Chargement des versions…",

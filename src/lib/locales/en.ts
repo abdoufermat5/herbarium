@@ -437,6 +437,8 @@ export const en = {
   "read.reviewCleared": "Review cleared.",
   "read.clearFailed": "Couldn't clear the review.",
   "read.scheduleFailed": "Couldn't schedule the review.",
+  "read.quiz": "Quiz me",
+  "read.quizHint": "Hide this page's {count} marked answers until you reveal them",
   "read.historyHint": "Saved versions of this page",
   "history.title": "Page history",
   "history.loading": "Loading versions…",
