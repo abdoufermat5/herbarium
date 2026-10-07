@@ -291,6 +291,10 @@ const SHIM_JS: &str = include_str!("storage_shim.js");
 /// after the storage shim when the page URL carries `recall=1`.
 const RECALL_JS: &str = include_str!("recall.js");
 
+/// Lets the reader list the page's headings, jump to one and set the zoom.
+/// Injected into every served page, after the storage shim.
+const BRIDGE_JS: &str = include_str!("reader_bridge.js");
+
 /// True when the request asks for recall mode (`?recall=1`).
 fn wants_recall(uri: &Uri) -> bool {
     uri.query()
@@ -307,7 +311,7 @@ fn inject_storage_shim(html: &str, state_json: &str, recall: bool) -> String {
         String::new()
     };
     let script = format!(
-        "<script>window.__herbariumState={};window.__herbariumPersist=true;{SHIM_JS}</script>{recall_script}",
+        "<script>window.__herbariumState={};window.__herbariumPersist=true;{SHIM_JS}</script><script>{BRIDGE_JS}</script>{recall_script}",
         escape_script_json(state_json)
     );
     if let Some(base_at) = html.find("<base ")
@@ -633,6 +637,11 @@ mod tests {
         assert!(
             !RECALL_JS.contains("</script"),
             "the script cannot close its own tag"
+        );
+        assert!(!BRIDGE_JS.contains("</script"));
+        assert!(
+            plain.contains("herbarium:headings"),
+            "the bridge is always injected"
         );
 
         let uri = |s: &str| s.parse::<Uri>().unwrap();

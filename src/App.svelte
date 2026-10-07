@@ -336,8 +336,8 @@
 {:else if !app.config?.vaultPath}
   <Onboarding />
 {:else}
-  <div class="shell" class:collapsed={!app.sidebarOpen}>
-    {#if app.sidebarOpen}<Sidebar />{/if}
+  <div class="shell" class:collapsed={!app.sidebarOpen || (app.focusMode && !!app.readId)}>
+    {#if app.sidebarOpen && !(app.focusMode && app.readId)}<Sidebar />{/if}
     <main class="main">
       {#if app.readId}
         {#key app.readId}

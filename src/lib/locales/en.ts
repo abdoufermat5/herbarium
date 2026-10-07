@@ -794,6 +794,19 @@ export const en = {
   "review.cfg.excludeTags": "Skip tags",
   "review.cfg.excludeTagsHint": "Same, for pages carrying any of these tags.",
   "review.cfg.excludeTagsPlaceholder": "someday, reference",
+  "read.view.label": "View",
+  "read.view.hint": "Contents, zoom and focus mode",
+  "read.view.focus": "Focus mode",
+  "read.view.exitFocus": "Leave focus mode",
+  "read.view.zoom": "Zoom · {percent}%",
+  "read.view.zoomIn": "Zoom in",
+  "read.view.zoomOut": "Zoom out",
+  "read.view.zoomReset": "Actual size",
+  "read.view.contents": "Contents",
+  "shortcuts.action.focusMode": "Focus mode on or off",
+  "shortcuts.action.zoomIn": "Zoom the page in",
+  "shortcuts.action.zoomOut": "Zoom the page out",
+  "shortcuts.action.zoomReset": "Reset the page zoom",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -89,6 +89,8 @@ interface AppState {
   /** The reader's proposal panel (review an agent's edit) is open. */
   proposalOpen: boolean;
   savedSearches: SavedSearch[];
+  /** The reader hides the sidebar, details and review bar. */
+  focusMode: boolean;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -170,6 +172,7 @@ export const app: AppState = $state({
   proposals: [],
   proposalOpen: false,
   savedSearches: [],
+  focusMode: false,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -457,6 +460,7 @@ export function resetWorkspace() {
   app.proposals = [];
   app.proposalOpen = false;
   app.savedSearches = [];
+  app.focusMode = false;
   knownProposals = null;
   app.createRequest = null;
   app.loadError = null;

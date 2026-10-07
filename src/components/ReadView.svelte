@@ -25,7 +25,8 @@
   import HtmlEditor from "./HtmlEditor.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import ProposalPanel from "./ProposalPanel.svelte";
-  import { prefs } from "../lib/prefs.svelte";
+  import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
+  import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
   // Single source of truth for the page storage shim, shared with the Rust
   // reader via `include_str!` in `src-tauri/src/protocol.rs`.
@@ -243,7 +244,11 @@
     const p = page;
     const frame = servedFrame;
     if (!p || !frame || event.source !== frame.contentWindow) return;
-    const data = event.data as { type?: unknown; changes?: unknown } | null;
+    const data = event.data as { type?: unknown; changes?: unknown; items?: unknown } | null;
+    if (data?.type === "herbarium:headings") {
+      toc = sanitizeHeadings(data.items);
+      return;
+    }
     if (!data || data.type !== "herbarium:storage") return;
     const changes = sanitizeChanges(data.changes);
     if (changes.length > 0) enqueueStorage(p.meta.id, changes);
@@ -362,6 +367,106 @@
   function markReady() {
     clearTimeout(frameTimer);
     frameReady = true;
+    sendToFrame({ type: "herbarium:zoom", zoom: prefs.readerZoom });
+  }
+
+  /* --------------------------------------------- contents, zoom, focus mode */
+
+  interface Heading {
+    level: number;
+    text: string;
+    index: number;
+  }
+
+  /** Headings the page reported through the reader bridge. */
+  let toc = $state<Heading[]>([]);
+
+  /** The page controls what it reports: keep only well-formed, bounded entries. */
+  function sanitizeHeadings(items: unknown): Heading[] {
+    if (!Array.isArray(items)) return [];
+    const out: Heading[] = [];
+    for (const item of items.slice(0, 200)) {
+      const h = item as Partial<Heading> | null;
+      if (
+        h &&
+        typeof h.text === "string" &&
+        typeof h.index === "number" &&
+        Number.isInteger(h.index) &&
+        (h.level === 1 || h.level === 2 || h.level === 3)
+      ) {
+        out.push({ level: h.level, text: h.text.slice(0, 120), index: h.index });
+      }
+    }
+    return out;
+  }
+
+  function sendToFrame(message: Record<string, unknown>) {
+    // The frame's origin is opaque (sandboxed), so "*" is the only target.
+    servedFrame?.contentWindow?.postMessage(message, "*");
+  }
+
+  function setZoom(zoom: number) {
+    setPref("readerZoom", zoom);
+    sendToFrame({ type: "herbarium:zoom", zoom });
+  }
+
+  function stepZoom(dir: 1 | -1) {
+    const i = READER_ZOOMS.indexOf(prefs.readerZoom);
+    const next = READER_ZOOMS[Math.min(READER_ZOOMS.length - 1, Math.max(0, (i < 0 ? 4 : i) + dir))];
+    setZoom(next);
+  }
+
+  const viewItems = $derived.by((): DropdownMenuItem[] => {
+    const items: DropdownMenuItem[] = [
+      {
+        label: app.focusMode ? t("read.view.exitFocus") : t("read.view.focus"),
+        checked: app.focusMode,
+        shortcut: "F",
+        onclick: () => (app.focusMode = !app.focusMode),
+      },
+      { divider: true },
+      { header: true, label: t("read.view.zoom", { percent: Math.round(prefs.readerZoom * 100) }) },
+      { label: t("read.view.zoomIn"), shortcut: `${modKey("=")}`, onclick: () => stepZoom(1) },
+      { label: t("read.view.zoomOut"), shortcut: `${modKey("-")}`, onclick: () => stepZoom(-1) },
+      { label: t("read.view.zoomReset"), shortcut: `${modKey("0")}`, onclick: () => setZoom(1) },
+    ];
+    if (toc.length > 0) {
+      items.push({ divider: true }, { header: true, label: t("read.view.contents") });
+      for (const h of toc) {
+        items.push({
+          label: `${"\u2003".repeat(h.level - 1)}${h.text}`,
+          onclick: () => sendToFrame({ type: "herbarium:goto", index: h.index }),
+        });
+      }
+    }
+    return items;
+  });
+
+  function onViewKey(e: KeyboardEvent) {
+    if (!page || confirmState.pending || folderPickerState.pending || app.paletteOpen || app.importOpen) return;
+    if (isTypingTarget(e.target) || e.altKey || e.repeat) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "=" || e.key === "+")) {
+      e.preventDefault();
+      e.stopPropagation();
+      stepZoom(1);
+    } else if (mod && e.key === "-") {
+      e.preventDefault();
+      e.stopPropagation();
+      stepZoom(-1);
+    } else if (mod && e.key === "0") {
+      e.preventDefault();
+      e.stopPropagation();
+      setZoom(1);
+    } else if (!mod && !e.shiftKey && (e.key === "f" || e.key === "F") && !app.reviewSession) {
+      e.preventDefault();
+      e.stopPropagation();
+      app.focusMode = !app.focusMode;
+    } else if (!mod && e.key === "Escape" && app.focusMode && !app.historyOpen && !app.proposalOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      app.focusMode = false;
+    }
   }
 
   async function toggleNetwork() {
@@ -953,6 +1058,7 @@
     app.historyOpen = false;
     window.addEventListener("focus", onFocus);
     window.addEventListener("keydown", onSessionKey, true);
+    window.addEventListener("keydown", onViewKey, true);
     window.addEventListener("message", onStorageMessage);
     window.addEventListener("pagehide", onPageHide);
     // Nothing leaves this page (navigation, close, delete) without flushing the
@@ -965,6 +1071,7 @@
     return () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("keydown", onSessionKey, true);
+      window.removeEventListener("keydown", onViewKey, true);
       window.removeEventListener("message", onStorageMessage);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -1005,6 +1112,21 @@
       </div>
 
       <div class="actions">
+        <DropdownMenu items={viewItems} align="right" ariaLabel={t("read.view.label")}>
+          {#snippet trigger({ open, toggle })}
+            <button
+              class="btn btn-sm details-btn"
+              class:active={open || app.focusMode}
+              aria-expanded={open}
+              aria-haspopup="menu"
+              onclick={toggle}
+              title={t("read.view.hint")}
+            >
+              <Icon name="layout-grid" size={14} />
+              {t("read.view.label")}
+            </button>
+          {/snippet}
+        </DropdownMenu>
         <button
           class="btn btn-sm details-btn"
           class:active={editing}
@@ -1186,7 +1308,7 @@
           <span class="spinner" role="status" aria-label={t("read.saving")}></span>
         {/if}
       </div>
-    {:else}
+    {:else if !app.focusMode}
       <div class="review-bar">
         {#if page.meta.nextReview}
           <button class="btn btn-xs btn-primary done" onclick={() => grade("good")} disabled={saving}>
@@ -1307,7 +1429,7 @@
         {/if}
       </div>
 
-      {#if app.inspectorOpen}
+      {#if app.inspectorOpen && !app.focusMode}
         <aside class="inspector" aria-label={t("insp.label")}>
           <section class="insp-section">
             <h2 class="eyebrow">{t("read.details")}</h2>
