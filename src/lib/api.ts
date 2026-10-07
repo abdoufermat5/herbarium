@@ -15,6 +15,8 @@ import type {
   Appearance,
   PageGraph,
   PreviewDigest,
+  Highlight,
+  HighlightColor,
   LabelColor,
   ReadingPath,
   ProposalSummary,
@@ -232,6 +234,25 @@ export const api = {
   /** Linked pages and their links; `all` includes pages without links. */
   pageGraph(all = false): Promise<PageGraph> {
     return op("pages.graph", { all });
+  },
+
+  addHighlight(
+    page: string,
+    h: { quote: string; prefix: string; suffix: string; color: HighlightColor; note?: string },
+  ): Promise<{ page: PageMeta; highlights: Highlight[]; highlight: Highlight }> {
+    return op("highlights.add", { page, ...h });
+  },
+
+  updateHighlight(
+    page: string,
+    id: string,
+    patch: { color?: HighlightColor; note?: string },
+  ): Promise<{ page: PageMeta; highlights: Highlight[] }> {
+    return op("highlights.update", { page, id, ...patch });
+  },
+
+  removeHighlight(page: string, id: string): Promise<{ page: PageMeta; highlights: Highlight[] }> {
+    return op("highlights.remove", { page, id });
   },
 
   /** Current previews by page id, and the pages that need one. */

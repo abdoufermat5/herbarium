@@ -1088,3 +1088,88 @@ fn created_at_import_key_and_find_by_url() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn highlights_with_notes_are_kept_and_searchable() {
+    let vault = temp_vault("highlights");
+    let host = open(&vault);
+    let page = create(&host, "Ferns", None, &[]);
+    let id = page["id"].as_str().unwrap();
+
+    let added = host
+        .call(Caller::Ui, "pages.create", json!({ "html": doc("Other") }))
+        .unwrap();
+    assert!(added["id"].is_string());
+
+    let out = host
+        .call(
+            Caller::Ui,
+            "highlights.add",
+            json!({ "page": id, "quote": " Ferns content ", "prefix": "x".repeat(200), "suffix": "", "note": "spores, not seeds" }),
+        )
+        .unwrap();
+    let hid = out["highlight"]["id"].as_str().unwrap().to_string();
+    assert_eq!(out["highlight"]["quote"], "Ferns content");
+    assert_eq!(out["highlight"]["color"], "yellow");
+    assert_eq!(
+        out["highlight"]["prefix"].as_str().unwrap().len(),
+        64,
+        "context is clipped"
+    );
+    assert_eq!(out["page"]["ext"]["highlights"][0]["id"], hid.as_str());
+
+    let hits = host
+        .call(Caller::Agent, "pages.search", json!({ "query": "spores" }))
+        .unwrap();
+    assert_eq!(hits[0]["id"], id, "notes are searchable");
+
+    let updated = host
+        .call(
+            Caller::Ui,
+            "highlights.update",
+            json!({ "page": id, "id": hid, "color": "green", "note": "  sporangia  " }),
+        )
+        .unwrap();
+    assert_eq!(updated["highlights"][0]["color"], "green");
+    assert_eq!(updated["highlights"][0]["note"], "sporangia");
+    assert!(
+        host.call(
+            Caller::Ui,
+            "highlights.update",
+            json!({ "page": id, "id": hid, "color": "red" })
+        )
+        .is_err()
+    );
+
+    let listed = host
+        .call(Caller::Agent, "highlights.list", json!({ "page": id }))
+        .unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert!(
+        host.call(
+            Caller::Agent,
+            "highlights.add",
+            json!({ "page": id, "quote": "x" })
+        )
+        .is_err(),
+        "only the user highlights"
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "highlights.add",
+            json!({ "page": id, "quote": "   " })
+        )
+        .is_err()
+    );
+
+    let removed = host
+        .call(
+            Caller::Ui,
+            "highlights.remove",
+            json!({ "page": id, "id": hid }),
+        )
+        .unwrap();
+    assert!(removed["page"]["ext"].get("highlights").is_none());
+    let _ = std::fs::remove_dir_all(&vault);
+}

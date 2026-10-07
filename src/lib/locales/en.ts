@@ -959,6 +959,20 @@ export const en = {
   "look.color.clay": "Clay",
   "look.color.teal": "Teal",
   "look.color.slate": "Slate",
+  "hl.title": "Highlights",
+  "hl.none": "Select text in the page to highlight it and add a note.",
+  "hl.toolbar": "Highlight",
+  "hl.addNote": "Note",
+  "hl.notePlaceholder": "Your note…",
+  "hl.remove": "Remove highlight",
+  "hl.lost": "Not found in the page any more (it was edited).",
+  "hl.failed": "Couldn't save the highlight",
+  "hl.yours_one": "Your highlight",
+  "hl.yours_other": "Your {count} highlights",
+  "hl.color.yellow": "Yellow",
+  "hl.color.green": "Green",
+  "hl.color.blue": "Blue",
+  "hl.color.pink": "Pink",
 } as const;
 
 export type MessageKey = keyof typeof en;

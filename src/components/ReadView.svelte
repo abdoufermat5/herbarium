@@ -20,7 +20,7 @@
   import { folderPickerState } from "../lib/folder-picker.svelte";
   import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
-  import type { Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
+  import type { Highlight, HighlightColor, Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
@@ -253,6 +253,20 @@
       toc = sanitizeHeadings(data.items);
       return;
     }
+    if (data?.type === "herbarium:selection") {
+      onFrameSelection(data as unknown as FrameSelection);
+      return;
+    }
+    if (data?.type === "herbarium:highlight-click") {
+      const id = (data as { id?: unknown }).id;
+      if (typeof id === "string") focusHighlight(id);
+      return;
+    }
+    if (data?.type === "herbarium:highlights-applied") {
+      const found = (data as { found?: unknown }).found;
+      anchored = new Set(Array.isArray(found) ? found.filter((x): x is string => typeof x === "string") : []);
+      return;
+    }
     if (!data || data.type !== "herbarium:storage") return;
     const changes = sanitizeChanges(data.changes);
     if (changes.length > 0) enqueueStorage(p.meta.id, changes);
@@ -373,6 +387,117 @@
     clearTimeout(frameTimer);
     frameReady = true;
     sendToFrame({ type: "herbarium:zoom", zoom: prefs.readerZoom });
+    selection = null;
+    sendHighlights();
+  }
+
+  /* ---------------------------------------------------- highlights & notes */
+
+  interface FrameSelection {
+    text: string;
+    prefix?: string;
+    suffix?: string;
+    rect?: { x: number; y: number; w: number; h: number };
+  }
+
+  const HIGHLIGHT_COLORS: HighlightColor[] = ["yellow", "green", "blue", "pink"];
+  const highlights = $derived<Highlight[]>(page?.meta.ext?.highlights ?? []);
+  /** Highlights the page could place (others lost their text in an edit). */
+  let anchored = $state<Set<string>>(new Set());
+  /** The selection in the page, with where to show the highlight toolbar. */
+  let selection = $state<(FrameSelection & { left: number; top: number }) | null>(null);
+  let focusedHighlight = $state<string | null>(null);
+
+  function sendHighlights() {
+    sendToFrame({
+      type: "herbarium:highlights",
+      items: highlights.map((h) => ({ id: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, color: h.color })),
+    });
+  }
+
+  function onFrameSelection(sel: FrameSelection) {
+    const frame = servedFrame;
+    if (!frame || typeof sel.text !== "string" || !sel.text.trim() || !sel.rect || editing) {
+      selection = null;
+      return;
+    }
+    const box = frame.getBoundingClientRect();
+    const zoom = prefs.readerZoom || 1;
+    const left = box.left + (sel.rect.x + sel.rect.w / 2) * zoom;
+    const top = box.top + sel.rect.y * zoom;
+    selection = {
+      text: sel.text.slice(0, 2000),
+      prefix: typeof sel.prefix === "string" ? sel.prefix.slice(-64) : "",
+      suffix: typeof sel.suffix === "string" ? sel.suffix.slice(0, 64) : "",
+      left: Math.min(Math.max(box.left + 80, left), box.right - 80),
+      top: Math.max(box.top + 8, top - 44),
+    };
+  }
+
+  /** Apply a highlight change: adopt the page meta and redraw the marks. */
+  function adoptHighlights(meta: PageMeta) {
+    if (!page) return;
+    page.meta = meta;
+    baseUpdatedAt = meta.updatedAt;
+    sendHighlights();
+  }
+
+  async function highlightSelection(color: HighlightColor, withNote = false) {
+    const p = page;
+    const sel = selection;
+    if (!p || !sel || pageGone) return;
+    selection = null;
+    try {
+      const out = await api.addHighlight(p.meta.id, {
+        quote: sel.text,
+        prefix: sel.prefix ?? "",
+        suffix: sel.suffix ?? "",
+        color,
+      });
+      adoptHighlights(out.page);
+      if (withNote) focusHighlight(out.highlight.id);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function saveHighlightNote(id: string, note: string) {
+    const p = page;
+    const current = highlights.find((h) => h.id === id);
+    if (!p || !current || (current.note ?? "") === note.trim()) return;
+    try {
+      adoptHighlights((await api.updateHighlight(p.meta.id, id, { note })).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function recolorHighlight(id: string, color: HighlightColor) {
+    const p = page;
+    if (!p) return;
+    try {
+      adoptHighlights((await api.updateHighlight(p.meta.id, id, { color })).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function removeHighlight(id: string) {
+    const p = page;
+    if (!p) return;
+    try {
+      adoptHighlights((await api.removeHighlight(p.meta.id, id)).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  /** Show a highlight's note in the details panel and the passage in the page. */
+  function focusHighlight(id: string) {
+    focusedHighlight = id;
+    if (!app.focusMode) app.inspectorOpen = true;
+    sendToFrame({ type: "herbarium:highlight-scroll", id });
+    setTimeout(() => document.getElementById(`hl-note-${id}`)?.focus(), 50);
   }
 
   /* --------------------------------------------- contents, zoom, focus mode */
@@ -1277,6 +1402,20 @@
       </div>
     {/if}
 
+    {#if app.reviewSession && highlights.length > 0}
+      <details class="hl-strip">
+        <summary>{t("hl.yours", { count: highlights.length })}</summary>
+        <ul>
+          {#each highlights as h (h.id)}
+            <li>
+              <button class="hl-quote" data-hl={h.color} onclick={() => focusHighlight(h.id)}>“{h.quote}”</button>
+              {#if h.note}<span class="hl-note-text">{h.note}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
+
     {#if pendingProposal && !app.proposalOpen}
       <div class="banner proposal" role="status">
         <Icon name="file-text" size={14} />
@@ -1634,6 +1773,48 @@
           {/if}
 
           <section class="insp-section">
+            <h2 class="eyebrow">{t("hl.title")}</h2>
+            {#if highlights.length === 0}
+              <p class="hint">{t("hl.none")}</p>
+            {:else}
+              <ul class="hl-list">
+                {#each highlights as h (h.id)}
+                  <li class:focused={focusedHighlight === h.id}>
+                    <div class="hl-head">
+                      <span class="hl-colors">
+                        {#each HIGHLIGHT_COLORS as c (c)}
+                          <button
+                            class="hl-dot"
+                            data-hl={c}
+                            class:on={h.color === c}
+                            aria-label={t(`hl.color.${c}`)}
+                            title={t(`hl.color.${c}`)}
+                            onclick={() => void recolorHighlight(h.id, c)}
+                          ></button>
+                        {/each}
+                      </span>
+                      <button class="btn btn-ghost btn-icon hl-remove" title={t("hl.remove")} aria-label={t("hl.remove")} onclick={() => void removeHighlight(h.id)}>
+                        <Icon name="x" size={12} />
+                      </button>
+                    </div>
+                    <button class="hl-quote" data-hl={h.color} onclick={() => focusHighlight(h.id)}>“{h.quote}”</button>
+                    {#if frameReady && !anchored.has(h.id)}
+                      <span class="hl-lost">{t("hl.lost")}</span>
+                    {/if}
+                    <textarea
+                      id={`hl-note-${h.id}`}
+                      rows="2"
+                      placeholder={t("hl.notePlaceholder")}
+                      value={h.note ?? ""}
+                      onblur={(e) => void saveHighlightNote(h.id, e.currentTarget.value)}
+                    ></textarea>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+
+          <section class="insp-section">
             <div class="links-head">
               <h2 class="eyebrow">{t("links.title")}</h2>
               <button class="btn btn-xs btn-ghost" onclick={copyPageLink} title={t("links.copyHint")}>
@@ -1752,6 +1933,17 @@
     </div>
   {/if}
 </div>
+
+{#if selection}
+  <div class="hl-toolbar" style={`left:${selection.left}px;top:${selection.top}px`} role="toolbar" aria-label={t("hl.toolbar")}>
+    {#each HIGHLIGHT_COLORS as c (c)}
+      <button class="hl-dot" data-hl={c} aria-label={t(`hl.color.${c}`)} title={t(`hl.color.${c}`)} onmousedown={(e) => e.preventDefault()} onclick={() => void highlightSelection(c)}></button>
+    {/each}
+    <button class="hl-note-btn" onmousedown={(e) => e.preventDefault()} onclick={() => void highlightSelection("yellow", true)}>
+      {t("hl.addNote")}
+    </button>
+  </div>
+{/if}
 
 <style>
   .read {
@@ -2245,6 +2437,144 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
+    cursor: pointer;
+  }
+
+  .hl-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .hl-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .hl-list li.focused {
+    border-color: var(--text-soft);
+  }
+
+  .hl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hl-colors {
+    display: flex;
+    gap: 4px;
+  }
+
+  [data-hl="yellow"] { --hl: rgba(250, 204, 21, 0.55); }
+  [data-hl="green"] { --hl: rgba(74, 222, 128, 0.5); }
+  [data-hl="blue"] { --hl: rgba(96, 165, 250, 0.5); }
+  [data-hl="pink"] { --hl: rgba(244, 114, 182, 0.5); }
+
+  .hl-dot {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    outline: 1px solid var(--border);
+    background: var(--hl);
+    cursor: pointer;
+  }
+
+  .hl-dot.on {
+    outline: 2px solid var(--text);
+  }
+
+  .hl-quote {
+    padding: 0;
+    border: 0;
+    background: linear-gradient(transparent 55%, var(--hl) 55%);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .hl-lost {
+    font-size: var(--fs-2xs);
+    color: var(--warn);
+  }
+
+  .hl-list textarea {
+    font-size: var(--fs-sm);
+    resize: vertical;
+  }
+
+  .hl-remove {
+    width: 22px;
+    height: 22px;
+  }
+
+  .hl-strip {
+    flex: none;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--raised);
+    font-size: var(--fs-sm);
+  }
+
+  .hl-strip summary {
+    cursor: pointer;
+    color: var(--text-soft);
+  }
+
+  .hl-strip ul {
+    list-style: none;
+    margin: 6px 0 2px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+
+  .hl-note-text {
+    display: block;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+  }
+
+  .hl-toolbar {
+    position: fixed;
+    z-index: var(--z-palette);
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .hl-note-btn {
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--sunken);
+    color: var(--text);
+    font-size: var(--fs-xs);
     cursor: pointer;
   }
 

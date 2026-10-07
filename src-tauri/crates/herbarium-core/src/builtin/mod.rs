@@ -2,11 +2,13 @@
 
 mod appearance;
 mod fsrs;
+mod highlights;
 mod history;
 mod library;
 mod links;
 mod network;
 mod pages;
+pub(crate) use highlights::of as highlights_of;
 pub use pages::import_key;
 mod paths;
 mod previews;
@@ -37,6 +39,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(samples::Samples),
         Box::new(appearance::Appearance),
         Box::new(previews::Previews),
+        Box::new(highlights::Highlights),
     ]
 }
 

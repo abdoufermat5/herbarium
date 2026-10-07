@@ -536,16 +536,24 @@ fn like_pattern(query: &str) -> String {
     format!("%{esc}%")
 }
 
-/// The note as indexed for search: the page's source tool and prompt are
-/// searchable alongside it.
+/// The note as indexed for search: the page's source tool and prompt, and its
+/// highlights and their notes, are searchable alongside it.
 fn fts_note(meta: &PageMeta) -> String {
-    let Some(source) = crate::models::PageSource::of(meta) else {
-        return meta.note.clone();
-    };
     let mut out = meta.note.clone();
-    for part in [source.tool, source.prompt].into_iter().flatten() {
+    if let Some(source) = crate::models::PageSource::of(meta) {
+        for part in [source.tool, source.prompt].into_iter().flatten() {
+            out.push('\n');
+            out.push_str(&part);
+        }
+    }
+    // Highlighted passages and their notes are searchable too.
+    for h in crate::builtin::highlights_of(meta) {
         out.push('\n');
-        out.push_str(&part);
+        out.push_str(&h.quote);
+        if !h.note.is_empty() {
+            out.push('\n');
+            out.push_str(&h.note);
+        }
     }
     out
 }

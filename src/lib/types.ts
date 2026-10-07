@@ -40,7 +40,12 @@ export interface PageMeta {
   /** The `<title>` extracted from the HTML at its last write or index. */
   sourceTitle?: string | null;
   /** Extension-owned data keyed by extension id; absent when empty. */
-  ext?: Record<string, unknown> & { review?: ReviewHistory; source?: PageSource; look?: { icon?: string } };
+  ext?: Record<string, unknown> & {
+    review?: ReviewHistory;
+    source?: PageSource;
+    look?: { icon?: string };
+    highlights?: Highlight[];
+  };
 }
 
 /** Where a page came from (`ext.source`); every field is optional. */
@@ -164,6 +169,19 @@ export interface PreviewDigest {
   blocks: Array<{ k: "box" | "text" | "img"; x: number; y: number; w: number; h: number; c?: string; r?: number; s?: number; lh?: number }>;
   image?: { x: number; y: number; w: number; h: number; src: string };
 }
+
+/** A highlighted passage of a page, anchored by its text and context. */
+export interface Highlight {
+  id: string;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  color: HighlightColor;
+  note?: string;
+  at: number;
+}
+
+export type HighlightColor = "yellow" | "green" | "blue" | "pink";
 
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */
 export interface SavedSearch {

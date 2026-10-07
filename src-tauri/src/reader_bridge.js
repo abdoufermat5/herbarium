@@ -104,6 +104,179 @@
     return { w: W, h: H, bg: bg, blocks: blocks, image: image && image.src.length < 80000 ? image : null };
   }
 
+  /* ---------------------------------------------------------- highlights */
+
+  var HL = "herbarium-hl";
+  var SKIP = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEMPLATE: 1, TEXTAREA: 1 };
+
+  /** Every visible text node of the page, with its offset in the joined text. */
+  function textIndex() {
+    var nodes = [];
+    var text = "";
+    var root = document.body || document.documentElement;
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (n) {
+        for (var p = n.parentNode; p && p !== root; p = p.parentNode) {
+          if (SKIP[p.nodeName] || (p.classList && p.classList.contains("herbarium-recall-cover"))) {
+            return NodeFilter.FILTER_REJECT;
+          }
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    for (var n = walker.nextNode(); n; n = walker.nextNode()) {
+      nodes.push({ node: n, start: text.length });
+      text += n.nodeValue;
+    }
+    return { nodes: nodes, text: text };
+  }
+
+  /** The joined-text offset of a range boundary. */
+  function offsetOf(index, container, offset) {
+    for (var i = 0; i < index.nodes.length; i++) {
+      var entry = index.nodes[i];
+      if (entry.node === container) return entry.start + offset;
+    }
+    // An element boundary: the first text node at or after it.
+    var probe = document.createRange();
+    probe.setStart(container, offset);
+    for (var j = 0; j < index.nodes.length; j++) {
+      if (probe.comparePoint(index.nodes[j].node, 0) >= 0) return index.nodes[j].start;
+    }
+    return index.text.length;
+  }
+
+  var selectionTimer = null;
+  function reportSelection() {
+    clearTimeout(selectionTimer);
+    selectionTimer = setTimeout(function () {
+      var sel = getSelection();
+      var msg = { type: "herbarium:selection", text: "" };
+      if (sel && sel.rangeCount && !sel.isCollapsed) {
+        var range = sel.getRangeAt(0);
+        var index = textIndex();
+        var start = offsetOf(index, range.startContainer, range.startOffset);
+        var end = offsetOf(index, range.endContainer, range.endOffset);
+        var quote = index.text.slice(start, end);
+        var trimmedStart = start + (quote.length - quote.replace(/^\s+/, "").length);
+        var trimmedEnd = end - (quote.length - quote.replace(/\s+$/, "").length);
+        if (trimmedEnd > trimmedStart && trimmedEnd - trimmedStart <= 2000) {
+          var r = range.getBoundingClientRect();
+          msg = {
+            type: "herbarium:selection",
+            text: index.text.slice(trimmedStart, trimmedEnd),
+            prefix: index.text.slice(Math.max(0, trimmedStart - 32), trimmedStart),
+            suffix: index.text.slice(trimmedEnd, trimmedEnd + 32),
+            rect: { x: r.left, y: r.top, w: r.width, h: r.height },
+          };
+        }
+      }
+      try {
+        window.parent.postMessage(msg, "*");
+      } catch (e) {
+        /* the reader is gone */
+      }
+    }, 60);
+  }
+  document.addEventListener("mouseup", reportSelection);
+  document.addEventListener("keyup", reportSelection);
+  document.addEventListener("touchend", reportSelection);
+
+  function unwrapHighlights() {
+    var marks = document.querySelectorAll("mark." + HL);
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      var parent = m.parentNode;
+      while (m.firstChild) parent.insertBefore(m.firstChild, m);
+      parent.removeChild(m);
+      parent.normalize();
+    }
+  }
+
+  /** Characters `a` and `b` share at their ends (`fromEnd`) or starts. */
+  function shared(a, b, fromEnd) {
+    var n = 0;
+    while (n < a.length && n < b.length) {
+      var ca = fromEnd ? a.charAt(a.length - 1 - n) : a.charAt(n);
+      var cb = fromEnd ? b.charAt(b.length - 1 - n) : b.charAt(n);
+      if (ca !== cb) break;
+      n++;
+    }
+    return n;
+  }
+
+  /** Where `h.quote` best fits, using its prefix and suffix to choose. */
+  function locate(text, h) {
+    var best = -1;
+    var bestScore = -1;
+    for (var at = text.indexOf(h.quote); at >= 0; at = text.indexOf(h.quote, at + 1)) {
+      var score =
+        shared(text.slice(Math.max(0, at - 64), at), h.prefix || "", true) +
+        shared(text.slice(at + h.quote.length, at + h.quote.length + 64), h.suffix || "", false);
+      if (score > bestScore) {
+        best = at;
+        bestScore = score;
+      }
+    }
+    return best;
+  }
+
+  function wrap(index, start, end, h) {
+    var parts = [];
+    for (var i = 0; i < index.nodes.length; i++) {
+      var e = index.nodes[i];
+      var nStart = e.start;
+      var nEnd = e.start + e.node.nodeValue.length;
+      if (nEnd <= start || nStart >= end) continue;
+      parts.push({ node: e.node, from: Math.max(start, nStart) - nStart, to: Math.min(end, nEnd) - nStart });
+    }
+    for (var j = 0; j < parts.length; j++) {
+      var p = parts[j];
+      var node = p.node;
+      if (p.to < node.nodeValue.length) node.splitText(p.to);
+      if (p.from > 0) node = node.splitText(p.from);
+      var mark = document.createElement("mark");
+      mark.className = HL;
+      mark.setAttribute("data-hl", h.id);
+      mark.setAttribute("data-color", h.color || "yellow");
+      node.parentNode.insertBefore(mark, node);
+      mark.appendChild(node);
+    }
+  }
+
+  function applyHighlights(items) {
+    if (!document.getElementById("herbarium-hl-style")) {
+      var style = document.createElement("style");
+      style.id = "herbarium-hl-style";
+      style.textContent =
+        "mark." + HL + "{color:inherit;border-radius:2px;cursor:pointer;padding:0;box-decoration-break:clone;-webkit-box-decoration-break:clone}" +
+        "mark." + HL + "[data-color=yellow]{background:rgba(250,204,21,.42)}" +
+        "mark." + HL + "[data-color=green]{background:rgba(74,222,128,.38)}" +
+        "mark." + HL + "[data-color=blue]{background:rgba(96,165,250,.38)}" +
+        "mark." + HL + "[data-color=pink]{background:rgba(244,114,182,.38)}" +
+        "mark." + HL + ".flash{outline:2px solid currentColor}";
+      (document.head || document.documentElement).appendChild(style);
+    }
+    unwrapHighlights();
+    var found = [];
+    for (var i = 0; i < items.length; i++) {
+      var h = items[i];
+      if (!h || typeof h.quote !== "string" || !h.quote) continue;
+      var index = textIndex();
+      var at = locate(index.text, h);
+      if (at < 0) continue;
+      wrap(index, at, at + h.quote.length, h);
+      found.push(h.id);
+    }
+    window.parent.postMessage({ type: "herbarium:highlights-applied", found: found }, "*");
+  }
+
+  document.addEventListener("click", function (e) {
+    var mark = e.target && e.target.closest ? e.target.closest("mark." + HL) : null;
+    if (!mark || String(getSelection() || "").length) return;
+    window.parent.postMessage({ type: "herbarium:highlight-click", id: mark.getAttribute("data-hl") }, "*");
+  });
+
   var lastReport = "";
   function report() {
     var items = headings();
@@ -127,6 +300,15 @@
     } else if (data.type === "herbarium:zoom" && typeof data.zoom === "number") {
       var zoom = Math.min(2, Math.max(0.5, data.zoom));
       document.documentElement.style.zoom = zoom === 1 ? "" : String(zoom);
+    } else if (data.type === "herbarium:highlights" && Array.isArray(data.items)) {
+      applyHighlights(data.items);
+    } else if (data.type === "herbarium:highlight-scroll" && typeof data.id === "string") {
+      var mark = document.querySelector('mark.' + HL + '[data-hl="' + data.id.replace(/[^A-Za-z0-9_-]/g, "") + '"]');
+      if (mark) {
+        mark.scrollIntoView({ behavior: "smooth", block: "center" });
+        mark.classList.add("flash");
+        setTimeout(function () { mark.classList.remove("flash"); }, 1200);
+      }
     } else if (data.type === "herbarium:digest") {
       var d = null;
       try {
