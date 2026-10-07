@@ -48,6 +48,49 @@ jobs:
       - name: Build Linux deb bundle
         run: pnpm tauri build --bundles deb
 
+  e2e:
+    name: End-to-end
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: e2e
+
+      - name: Install Linux dependencies and drivers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev \
+            webkit2gtk-driver xvfb
+          cargo install tauri-driver --locked
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Run the e2e suites (CLI, native host, extension, publish, remix, desktop app)
+        run: pnpm test:e2e
+        env:
+          E2E_SCREENSHOTS: ${{ runner.temp }}/e2e-screenshots
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-screenshots
+          path: ${{ runner.temp }}/e2e-screenshots
+          if-no-files-found: ignore
+
   compile:
     name: Compile (${{ matrix.platform }})
     strategy:

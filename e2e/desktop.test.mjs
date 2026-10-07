@@ -102,7 +102,9 @@ async function step(name, fn) {
 
 /** Keep a picture of the moment when E2E_SCREENSHOTS names a folder. */
 async function shot(name) {
-  if (process.env.E2E_SCREENSHOTS) await app.screenshot(join(process.env.E2E_SCREENSHOTS, `${name}.png`));
+  if (!process.env.E2E_SCREENSHOTS) return;
+  mkdirSync(process.env.E2E_SCREENSHOTS, { recursive: true });
+  await app.screenshot(join(process.env.E2E_SCREENSHOTS, `${name}.png`));
 }
 
 test("desktop: a new user's first session", { skip: unavailable ?? false }, async () => {

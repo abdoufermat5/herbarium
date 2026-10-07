@@ -1,7 +1,7 @@
 MANIFEST := --manifest-path src-tauri/Cargo.toml
 VAULT ?=
 
-.PHONY: help install dev build check lint test ci mcp release clean
+.PHONY: help install dev build check lint test ci e2e mcp release clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -26,6 +26,9 @@ test: ## Rust tests (core, MCP server, app)
 
 ci: check lint test ## Run what CI runs
 	pnpm build
+
+e2e: ## Run the end-to-end suites (CLI, extension, desktop app)
+	pnpm test:e2e
 
 mcp: ## Run the MCP server on stdio (VAULT=path to override the app's vault)
 	cargo run $(MANIFEST) --quiet -- mcp $(if $(VAULT),--vault $(VAULT))
