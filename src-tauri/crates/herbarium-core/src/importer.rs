@@ -85,7 +85,7 @@ pub fn imported_keys(store: &Store) -> Result<HashSet<String>, String> {
         .all()
         .map_err(|e| e.to_string())?
         .iter()
-        .filter_map(|m| crate::builtin::import_key(m).map(str::to_string))
+        .filter_map(|m| crate::import_key(m).map(str::to_string))
         .collect())
 }
 

@@ -1,0 +1,52 @@
+/* Shared look of the popup and the Today page, matching the app. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --raised: #f7f6f3;
+  --sunken: #f1f0ec;
+  --border: #e6e4df;
+  --text: #2f3437;
+  --soft: #4a4f52;
+  --muted: #6b6a68;
+  --accent: #346538;
+  --accent-soft: #edf3ec;
+  --danger: #9f2f2d;
+  --radius: 8px;
+  font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #202020;
+    --raised: #262626;
+    --sunken: #2a2a29;
+    --border: #363636;
+    --text: #e6e5e3;
+    --soft: #cfcdc9;
+    --muted: #9b9a97;
+    --accent: #8cbf91;
+    --accent-soft: #233025;
+    --danger: #e0807d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+h1, h2, h3 { margin: 0; font-weight: 600; }
+button, input { font: inherit; color: inherit; }
+button {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 6px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg); cursor: pointer;
+}
+button:hover:not(:disabled) { background: var(--raised); }
+button:disabled { opacity: 0.55; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+button.primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+button.link { border: 0; padding: 0; background: none; color: var(--accent); }
+button.link:hover { text-decoration: underline; background: none; }
+input[type="search"], input[type="text"] {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+}
+.muted { color: var(--muted); }
+.error { color: var(--danger); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.eyebrow { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }

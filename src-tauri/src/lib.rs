@@ -4,6 +4,7 @@ mod commands;
 mod config;
 mod editors;
 mod export;
+mod native_host;
 mod navigation;
 mod protocol;
 mod updater;
@@ -15,6 +16,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_deep_link::DeepLinkExt;
 
 pub use commands::AppState;
+pub use native_host::{is_browser_launch, run as run_native_host};
 
 /// The frontend invokes this only after its unsaved-work guards have settled.
 #[tauri::command]
@@ -172,6 +174,9 @@ pub fn run() {
             commands::export_site,
             commands::scan_ai_export,
             commands::import_ai_export,
+            commands::browser_status,
+            commands::connect_browsers,
+            commands::reveal_extension,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,

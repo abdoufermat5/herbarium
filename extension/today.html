@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Today · Herbarium</title>
+<link rel="icon" href="icons/icon-32.png">
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="today.css">
+</head>
+<body>
+<main class="page">
+  <header class="top">
+    <div>
+      <p class="eyebrow" id="date"></p>
+      <h1 id="greeting">Today</h1>
+    </div>
+    <input type="search" id="search" placeholder="Search your Herbarium…" aria-label="Search your Herbarium">
+  </header>
+  <p id="error" class="error" hidden></p>
+  <ul id="results" class="results" hidden></ul>
+  <div id="content" class="grid" hidden>
+    <section class="card due">
+      <h2 class="eyebrow">Review</h2>
+      <p class="big"><span id="due-count">0</span> <span id="due-label">pages due</span></p>
+      <p class="muted" id="streak"></p>
+      <button class="primary" id="review">Start reviewing</button>
+      <ul id="due" class="list"></ul>
+    </section>
+    <section class="card" id="continue-card" hidden>
+      <h2 class="eyebrow">Continue reading</h2>
+      <ul id="continue" class="list"></ul>
+    </section>
+    <section class="card" id="rediscover-card" hidden>
+      <h2 class="eyebrow">Rediscover</h2>
+      <ul id="rediscover" class="list"></ul>
+    </section>
+    <section class="card" id="onthisday-card" hidden>
+      <h2 class="eyebrow">On this day</h2>
+      <ul id="onthisday" class="list"></ul>
+    </section>
+    <section class="card">
+      <h2 class="eyebrow">Recently saved</h2>
+      <ul id="recent" class="list"></ul>
+    </section>
+  </div>
+</main>
+<script src="today.js"></script>
+</body>
+</html>

@@ -432,6 +432,72 @@ pub async fn import_ai_export(
     crate::ai_import::import(&host, &scan.candidates, Some(&keys), folder.as_deref())
 }
 
+/// Copy the browser extension bundled with the app to a stable folder and
+/// reveal it, for "Load unpacked" until the extension is in the stores. (An
+/// AppImage's own files vanish when it exits, so the copy is what browsers
+/// keep loading.)
+#[tauri::command]
+pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
+    use tauri::Manager;
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map(|d| d.join("browser-extension"))
+        .ok()
+        .filter(|d| d.join("manifest.json").is_file());
+    let source = match bundled {
+        Some(dir) => dir,
+        // `tauri dev`: the extension next to the app's sources.
+        None if cfg!(debug_assertions) => {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../extension")
+        }
+        None => return Err("the browser extension is not bundled with this build".into()),
+    };
+    let dest = dirs::data_dir()
+        .ok_or("no data folder")?
+        .join("Herbarium")
+        .join("browser-extension");
+    copy_dir(&source, &dest).map_err(|e| format!("cannot copy the extension: {e}"))?;
+    tauri_plugin_opener::reveal_item_in_dir(dest.join("manifest.json"))
+        .map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+pub struct BrowserStatus {
+    browser: String,
+    connected: bool,
+}
+
+/// Browsers found and whether the extension's native host is registered with each.
+#[tauri::command]
+pub async fn browser_status() -> Vec<BrowserStatus> {
+    crate::native_host::status()
+        .into_iter()
+        .map(|(browser, connected)| BrowserStatus { browser, connected })
+        .collect()
+}
+
+/// Register the native messaging host with every browser found.
+#[tauri::command]
+pub async fn connect_browsers() -> CmdResult<Vec<String>> {
+    crate::native_host::install_default()
+}
+
 #[tauri::command]
 pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
     let host = state.host.lock().map_err(|e| e.to_string())?;

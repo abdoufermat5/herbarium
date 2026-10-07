@@ -58,6 +58,7 @@ usage:
   herbarium add [options] <file|-|url>…  save pages into the vault
   herbarium import [options] <export>    import artifacts from a Claude or ChatGPT data export
   herbarium mcp [--vault <path>]         serve the MCP protocol on stdin/stdout
+  herbarium native-host install          connect the browser extension
   herbarium help                         show this help
 
 Run `herbarium add --help` for the add options.";

@@ -3,7 +3,7 @@
 //! desktop app, the MCP server) run everything through [`Host::call`].
 
 pub mod assets;
-mod builtin;
+pub(crate) mod builtin;
 pub mod content;
 pub mod extension;
 mod host;
@@ -15,5 +15,6 @@ pub mod store;
 pub mod time;
 pub mod vault;
 
+pub use builtin::import_key;
 pub use extension::{Caller, Ctx, Event, Extension, OpResult, Operation, Registry, events};
 pub use host::Host;

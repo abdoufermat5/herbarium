@@ -361,6 +361,21 @@ export const api = {
     return invoke("import_ai_export", { keys, folder });
   },
 
+  /** Browsers found and whether the extension's native host is registered with each. */
+  browserStatus(): Promise<Array<{ browser: string; connected: boolean }>> {
+    return invoke("browser_status");
+  },
+
+  /** Register the native messaging host with every browser found; lines describe what was done. */
+  connectBrowsers(): Promise<string[]> {
+    return invoke("connect_browsers");
+  },
+
+  /** Copy the bundled extension to a stable folder, reveal it and return its path. */
+  revealExtension(): Promise<string> {
+    return invoke("reveal_extension");
+  },
+
   /** A newer signed release, or null when this build is current. */
   checkUpdate(): Promise<UpdateInfo | null> {
     return invoke("check_update");

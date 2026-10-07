@@ -860,6 +860,21 @@ export const en = {
   "aiImport.importing": "Importing…",
   "aiImport.done": "Imported {imported} pages ({skipped} already there)",
   "aiImport.someFailed": "{count} could not be imported",
+  "browser.title": "Browser",
+  "browser.note": "Save AI pages and anything on the web with one click, see which pages you already saved, and search your vault from the address bar with h.",
+  "browser.connect": "Connect browsers",
+  "browser.connectHint": "Lets the Herbarium extension talk to this app. Run it again after moving or updating the app.",
+  "browser.connectAction": "Connect browsers",
+  "browser.connecting": "Connecting…",
+  "browser.connected": "Connected {count} browsers",
+  "browser.connectFailed": "Couldn't connect the browsers",
+  "browser.none": "No supported browser found (Chrome, Chromium, Brave, Edge, Vivaldi or Firefox).",
+  "browser.isConnected": "connected",
+  "browser.notConnected": "not connected",
+  "browser.extension": "Install the extension",
+  "browser.extensionHint": "Until it is in the browser stores: open the extensions page, turn on developer mode and choose “Load unpacked” with this folder (in Firefox: about:debugging → Load Temporary Add-on → manifest.json).",
+  "browser.extensionAction": "Show extension folder",
+  "browser.extensionRevealed": "The extension is in {path}",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -154,6 +154,7 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
         "Find pages by source URL",
         Effect::ReadOnly,
     ),
+    ("today.summary", "Today overview", Effect::ReadOnly),
     ("paths.list", "List reading paths", Effect::ReadOnly),
     ("paths.get", "Read reading path", Effect::ReadOnly),
     ("paths.create", "Create reading path", Effect::Additive),
