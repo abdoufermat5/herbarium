@@ -227,6 +227,14 @@ struct AcceptArgs {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CreateArgs {
+    id: String,
+    html: String,
+    base_updated_at: Option<i64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ConfigureArgs {
     review_edits: bool,
 }
@@ -291,6 +299,36 @@ impl Extension for Proposals {
                 Ok(json!({ "proposal": proposal, "html": html }))
             },
         ))?;
+
+        r.add(
+            Operation::new(
+                "proposals.create",
+                "Keep HTML as a proposal for a page, to compare and accept or reject (what a remix by an AI model produces). Replaces the page's earlier proposal.",
+                object(
+                    json!({
+                        "id": id_prop(),
+                        "html": { "type": "string" },
+                        "baseUpdatedAt": { "type": "integer" }
+                    }),
+                    &["id", "html"],
+                ),
+                |ctx: &mut Ctx, a: CreateArgs| {
+                    ensure_html(&a.html)?;
+                    let meta = ctx.page(&a.id)?;
+                    let proposal = Proposal {
+                        id: meta.id.clone(),
+                        at: now_ms(),
+                        base_updated_at: a.base_updated_at.unwrap_or(meta.updated_at),
+                        title: extract_title(&a.html),
+                        bytes: a.html.len(),
+                    };
+                    write_proposal(&ctx.store.vault, &proposal, &a.html)?;
+                    ctx.emit(events::PROPOSAL_CREATED, json!({ "proposal": proposal }));
+                    Ok(proposal)
+                },
+            )
+            .ui_only(),
+        )?;
 
         r.add(
             Operation::new(

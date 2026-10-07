@@ -21,6 +21,9 @@ import type {
   LabelColor,
   ReadingPath,
   ProposalSummary,
+  AiSettings,
+  AiProvider,
+  RemixPreset,
   ImportFile,
   ImportResult,
   IndexReport,
@@ -474,6 +477,25 @@ export const api = {
   /** Copy the bundled extension to a stable folder, reveal it and return its path. */
   revealExtension(): Promise<string> {
     return invoke("reveal_extension");
+  },
+
+  /** Who remixes pages and whether an API key is stored (the key itself stays in the backend). */
+  aiSettings(): Promise<AiSettings> {
+    return invoke("ai_settings");
+  },
+
+  /** `key`: a new Anthropic API key, "" to remove it, or undefined to keep it. */
+  setAiSettings(provider: AiProvider, model: string, key?: string): Promise<AiSettings> {
+    return invoke("set_ai_settings", { provider, model, key });
+  },
+
+  /** Remix a page with the configured model; the result waits as a proposal. */
+  remixPage(id: string, preset: RemixPreset, instructions: string): Promise<ProposalSummary> {
+    return invoke("remix_page", { id, preset, instructions });
+  },
+
+  cancelRemix(): Promise<void> {
+    return invoke("cancel_remix");
   },
 
   /** A newer signed release, or null when this build is current. */

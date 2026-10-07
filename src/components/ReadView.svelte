@@ -29,6 +29,7 @@
   import { exportPageFile } from "../lib/exports";
   import { ICON_CHOICES, tagColor } from "../lib/appearance";
   import ProposalPanel from "./ProposalPanel.svelte";
+  import RemixDialog from "./RemixDialog.svelte";
   import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
@@ -930,6 +931,8 @@
   }
 
   /* ------------------------------------------------------- agent proposals */
+  let remixOpen = $state(false);
+
 
   const pendingProposal = $derived(app.proposals.find((x) => x.id === page?.meta.id) ?? null);
 
@@ -1380,6 +1383,16 @@
             {t("read.quiz")}
           </button>
         {/if}
+        <button
+          class="btn btn-sm details-btn"
+          class:active={remixOpen}
+          onclick={() => (remixOpen = true)}
+          disabled={pageGone}
+          title={t("remix.hint")}
+        >
+          <Icon name="sparkle" size={14} />
+          {t("remix.action")}
+        </button>
         <button
           class="btn btn-sm details-btn"
           class:active={app.historyOpen}
@@ -1972,6 +1985,16 @@
       />
     {/if}
 
+    {#if remixOpen && page}
+      <RemixDialog
+        pageId={page.meta.id}
+        onClose={() => (remixOpen = false)}
+        onDone={() => {
+          remixOpen = false;
+          app.proposalOpen = true;
+        }}
+      />
+    {/if}
     {#if app.proposalOpen && pendingProposal}
       <ProposalPanel
         pageId={page.meta.id}

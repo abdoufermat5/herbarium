@@ -36,6 +36,22 @@ pub struct Config {
     /// Offer to save when a whole HTML page is copied.
     #[serde(default)]
     pub watch_clipboard: bool,
+    /// Who remixes pages: `anthropic` (the API, with a key) or `claude-code`
+    /// (the `claude` command line).
+    #[serde(default = "default_ai_provider")]
+    pub ai_provider: String,
+    #[serde(default = "default_ai_model")]
+    pub ai_model: String,
+}
+
+fn default_ai_provider() -> String {
+    "anthropic".into()
+}
+
+pub const DEFAULT_AI_MODEL: &str = "claude-opus-5-5";
+
+fn default_ai_model() -> String {
+    DEFAULT_AI_MODEL.into()
 }
 
 impl Default for Config {
@@ -47,16 +63,23 @@ impl Default for Config {
             capture_shortcut: default_capture_shortcut(),
             watch_downloads: true,
             watch_clipboard: false,
+            ai_provider: default_ai_provider(),
+            ai_model: default_ai_model(),
         }
     }
 }
 
-fn path() -> Result<PathBuf, String> {
+/// The app's configuration folder, created if needed.
+pub fn dir() -> Result<PathBuf, String> {
     let dir = dirs::config_dir()
         .ok_or("no configuration directory on this system")?
         .join(IDENTIFIER);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("config.json"))
+    Ok(dir)
+}
+
+fn path() -> Result<PathBuf, String> {
+    Ok(dir()?.join("config.json"))
 }
 
 pub fn load() -> Result<Config, String> {

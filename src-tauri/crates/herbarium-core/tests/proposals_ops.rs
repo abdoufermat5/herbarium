@@ -281,3 +281,49 @@ fn agent_history_restore_also_waits_and_deleting_the_page_drops_the_proposal() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn the_ui_can_leave_a_proposal_for_a_remix() {
+    let vault = temp_vault("create");
+    let host = open(&vault);
+    let (id, meta) = page(&host, "Plain");
+
+    let err = host
+        .call(
+            Caller::Agent,
+            "proposals.create",
+            json!({ "id": id, "html": doc("Agent") }),
+        )
+        .unwrap_err();
+    assert!(!err.is_empty());
+    assert!(
+        host.call(
+            Caller::Ui,
+            "proposals.create",
+            json!({ "id": id, "html": "just words" }),
+        )
+        .is_err()
+    );
+
+    let proposal = host
+        .call(
+            Caller::Ui,
+            "proposals.create",
+            json!({ "id": id, "html": doc("Remixed"), "baseUpdatedAt": meta["updatedAt"] }),
+        )
+        .unwrap();
+    assert_eq!(proposal["title"], "Remixed");
+    assert_eq!(
+        html_of(&host, &id),
+        doc("Plain"),
+        "the page waits for approval"
+    );
+    let list = host.call(Caller::Ui, "proposals.list", json!({})).unwrap();
+    assert_eq!(list[0]["id"], id.as_str());
+    assert_eq!(list[0]["stale"], false);
+
+    host.call(Caller::Ui, "proposals.accept", json!({ "id": id }))
+        .unwrap();
+    assert_eq!(html_of(&host, &id), doc("Remixed"));
+    let _ = std::fs::remove_dir_all(&vault);
+}

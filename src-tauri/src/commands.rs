@@ -696,3 +696,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+    provider: String,
+    model: String,
+    /// Whether an Anthropic API key is stored (the key never leaves the backend).
+    has_key: bool,
+}
+
+fn ai_settings_of(cfg: &Config) -> AiSettings {
+    AiSettings {
+        provider: cfg.ai_provider.clone(),
+        model: cfg.ai_model.clone(),
+        has_key: crate::secrets::load().anthropic_key.is_some(),
+    }
+}
+
+#[tauri::command]
+pub async fn ai_settings() -> AiSettings {
+    ai_settings_of(&config::load().unwrap_or_default())
+}
+
+/// Change the AI provider and model; `key` stores (or, blank, removes) the
+/// Anthropic API key, and is left alone when absent.
+#[tauri::command]
+pub async fn set_ai_settings(
+    provider: String,
+    model: String,
+    key: Option<String>,
+) -> CmdResult<AiSettings> {
+    if !matches!(provider.as_str(), "anthropic" | "claude-code") {
+        return Err(format!("unknown AI provider `{provider}`"));
+    }
+    let model = model.trim();
+    if model.is_empty() || model.len() > 100 || model.chars().any(char::is_whitespace) {
+        return Err("enter a model name such as claude-opus-5-5".into());
+    }
+    if key.is_some() {
+        crate::secrets::set(|s, v| s.anthropic_key = v, key)?;
+    }
+    let mut cfg = config::load().unwrap_or_default();
+    cfg.ai_provider = provider;
+    cfg.ai_model = model.to_string();
+    config::save(&cfg)?;
+    Ok(ai_settings_of(&cfg))
+}
+
+/// Remix a page with the configured model and keep the result as a proposal.
+/// Emits `remix-progress` `{ id, chars }` while the answer comes in.
+#[tauri::command]
+pub async fn remix_page(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    preset: String,
+    instructions: String,
+) -> CmdResult<Value> {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+
+    let (page, highlights) = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        let page = host.call(
+            Caller::Ui,
+            "pages.get",
+            json!({ "id": id, "format": "html" }),
+        )?;
+        let highlights = host.call(Caller::Ui, "highlights.list", json!({ "page": id }))?;
+        (page, highlights)
+    };
+    let html = page["html"].as_str().unwrap_or_default();
+    crate::remix::check_size(html)?;
+    let highlights: Vec<(String, String)> = highlights
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|h| {
+            (
+                h["quote"].as_str().unwrap_or_default().to_string(),
+                h["note"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let prompt = crate::remix::user_prompt(
+        &preset,
+        &instructions,
+        page["meta"]["title"].as_str().unwrap_or_default(),
+        &highlights,
+        html,
+    )?;
+    let base_updated_at = page["meta"]["updatedAt"].clone();
+
+    let cfg = config::load().unwrap_or_default();
+    let key = crate::secrets::load().anthropic_key;
+    crate::remix::CANCEL.store(false, Ordering::Relaxed);
+    let page_id = id.clone();
+    let emitter = app.clone();
+    let remixed = tauri::async_runtime::spawn_blocking(move || {
+        let job = crate::remix::Job {
+            provider: &cfg.ai_provider,
+            model: &cfg.ai_model,
+            key: key.as_deref(),
+            prompt,
+        };
+        crate::remix::run(job, |chars| {
+            let _ = emitter.emit("remix-progress", json!({ "id": page_id, "chars": chars }));
+            !crate::remix::CANCEL.load(Ordering::Relaxed)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let host = state.host.lock().map_err(|e| e.to_string())?;
+    host.call(
+        Caller::Ui,
+        "proposals.create",
+        json!({ "id": id, "html": remixed, "baseUpdatedAt": base_updated_at }),
+    )
+}
+
+#[tauri::command]
+pub async fn cancel_remix() {
+    crate::remix::cancel();
+}

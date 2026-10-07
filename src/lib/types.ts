@@ -379,3 +379,14 @@ export interface EditorInfo {
   id: string;
   name: string;
 }
+
+export type AiProvider = "anthropic" | "claude-code";
+
+export interface AiSettings {
+  provider: AiProvider;
+  model: string;
+  /** Whether an Anthropic API key is stored. */
+  hasKey: boolean;
+}
+
+export type RemixPreset = "simplify" | "deeper" | "quiz" | "translate" | "cheatsheet" | "modernize" | "custom";

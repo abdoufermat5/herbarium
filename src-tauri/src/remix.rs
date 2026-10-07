@@ -1,0 +1,560 @@
+// Remix a page with an AI model: simplify it, explain it deeper, turn it into
+// a quiz, translate it... The model gets the page's HTML and an instruction
+// and answers with a new HTML document, which is kept as a proposal: the user
+// compares it with the page and accepts or rejects it, as with an agent's
+// edit. Two ways to reach a model: the Anthropic API with the user's key
+// (streamed, so long pages don't time out), or the Claude Code command line
+// with the user's own sign-in.
+
+use std::io::{BufRead, BufReader, Read, Write};
+use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+use serde_json::{Value, json};
+
+/// The API's address; `HERBARIUM_ANTHROPIC_API` points tests at a fake one.
+fn api_base() -> String {
+    std::env::var("HERBARIUM_ANTHROPIC_API")
+        .unwrap_or_else(|_| "https://api.anthropic.com".into())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// The Claude Code command; `HERBARIUM_CLAUDE_BIN` overrides it.
+fn claude_bin() -> String {
+    std::env::var("HERBARIUM_CLAUDE_BIN").unwrap_or_else(|_| "claude".into())
+}
+
+/// Pages larger than this are not sent: the answer would not fit.
+const MAX_INPUT: usize = 400 * 1024;
+const MAX_TOKENS: u32 = 64_000;
+
+/// Set to stop the remix in progress.
+pub static CANCEL: AtomicBool = AtomicBool::new(false);
+
+/// The ready-made instructions.
+pub fn preset(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "simplify" => {
+            "Rewrite this page so a newcomer understands it on a first read: plainer words, shorter sentences, one idea at a time, a short summary at the top. Keep everything that is correct and important; drop jargon or explain it where it first appears."
+        }
+        "deeper" => {
+            "Explain this page in more depth: add the reasoning behind each idea, worked examples, common mistakes and how the ideas connect. Keep the page's structure and add to it rather than replacing it."
+        }
+        "quiz" => {
+            "Add active-recall questions to this page so the reader can test themselves. After each important section, add a short question with its answer in an element marked with the `data-herbarium-recall` attribute holding the question, e.g. `<p data-herbarium-recall=\"What does X do?\">It does Y.</p>`. Herbarium hides those answers until the reader reveals them. Leave the rest of the page as it is."
+        }
+        "translate" => {
+            "Translate this page into the language named below, keeping the HTML structure, styles and scripts exactly as they are; only the human-readable text changes (including the <title>, alt text and labels)."
+        }
+        "cheatsheet" => {
+            "Turn this page into a one-screen cheat sheet: the key facts, commands, formulas or steps, in a dense, well-organized layout (a grid of small cards works well) that reads at a glance and prints on one page."
+        }
+        "modernize" => {
+            "Fix and modernize this page: repair anything broken (layout, scripts, contrast, overflowing content), make it responsive down to phone width, give it clean modern styling with a light and dark theme, and make it accessible (headings in order, labels, focus styles). Keep its content and behaviour."
+        }
+        "custom" => "",
+        _ => return None,
+    })
+}
+
+const SYSTEM: &str = "You rework single-file HTML pages kept in Herbarium, the user's personal library of pages they read and review. You receive a page and an instruction, and you answer with the complete new page: one self-contained HTML document (CSS and JavaScript inline) in a single ```html fenced code block, with nothing after the block. Keep the <title> meaningful. Keep the page working offline: do not add external scripts, stylesheets or fonts unless the original page already loads them. Keep the original's language unless the instruction asks for another. Links of the form herbarium://page/<id> point to other pages in the library: keep them.";
+
+/// The user turn: the instruction, the reader's highlights, then the page.
+pub fn user_prompt(
+    preset_name: &str,
+    instructions: &str,
+    title: &str,
+    highlights: &[(String, String)],
+    html: &str,
+) -> Result<String, String> {
+    let base = preset(preset_name).ok_or_else(|| format!("unknown remix `{preset_name}`"))?;
+    let extra = instructions.trim();
+    if base.is_empty() && extra.is_empty() {
+        return Err("say how to remix the page".into());
+    }
+    let mut out = String::new();
+    out.push_str("<instruction>\n");
+    out.push_str(base);
+    if !extra.is_empty() {
+        if !base.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str(extra);
+    }
+    out.push_str("\n</instruction>\n\n");
+    if !highlights.is_empty() {
+        out.push_str("<highlights>\nPassages the reader highlighted, with their notes; they mattered to them, so keep them and give them weight.\n");
+        for (quote, note) in highlights {
+            out.push_str("- \"");
+            out.push_str(quote);
+            out.push('"');
+            if !note.is_empty() {
+                out.push_str(" (note: ");
+                out.push_str(note);
+                out.push(')');
+            }
+            out.push('\n');
+        }
+        out.push_str("</highlights>\n\n");
+    }
+    out.push_str(&format!("<page title=\"{}\">\n", title.replace('"', "'")));
+    out.push_str(html);
+    out.push_str("\n</page>");
+    Ok(out)
+}
+
+/// The HTML document in a model's answer: the ```html block, or the
+/// document itself when the answer is bare HTML.
+pub fn extract_html(text: &str) -> Option<String> {
+    let lower = text.to_ascii_lowercase();
+    if let Some(start) = lower.find("```html") {
+        let body_start = text[start..].find('\n').map(|i| start + i + 1)?;
+        // The last fence closes the block: the page itself may contain ```.
+        let end = text[body_start..]
+            .rfind("```")
+            .map(|i| body_start + i)
+            .unwrap_or(text.len());
+        let html = text[body_start..end].trim();
+        if !html.is_empty() {
+            return Some(html.to_string());
+        }
+    }
+    let start = lower.find("<!doctype").or_else(|| lower.find("<html"))?;
+    let end = lower
+        .rfind("</html>")
+        .map(|i| i + "</html>".len())
+        .unwrap_or(text.len());
+    (end > start).then(|| text[start..end].trim().to_string())
+}
+
+/// Read a Messages API event stream, collecting the answer's text.
+/// `progress` gets the number of characters so far and returns false to stop.
+pub fn read_stream(
+    reader: impl Read,
+    mut progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    let mut text = String::new();
+    let mut stop_reason: Option<String> = None;
+    let mut data = String::new();
+    let mut reported = 0;
+    for line in BufReader::new(reader).lines() {
+        let line = line.map_err(|e| format!("the connection broke: {e}"))?;
+        if let Some(d) = line.strip_prefix("data:") {
+            data.push_str(d.trim_start());
+            continue;
+        }
+        if !line.is_empty() || data.is_empty() {
+            continue;
+        }
+        let event: Value = serde_json::from_str(&data).map_err(|e| format!("bad event: {e}"))?;
+        data.clear();
+        match event["type"].as_str().unwrap_or_default() {
+            "content_block_delta" if event["delta"]["type"] == "text_delta" => {
+                text.push_str(event["delta"]["text"].as_str().unwrap_or_default());
+                if text.len() - reported >= 512 {
+                    reported = text.len();
+                    if !progress(text.chars().count()) {
+                        return Err("cancelled".into());
+                    }
+                }
+            }
+            "message_delta" => {
+                if let Some(r) = event["delta"]["stop_reason"].as_str() {
+                    stop_reason = Some(r.to_string());
+                }
+            }
+            "error" => {
+                return Err(api_error(&event));
+            }
+            _ => {
+                if !progress(text.chars().count()) {
+                    return Err("cancelled".into());
+                }
+            }
+        }
+    }
+    match stop_reason.as_deref() {
+        // A refusal can come after some output: what came before is not an answer.
+        Some("refusal") => Err("the model declined to remix this page".into()),
+        Some("max_tokens") => Err("the page was too long for the model to finish".into()),
+        Some(_) => Ok(text),
+        None => Err("the answer was cut off".into()),
+    }
+}
+
+fn api_error(body: &Value) -> String {
+    let message = body["error"]["message"].as_str().unwrap_or("unknown error");
+    match body["error"]["type"].as_str() {
+        Some("authentication_error") => "the Anthropic API key was refused".into(),
+        Some("overloaded_error") => "the model is overloaded; try again in a moment".into(),
+        Some("rate_limit_error") => format!("rate limited: {message}"),
+        _ => message.to_string(),
+    }
+}
+
+/// Ask the Anthropic API, streaming the answer.
+pub fn ask_api(
+    key: &str,
+    model: &str,
+    prompt: &str,
+    progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    ask_api_at(&api_base(), key, model, prompt, progress)
+}
+
+fn ask_api_at(
+    base: &str,
+    key: &str,
+    model: &str,
+    prompt: &str,
+    progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20 * 60))
+        .connect_timeout(Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("could not create HTTP client: {e}"))?;
+    let body = json!({
+        "model": model,
+        "max_tokens": MAX_TOKENS,
+        "stream": true,
+        "thinking": { "type": "adaptive" },
+        // If the model declines, the API tries Anthropic's recommended
+        // fallback model in the same call.
+        "fallbacks": "default",
+        "system": SYSTEM,
+        "messages": [{ "role": "user", "content": prompt }],
+    });
+    let resp = client
+        .post(format!("{base}/v1/messages"))
+        .header("x-api-key", key)
+        .header("anthropic-version", "2023-06-01")
+        .header("anthropic-beta", "server-side-fallback-2026-07-01")
+        .header("content-type", "application/json")
+        .body(body.to_string())
+        .send()
+        .map_err(|e| format!("could not reach the Anthropic API: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let raw = resp.text().unwrap_or_default();
+        let parsed: Value = serde_json::from_str(&raw).unwrap_or(Value::Null);
+        return Err(if parsed.is_null() {
+            format!("the Anthropic API answered HTTP {status}")
+        } else {
+            api_error(&parsed)
+        });
+    }
+    read_stream(resp, progress)
+}
+
+/// Ask Claude Code (`claude -p`), with the prompt on stdin.
+pub fn ask_claude_code(
+    model: &str,
+    prompt: &str,
+    progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    ask_claude_code_with(&claude_bin(), model, prompt, progress)
+}
+
+fn ask_claude_code_with(
+    bin: &str,
+    model: &str,
+    prompt: &str,
+    mut progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    let full = format!("{SYSTEM}\n\n{prompt}");
+    let mut child = Command::new(bin)
+        .args(["-p", "--output-format", "text", "--model", model])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "Claude Code is not installed (the `claude` command was not found)".to_string()
+            } else {
+                format!("could not start Claude Code: {e}")
+            }
+        })?;
+    let mut stdin = child.stdin.take().ok_or("no stdin")?;
+    let writer = std::thread::spawn(move || stdin.write_all(full.as_bytes()));
+    let mut stdout = child.stdout.take().ok_or("no stdout")?;
+    let reader = std::thread::spawn(move || {
+        let mut out = String::new();
+        stdout.read_to_string(&mut out).map(|_| out)
+    });
+    let mut stderr = child.stderr.take().ok_or("no stderr")?;
+    let errors = std::thread::spawn(move || {
+        let mut out = String::new();
+        let _ = stderr.read_to_string(&mut out);
+        out
+    });
+    let status = loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            break status;
+        }
+        if !progress(0) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".into());
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    let _ = writer.join();
+    let out = reader
+        .join()
+        .map_err(|_| "Claude Code output was lost")?
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        let err = errors.join().unwrap_or_default();
+        let err = err.trim();
+        return Err(if err.is_empty() {
+            format!("Claude Code failed ({status})")
+        } else {
+            format!("Claude Code failed: {err}")
+        });
+    }
+    Ok(out)
+}
+
+pub struct Job<'a> {
+    pub provider: &'a str,
+    pub model: &'a str,
+    pub key: Option<&'a str>,
+    pub prompt: String,
+}
+
+/// Run a remix and return the new page's HTML.
+pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, String> {
+    let answer = match job.provider {
+        "anthropic" => {
+            let key = job
+                .key
+                .ok_or("add your Anthropic API key in Settings → AI first")?;
+            ask_api(key, job.model, &job.prompt, progress)?
+        }
+        "claude-code" => ask_claude_code(job.model, &job.prompt, progress)?,
+        other => return Err(format!("unknown AI provider `{other}`")),
+    };
+    let html = extract_html(&answer).ok_or("the answer held no HTML page")?;
+    if !herbarium_core::content::looks_like_html(&html) {
+        return Err("the answer held no HTML page".into());
+    }
+    Ok(html)
+}
+
+/// Refuse pages too large to send.
+pub fn check_size(html: &str) -> Result<(), String> {
+    if html.len() > MAX_INPUT {
+        Err(format!(
+            "this page is too large to remix ({} KB; the limit is {} KB)",
+            html.len() / 1024,
+            MAX_INPUT / 1024
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+pub fn cancel() {
+    CANCEL.store(true, Ordering::Relaxed);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn html_is_taken_from_the_answer() {
+        let fenced = "Here it is:\n```html\n<!doctype html><html><body><pre>```js\nx\n```</pre></body></html>\n```\n";
+        assert_eq!(
+            extract_html(fenced).unwrap(),
+            "<!doctype html><html><body><pre>```js\nx\n```</pre></body></html>"
+        );
+        let bare = "Sure. <!DOCTYPE html><html><p>x</p></html> Enjoy";
+        assert_eq!(
+            extract_html(bare).unwrap(),
+            "<!DOCTYPE html><html><p>x</p></html>"
+        );
+        assert_eq!(extract_html("no page here"), None);
+    }
+
+    #[test]
+    fn prompts_carry_the_instruction_highlights_and_page() {
+        let p = user_prompt(
+            "translate",
+            "French",
+            "A \"page\"",
+            &[("key idea".into(), "remember".into())],
+            "<p>hi</p>",
+        )
+        .unwrap();
+        assert!(p.contains("Translate this page"));
+        assert!(p.contains("French"));
+        assert!(p.contains("- \"key idea\" (note: remember)"));
+        assert!(p.contains("<page title=\"A 'page'\">\n<p>hi</p>\n</page>"));
+        assert!(user_prompt("custom", "  ", "t", &[], "x").is_err());
+        assert!(user_prompt("nope", "", "t", &[], "x").is_err());
+        assert!(user_prompt("custom", "make it pink", "t", &[], "x").is_ok());
+    }
+
+    fn sse(events: &[Value]) -> String {
+        events
+            .iter()
+            .map(|e| format!("event: {}\ndata: {}\n\n", e["type"].as_str().unwrap(), e))
+            .collect()
+    }
+
+    #[test]
+    fn streams_are_read() {
+        let ok = sse(&[
+            json!({ "type": "message_start", "message": {} }),
+            json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "thinking" } }),
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "thinking_delta", "thinking": "hmm" } }),
+            json!({ "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "```html\n<p>" } }),
+            json!({ "type": "content_block_delta", "index": 1, "delta": { "type": "text_delta", "text": "x</p>\n```" } }),
+            json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }),
+            json!({ "type": "message_stop" }),
+        ]);
+        assert_eq!(
+            read_stream(ok.as_bytes(), |_| true).unwrap(),
+            "```html\n<p>x</p>\n```"
+        );
+
+        let refused = sse(&[
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "partial" } }),
+            json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" } }),
+        ]);
+        assert!(
+            read_stream(refused.as_bytes(), |_| true)
+                .unwrap_err()
+                .contains("declined")
+        );
+
+        let error = sse(&[
+            json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } }),
+        ]);
+        assert!(
+            read_stream(error.as_bytes(), |_| true)
+                .unwrap_err()
+                .contains("overloaded")
+        );
+
+        let cut = sse(&[json!({ "type": "message_start", "message": {} })]);
+        assert!(read_stream(cut.as_bytes(), |_| true).is_err());
+        assert_eq!(
+            read_stream(ok.as_bytes(), |_| false).unwrap_err(),
+            "cancelled"
+        );
+    }
+
+    /// A one-shot HTTP server answering with `status` and `body`; hands back
+    /// its address and the request it got.
+    fn fake_api(status: &'static str, body: String) -> (String, std::thread::JoinHandle<String>) {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(sock.try_clone().unwrap());
+            let mut head = String::new();
+            let mut len = 0;
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                    len = v.trim().parse().unwrap();
+                }
+                head.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let mut req = vec![0; len];
+            reader.read_exact(&mut req).unwrap();
+            write!(
+                sock,
+                "HTTP/1.1 {status}\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            head + &String::from_utf8(req).unwrap()
+        });
+        (addr, handle)
+    }
+
+    #[test]
+    fn the_api_is_asked_with_streaming_adaptive_thinking_and_fallbacks() {
+        let answer = sse(&[
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "```html\n<p>new</p>\n```" } }),
+            json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }),
+        ]);
+        let (base, server) = fake_api("200 OK", answer);
+        let text = ask_api_at(&base, "sk-test", "claude-opus-5-5", "remix me", |_| true).unwrap();
+        assert_eq!(extract_html(&text).unwrap(), "<p>new</p>");
+        let request = server.join().unwrap().to_ascii_lowercase();
+        assert!(request.starts_with("post /v1/messages "));
+        assert!(request.contains("x-api-key: sk-test"));
+        assert!(request.contains("anthropic-version: 2023-06-01"));
+        assert!(request.contains("anthropic-beta: server-side-fallback-2026-07-01"));
+        let body: Value =
+            serde_json::from_str(&request[request.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+        assert_eq!(body["model"], "claude-opus-5-5");
+        assert_eq!(body["stream"], true);
+        assert_eq!(body["thinking"]["type"], "adaptive");
+        assert_eq!(body["fallbacks"], "default");
+        assert_eq!(body["messages"][0]["content"], "remix me");
+
+        let (base, server) = fake_api(
+            "401 Unauthorized",
+            json!({ "type": "error", "error": { "type": "authentication_error", "message": "invalid x-api-key" } }).to_string(),
+        );
+        let err = ask_api_at(&base, "bad", "m", "p", |_| true).unwrap_err();
+        assert!(err.contains("key was refused"), "{err}");
+        server.join().unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_code_gets_the_prompt_on_stdin() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("herbarium-claude-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let bin = dir.join("claude");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho \"$@\" > \"$0.args\"\ncat > \"$0.stdin\"\nprintf '```html\\n<p>cli</p>\\n```\\n'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let bin = bin.to_str().unwrap();
+        let out = ask_claude_code_with(bin, "claude-opus-5-5", "remix me", |_| true).unwrap();
+        assert_eq!(extract_html(&out).unwrap(), "<p>cli</p>");
+        let args = std::fs::read_to_string(format!("{bin}.args")).unwrap();
+        assert_eq!(
+            args.trim(),
+            "-p --output-format text --model claude-opus-5-5"
+        );
+        let stdin = std::fs::read_to_string(format!("{bin}.stdin")).unwrap();
+        assert!(stdin.starts_with(SYSTEM) && stdin.ends_with("remix me"));
+
+        std::fs::write(
+            dir.join("fail"),
+            "#!/bin/sh\necho 'not logged in' >&2\nexit 1\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(dir.join("fail"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = ask_claude_code_with(dir.join("fail").to_str().unwrap(), "m", "p", |_| true)
+            .unwrap_err();
+        assert!(err.contains("not logged in"), "{err}");
+        assert!(
+            ask_claude_code_with("/nonexistent/claude", "m", "p", |_| true)
+                .unwrap_err()
+                .contains("not installed")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

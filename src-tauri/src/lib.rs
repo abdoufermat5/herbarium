@@ -8,6 +8,8 @@ mod export;
 mod native_host;
 mod navigation;
 mod protocol;
+mod remix;
+mod secrets;
 mod updater;
 
 use herbarium_core::Host;
@@ -213,6 +215,10 @@ pub fn run() {
             commands::save_clipboard_page,
             commands::save_download,
             commands::set_capture,
+            commands::ai_settings,
+            commands::set_ai_settings,
+            commands::remix_page,
+            commands::cancel_remix,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,
