@@ -1097,6 +1097,9 @@ export const en = {
   "share.working": "Publishing…",
   "share.failed": "Could not publish",
   "share.connectFirst": "Connect your GitHub account in Settings → Publishing first.",
+  "proposal.titleRemix": "Remixed by Claude",
+  "proposal.summaryRemix": "Claude remixed this page {when}.",
+  "proposal.bannerTitleRemix": "A remix of this page is waiting",
 } as const;
 
 export type MessageKey = keyof typeof en;

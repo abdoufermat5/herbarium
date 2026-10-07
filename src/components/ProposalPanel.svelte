@@ -75,9 +75,9 @@
   role="presentation"
   onmousedown={(e) => e.target === e.currentTarget && onClose()}
 >
-  <div class="panel" role="dialog" aria-modal="true" aria-label={t("proposal.title")}>
+  <div class="panel" role="dialog" aria-modal="true" aria-label={proposal?.source === "remix" ? t("proposal.titleRemix") : t("proposal.title")}>
     <header class="head">
-      <span class="eyebrow"><Icon name="file-text" size={13} />{t("proposal.title")}</span>
+      <span class="eyebrow">{#if proposal?.source === "remix"}<Icon name="sparkle" size={13} />{t("proposal.titleRemix")}{:else}<Icon name="file-text" size={13} />{t("proposal.title")}{/if}</span>
       <button
         bind:this={closeBtn}
         class="btn btn-ghost btn-icon"
@@ -95,7 +95,7 @@
       <div class="state error">{t("proposal.loadFailed")}: {loadError}</div>
     {:else}
       <p class="summary">
-        <span title={fmtDateTime(proposal.at)}>{t("proposal.summary", { when: timeAgo(proposal.at) })}</span>
+        <span title={fmtDateTime(proposal.at)}>{t(proposal.source === "remix" ? "proposal.summaryRemix" : "proposal.summary", { when: timeAgo(proposal.at) })}</span>
         {#if proposal.stale}
           <span class="stale"><Icon name="info" size={12} />{t("proposal.stale")}</span>
         {/if}

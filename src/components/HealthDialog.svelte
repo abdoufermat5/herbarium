@@ -67,7 +67,7 @@
           <li>
             <button onclick={() => void open(p.id)}>
               <span class="title ellipsis">{p.title}</span>
-              <span class="why">{summary(p.issues)}{#if p.folder} · {p.folder}{/if}</span>
+              <span class="why">{summary(p.issues)}{#if p.folder}{" · "}{p.folder}{/if}</span>
             </button>
           </li>
         {/each}

@@ -164,8 +164,8 @@
                 <span class="main">
                   <span class="title ellipsis">{c.title}</span>
                   <span class="sub ellipsis">
-                    {c.tool} · {fmtDate(c.createdAt)}{#if c.conversation} · {c.conversation}{/if}
-                    {#if c.alreadyImported} · {t("aiImport.already")}{/if}
+                    {c.tool} · {fmtDate(c.createdAt)}{#if c.conversation}{" · "}{c.conversation}{/if}
+                    {#if c.alreadyImported}{" · "}{t("aiImport.already")}{/if}
                   </span>
                 </span>
               </label>

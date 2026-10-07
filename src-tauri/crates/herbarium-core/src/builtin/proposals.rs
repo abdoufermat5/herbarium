@@ -66,6 +66,9 @@ pub(crate) struct Proposal {
     /// The `<title>` of the proposed HTML.
     pub title: String,
     pub bytes: usize,
+    /// What made it, when not an agent: `remix` (an AI model asked from the app).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 fn proposals_dir(vault: &Path) -> PathBuf {
@@ -174,6 +177,7 @@ fn list(ctx: &Ctx) -> OpResult<Vec<Value>> {
                 "bytes": p.bytes,
                 "pageTitle": meta.title,
                 "stale": meta.updated_at != p.base_updated_at,
+                "source": p.source,
             })
         })
         .collect())
@@ -201,6 +205,7 @@ pub(crate) fn overwrite_or_propose(
         base_updated_at: base_updated_at.unwrap_or(meta.updated_at),
         title: extract_title(html),
         bytes: html.len(),
+        source: None,
     };
     write_proposal(&ctx.store.vault, &proposal, html)?;
     ctx.emit(events::PROPOSAL_CREATED, json!({ "proposal": proposal }));
@@ -231,6 +236,8 @@ struct CreateArgs {
     id: String,
     html: String,
     base_updated_at: Option<i64>,
+    #[serde(default)]
+    source: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -308,7 +315,8 @@ impl Extension for Proposals {
                     json!({
                         "id": id_prop(),
                         "html": { "type": "string" },
-                        "baseUpdatedAt": { "type": "integer" }
+                        "baseUpdatedAt": { "type": "integer" },
+                        "source": { "type": "string", "enum": ["remix"] }
                     }),
                     &["id", "html"],
                 ),
@@ -321,6 +329,7 @@ impl Extension for Proposals {
                         base_updated_at: a.base_updated_at.unwrap_or(meta.updated_at),
                         title: extract_title(&a.html),
                         bytes: a.html.len(),
+                        source: a.source.filter(|s| s == "remix"),
                     };
                     write_proposal(&ctx.store.vault, &proposal, &a.html)?;
                     ctx.emit(events::PROPOSAL_CREATED, json!({ "proposal": proposal }));

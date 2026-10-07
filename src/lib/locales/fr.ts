@@ -1107,4 +1107,7 @@ export const fr: Record<MessageKey, string> = {
   "share.working": "Publication…",
   "share.failed": "Publication impossible",
   "share.connectFirst": "Connectez d’abord votre compte GitHub dans Réglages → Publication.",
+  "proposal.titleRemix": "Remanié par Claude",
+  "proposal.summaryRemix": "Claude a remanié cette page {when}.",
+  "proposal.bannerTitleRemix": "Un remaniement de cette page attend",
 };

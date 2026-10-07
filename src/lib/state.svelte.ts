@@ -356,7 +356,10 @@ let knownProposals: Set<string> | null = null;
  *  load, one summary of everything waiting; afterwards, each new proposal. */
 function announceProposals(list: ProposalSummary[]) {
   const keys = new Set(list.map((p) => `${p.id}:${p.at}`));
-  const fresh = knownProposals ? list.filter((p) => !knownProposals!.has(`${p.id}:${p.at}`)) : list;
+  // A remix is announced by its own dialog.
+  const fresh = (knownProposals ? list.filter((p) => !knownProposals!.has(`${p.id}:${p.at}`)) : list).filter(
+    (p) => p.source !== "remix",
+  );
   knownProposals = keys;
   if (fresh.length === 0) return;
   const first = fresh[0];

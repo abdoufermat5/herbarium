@@ -1471,7 +1471,7 @@
       <div class="banner proposal" role="status">
         <Icon name="file-text" size={14} />
         <div class="banner-text">
-          <strong>{t("proposal.bannerTitle")}</strong>
+          <strong>{pendingProposal.source === "remix" ? t("proposal.bannerTitleRemix") : t("proposal.bannerTitle")}</strong>
           <span>{t("proposal.bannerMessage", { when: timeAgo(pendingProposal.at) })}</span>
         </div>
         <div class="banner-actions">

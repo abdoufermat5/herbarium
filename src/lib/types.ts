@@ -92,6 +92,8 @@ export interface ProposalSummary {
   bytes: number;
   /** The page changed after the agent read it. */
   stale: boolean;
+  /** `remix` when Claude made it from the app's Remix; absent for an agent. */
+  source?: "remix";
 }
 
 /** A page's links (`pages.links`). */

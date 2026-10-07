@@ -309,7 +309,7 @@ fn the_ui_can_leave_a_proposal_for_a_remix() {
         .call(
             Caller::Ui,
             "proposals.create",
-            json!({ "id": id, "html": doc("Remixed"), "baseUpdatedAt": meta["updatedAt"] }),
+            json!({ "id": id, "html": doc("Remixed"), "baseUpdatedAt": meta["updatedAt"], "source": "remix" }),
         )
         .unwrap();
     assert_eq!(proposal["title"], "Remixed");
@@ -321,6 +321,8 @@ fn the_ui_can_leave_a_proposal_for_a_remix() {
     let list = host.call(Caller::Ui, "proposals.list", json!({})).unwrap();
     assert_eq!(list[0]["id"], id.as_str());
     assert_eq!(list[0]["stale"], false);
+    assert_eq!(list[0]["source"], "remix");
+    assert_eq!(list[0]["source"], "remix");
 
     host.call(Caller::Ui, "proposals.accept", json!({ "id": id }))
         .unwrap();

@@ -363,7 +363,7 @@ pub fn propose(
 ) -> Result<Value, String> {
     host.op(
         "proposals.create",
-        json!({ "id": id, "html": html, "baseUpdatedAt": base_updated_at }),
+        json!({ "id": id, "html": html, "baseUpdatedAt": base_updated_at, "source": "remix" }),
     )
 }
 

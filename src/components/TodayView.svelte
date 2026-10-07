@@ -154,7 +154,7 @@
             <button class="feature" onclick={() => void openPage(p.id)}>
               <span class="feature-title"><PageIcon page={p} size={18} />{p.title}</span>
               {#if p.note}<span class="feature-note">{p.note}</span>{/if}
-              <span class="meta">{t("today.savedAgo", { when: timeAgo(p.createdAt) })}{#if p.folder} · {p.folder}{/if}</span>
+              <span class="meta">{t("today.savedAgo", { when: timeAgo(p.createdAt) })}{#if p.folder}{" · "}{p.folder}{/if}</span>
             </button>
           </section>
         {/if}
@@ -182,7 +182,7 @@
               <li>
                 <button class="row two" onclick={() => void openPage(p.id)}>
                   <span class="line"><PageIcon page={p} /><span class="ellipsis">{p.title}</span></span>
-                  <span class="meta">{timeAgo(p.createdAt)}{#if p.ext?.source?.tool} · {p.ext.source.tool}{/if}</span>
+                  <span class="meta">{timeAgo(p.createdAt)}{#if p.ext?.source?.tool}{" · "}{p.ext.source.tool}{/if}</span>
                 </button>
               </li>
             {/each}
