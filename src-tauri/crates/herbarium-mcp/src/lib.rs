@@ -3,6 +3,10 @@
 //! Every operation registered on the [`Host`] that is visible to agents
 //! becomes an MCP tool; the operation name `area.verb` is exposed as
 //! `area_verb` because MCP clients restrict tool names to `[A-Za-z0-9_-]`.
+//!
+//! Pages are also MCP resources (`herbarium://page/<id>` for the HTML,
+//! `herbarium://page/<id>/text` for the visible text), so a client can attach
+//! them as context, and a few prompts package common requests.
 
 use std::io::{self, BufRead, Write};
 
@@ -223,6 +227,13 @@ fn handle(host: &Host, msg: &Value) -> Option<Value> {
         "ping" => success(id, json!({})),
         "tools/list" => success(id, json!({ "tools": tools(host) })),
         "tools/call" => call(host, id, &params),
+        "resources/list" => resources_list(host, id, &params),
+        "resources/templates/list" => {
+            success(id, json!({ "resourceTemplates": resource_templates() }))
+        }
+        "resources/read" => resources_read(host, id, &params),
+        "prompts/list" => success(id, json!({ "prompts": prompts_list() })),
+        "prompts/get" => prompts_get(id, &params),
         _ => error(id, -32601, &format!("method not found: {method}")),
     })
 }
@@ -235,7 +246,11 @@ fn initialize(params: &Value) -> Value {
         .unwrap_or(&PROTOCOL_VERSIONS[0]);
     json!({
         "protocolVersion": version,
-        "capabilities": { "tools": { "listChanged": false } },
+        "capabilities": {
+            "tools": { "listChanged": false },
+            "resources": { "listChanged": false },
+            "prompts": { "listChanged": false },
+        },
         "serverInfo": { "name": "herbarium", "version": env!("CARGO_PKG_VERSION") },
         "instructions": INSTRUCTIONS,
     })
@@ -283,6 +298,251 @@ fn call(host: &Host, id: Value, params: &Value) -> Value {
             json!({ "content": [{ "type": "text", "text": e }], "isError": true }),
         ),
     }
+}
+
+const PAGE_URI: &str = "herbarium://page/";
+const TEXT_SUFFIX: &str = "/text";
+/// Pages per `resources/list` reply; the rest follow through `nextCursor`.
+const RESOURCES_PAGE: usize = 100;
+/// JSON-RPC error code MCP uses for an unknown resource.
+const RESOURCE_NOT_FOUND: i64 = -32002;
+
+fn resources_list(host: &Host, id: Value, params: &Value) -> Value {
+    let Some(store) = host.store() else {
+        return error(id, -32603, "no vault open");
+    };
+    let start = match params.get("cursor") {
+        None | Some(Value::Null) => 0,
+        Some(cursor) => match cursor.as_str().and_then(|c| c.parse::<usize>().ok()) {
+            Some(n) => n,
+            None => return error(id, -32602, "invalid cursor"),
+        },
+    };
+    let pages = match store.all() {
+        Ok(pages) => pages,
+        Err(e) => return error(id, -32603, &e.to_string()),
+    };
+    let resources: Vec<Value> = pages
+        .iter()
+        .skip(start)
+        .take(RESOURCES_PAGE)
+        .map(|meta| {
+            let mut place = meta.folder.clone().unwrap_or_default();
+            if !meta.tags.is_empty() {
+                if !place.is_empty() {
+                    place.push_str(" · ");
+                }
+                place.push_str(&meta.tags.join(", "));
+            }
+            let mut resource = json!({
+                "uri": format!("{PAGE_URI}{}", meta.id),
+                "name": meta.id,
+                "title": meta.title,
+                "mimeType": "text/html",
+            });
+            if !place.is_empty() {
+                resource["description"] = Value::String(place);
+            }
+            resource
+        })
+        .collect();
+    let mut result = json!({ "resources": resources });
+    let next = start + RESOURCES_PAGE;
+    if next < pages.len() {
+        result["nextCursor"] = Value::String(next.to_string());
+    }
+    success(id, result)
+}
+
+fn resource_templates() -> Value {
+    json!([
+        {
+            "uriTemplate": "herbarium://page/{id}",
+            "name": "page",
+            "title": "Herbarium page",
+            "description": "A saved page's full HTML source.",
+            "mimeType": "text/html",
+        },
+        {
+            "uriTemplate": "herbarium://page/{id}/text",
+            "name": "page-text",
+            "title": "Herbarium page text",
+            "description": "A saved page's visible text, much smaller than its HTML.",
+            "mimeType": "text/plain",
+        },
+    ])
+}
+
+fn resources_read(host: &Host, id: Value, params: &Value) -> Value {
+    let Some(uri) = params.get("uri").and_then(Value::as_str) else {
+        return error(id, -32602, "resources/read needs a `uri`");
+    };
+    let not_found = |id| {
+        error(
+            id,
+            RESOURCE_NOT_FOUND,
+            &format!("resource not found: {uri}"),
+        )
+    };
+    let Some(rest) = uri.strip_prefix(PAGE_URI) else {
+        return not_found(id);
+    };
+    let (page_id, text) = match rest.strip_suffix(TEXT_SUFFIX) {
+        Some(page_id) => (page_id, true),
+        None => (rest, false),
+    };
+    if page_id.is_empty() || page_id.contains('/') {
+        return not_found(id);
+    }
+    let format = if text { "text" } else { "html" };
+    let page = match host.call(
+        Caller::Agent,
+        "pages.get",
+        json!({ "id": page_id, "format": format }),
+    ) {
+        Ok(page) => page,
+        Err(_) => return not_found(id),
+    };
+    let body = page.get(format).and_then(Value::as_str).unwrap_or_default();
+    success(
+        id,
+        json!({
+            "contents": [{
+                "uri": uri,
+                "mimeType": if text { "text/plain" } else { "text/html" },
+                "text": body,
+            }]
+        }),
+    )
+}
+
+struct PromptArg {
+    name: &'static str,
+    description: &'static str,
+    required: bool,
+}
+
+struct Prompt {
+    name: &'static str,
+    title: &'static str,
+    description: &'static str,
+    arguments: &'static [PromptArg],
+    /// The message, with `{argument}` placeholders.
+    template: &'static str,
+}
+
+const PROMPTS: &[Prompt] = &[
+    Prompt {
+        name: "save_page",
+        title: "Write a page",
+        description: "Write a self-contained HTML page about a topic and save it to Herbarium.",
+        arguments: &[
+            PromptArg {
+                name: "topic",
+                description: "What the page should explain.",
+                required: true,
+            },
+            PromptArg {
+                name: "folder",
+                description: "Folder to save it in, e.g. `rust/cargo`.",
+                required: false,
+            },
+        ],
+        template: "Write a clear, self-contained HTML page explaining: {topic}\n\n\
+Make it worth coming back to: a short summary first, worked examples, and an \
+interactive element where it helps understanding. Mark a few recall questions \
+with `data-herbarium-recall` so review sessions can quiz me.\n\n\
+Check folders_list and tags_list first and reuse what fits. Save it with \
+pages_create{folder_clause}, passing `source` with your tool name and this \
+request, then give me the herbarium-app://open/<id> link.",
+    },
+    Prompt {
+        name: "ask_vault",
+        title: "Ask my pages",
+        description: "Answer a question from the pages saved in Herbarium.",
+        arguments: &[PromptArg {
+            name: "question",
+            description: "What you want to know.",
+            required: true,
+        }],
+        template: "Answer this question using the pages saved in my Herbarium vault: {question}\n\n\
+Search with pages_search (try a few phrasings), read the most relevant pages with \
+pages_get and `format: \"text\"`, and answer from what they say. Cite each page you \
+used as a herbarium-app://open/<id> link. If the vault does not cover the question, \
+say so before adding anything from your own knowledge.",
+    },
+    Prompt {
+        name: "review_session",
+        title: "Review with me",
+        description: "Walk through the pages due for review, quizzing you on each.",
+        arguments: &[],
+        template: "Run a review session with me over my Herbarium pages that are due.\n\n\
+Get the queue with review_due. For each page, read it with pages_get \
+(`format: \"text\"`), ask me two or three questions about it one at a time, and \
+tell me how I did. Then record the review with review_complete: grade `again` if \
+I struggled, `hard`, `good` or `easy` otherwise. Stop when the queue is empty or I \
+ask to stop, and finish with a short summary.",
+    },
+];
+
+fn prompts_list() -> Vec<Value> {
+    PROMPTS
+        .iter()
+        .map(|p| {
+            json!({
+                "name": p.name,
+                "title": p.title,
+                "description": p.description,
+                "arguments": p.arguments.iter().map(|a| json!({
+                    "name": a.name,
+                    "description": a.description,
+                    "required": a.required,
+                })).collect::<Vec<_>>(),
+            })
+        })
+        .collect()
+}
+
+fn prompts_get(id: Value, params: &Value) -> Value {
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    let Some(prompt) = PROMPTS.iter().find(|p| p.name == name) else {
+        return error(id, -32602, &format!("unknown prompt: {name}"));
+    };
+    let args = params.get("arguments");
+    let arg = |key: &str| {
+        args.and_then(|a| a.get(key))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let mut text = prompt.template.to_string();
+    for a in prompt.arguments {
+        match arg(a.name) {
+            Some(value) => text = text.replace(&format!("{{{}}}", a.name), value),
+            None if a.required => {
+                return error(
+                    id,
+                    -32602,
+                    &format!("missing required argument: {}", a.name),
+                );
+            }
+            None => {}
+        }
+    }
+    let folder_clause = arg("folder")
+        .map(|f| format!(" in the folder `{f}`"))
+        .unwrap_or_default();
+    let text = text.replace("{folder_clause}", &folder_clause);
+    success(
+        id,
+        json!({
+            "description": prompt.description,
+            "messages": [{ "role": "user", "content": { "type": "text", "text": text } }],
+        }),
+    )
 }
 
 fn success(id: Value, result: Value) -> Value {
@@ -591,6 +851,119 @@ mod tests {
         assert_eq!(structured(json!("abc")), json!({ "value": "abc" }));
 
         let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn pages_are_resources() {
+        let vault =
+            std::env::temp_dir().join(format!("herbarium-mcp-resources-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&vault);
+        let mut host = Host::new();
+        host.open_vault(vault.to_str().unwrap()).unwrap();
+        for i in 0..(RESOURCES_PAGE + 1) {
+            host.call(
+                Caller::Agent,
+                "pages.create",
+                json!({ "html": format!("<title>P{i:03}</title><p>body {i}</p>"), "folder": "f", "tags": ["t"] }),
+            )
+            .unwrap();
+        }
+
+        let replies = exchange(
+            &host,
+            &[
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "resources/list" }),
+                json!({ "jsonrpc": "2.0", "id": 3, "method": "resources/list", "params": { "cursor": "100" } }),
+                json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/read", "params": { "uri": "herbarium://page/p000" } }),
+                json!({ "jsonrpc": "2.0", "id": 5, "method": "resources/read", "params": { "uri": "herbarium://page/p000/text" } }),
+                json!({ "jsonrpc": "2.0", "id": 6, "method": "resources/read", "params": { "uri": "herbarium://page/missing" } }),
+                json!({ "jsonrpc": "2.0", "id": 7, "method": "resources/read", "params": { "uri": "herbarium://page/../p000" } }),
+                json!({ "jsonrpc": "2.0", "id": 8, "method": "resources/templates/list" }),
+                json!({ "jsonrpc": "2.0", "id": 9, "method": "resources/list", "params": { "cursor": "x" } }),
+            ],
+        );
+
+        let caps = &replies[0]["result"]["capabilities"];
+        assert!(caps["resources"].is_object() && caps["prompts"].is_object());
+
+        let first = &replies[1]["result"];
+        assert_eq!(first["resources"].as_array().unwrap().len(), RESOURCES_PAGE);
+        assert_eq!(first["nextCursor"], "100");
+        let r0 = &first["resources"][0];
+        assert_eq!(r0["uri"], "herbarium://page/p000");
+        assert_eq!(r0["title"], "P000");
+        assert_eq!(r0["description"], "f · t");
+        let second = &replies[2]["result"];
+        assert_eq!(second["resources"].as_array().unwrap().len(), 1);
+        assert!(
+            second.get("nextCursor").is_none(),
+            "the last page has no cursor"
+        );
+
+        let html = &replies[3]["result"]["contents"][0];
+        assert_eq!(html["mimeType"], "text/html");
+        assert!(html["text"].as_str().unwrap().contains("<p>body 0</p>"));
+        let text = &replies[4]["result"]["contents"][0];
+        assert_eq!(text["mimeType"], "text/plain");
+        assert!(text["text"].as_str().unwrap().contains("body 0"));
+        assert!(!text["text"].as_str().unwrap().contains("<p>"));
+
+        assert_eq!(replies[5]["error"]["code"], RESOURCE_NOT_FOUND);
+        assert_eq!(replies[6]["error"]["code"], RESOURCE_NOT_FOUND);
+        assert_eq!(
+            replies[7]["result"]["resourceTemplates"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert_eq!(replies[8]["error"]["code"], -32602);
+
+        let _ = std::fs::remove_dir_all(&vault);
+    }
+
+    #[test]
+    fn prompts_fill_their_arguments() {
+        let host = Host::new();
+        let replies = exchange(
+            &host,
+            &[
+                json!({ "jsonrpc": "2.0", "id": 1, "method": "prompts/list" }),
+                json!({ "jsonrpc": "2.0", "id": 2, "method": "prompts/get", "params": { "name": "save_page", "arguments": { "topic": "Cargo workspaces", "folder": "rust" } } }),
+                json!({ "jsonrpc": "2.0", "id": 3, "method": "prompts/get", "params": { "name": "save_page", "arguments": { "topic": "Lifetimes" } } }),
+                json!({ "jsonrpc": "2.0", "id": 4, "method": "prompts/get", "params": { "name": "ask_vault", "arguments": {} } }),
+                json!({ "jsonrpc": "2.0", "id": 5, "method": "prompts/get", "params": { "name": "nope" } }),
+                json!({ "jsonrpc": "2.0", "id": 6, "method": "prompts/get", "params": { "name": "review_session" } }),
+            ],
+        );
+
+        let names: Vec<_> = replies[0]["result"]["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["save_page", "ask_vault", "review_session"]);
+
+        let text = |i: usize| {
+            replies[i]["result"]["messages"][0]["content"]["text"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        let with_folder = text(1);
+        assert!(with_folder.contains("Cargo workspaces"));
+        assert!(with_folder.contains("in the folder `rust`"));
+        assert!(!with_folder.contains('{'), "every placeholder is filled");
+        let without_folder = text(2);
+        assert!(!without_folder.contains("folder `") && !without_folder.contains('{'));
+        assert_eq!(
+            replies[3]["error"]["code"], -32602,
+            "a required argument is missing"
+        );
+        assert_eq!(replies[4]["error"]["code"], -32602);
+        assert!(text(5).contains("review_due"));
     }
 
     #[test]
