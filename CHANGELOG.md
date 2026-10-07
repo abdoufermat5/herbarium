@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Page sources: a page can record where it came from — the address it was saved from, the tool that generated it and the prompt that asked for it. `pages.create` and `pages.update` take `source`, the tool and prompt are searchable, the details panel shows them, `herbarium add` records a fetched URL and takes `--tool` and `--prompt`, and agents are asked to fill it in.
+- MCP resources and prompts: every page is a resource (`herbarium://page/<id>` for its HTML, `herbarium://page/<id>/text` for its text), and the `save_page`, `ask_vault` and `review_session` prompts package common requests.
+- Review agent edits: with Settings → Agents → "Review agent edits" on, an agent's `pages.set_html` or `history.restore` leaves a proposal instead of changing the page. The reader shows a banner and a side-by-side diff to accept or reject it, new proposals are announced, and accepting one for a page that changed since asks first. Agents get `agents.settings`, `proposals.list` and `proposals.get`; only the user can accept, reject or change the setting.
+- Quiz mode: answers a page marks with `data-herbarium-recall` (optionally holding the question) are hidden behind a "show answer" button during review sessions, or on any page with "Quiz me" in the reader.
+
 ## [0.2.1] - 2026-10-04
 
 ### Added

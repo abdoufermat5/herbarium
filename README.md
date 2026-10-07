@@ -34,6 +34,8 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 - **Read** each page in a sandboxed viewer, scripts included. Pages that save progress with `localStorage` or `window.storage` keep it between visits.
 - **Edit** the HTML in the app or in your own editor. Every in-app or agent edit keeps the previous version, which you can compare and restore.
 - **Review** pages with adaptive scheduling (FSRS): grade each review Again, Hard, Good or Easy and pick the retention you want, with reminders and a keyboard-driven review session.
+- **Quiz** yourself: answers a page marks with `data-herbarium-recall` stay hidden until you reveal them.
+- **Remember the source**: the page, tool and prompt each page came from.
 - **Trash** with restore and undo.
 - **Command palette** (`Ctrl/⌘ K`); press `?` for all shortcuts.
 - Light and dark themes, English and French.
@@ -57,6 +59,8 @@ claude mcp add herbarium -- herbarium mcp
 ```
 
 Then ask, for example, *"write a short HTML explainer of Cargo workspaces and save it to Herbarium under `rust`"*. It uses the vault last opened in the app (or `--vault <path>`).
+
+Pages are also MCP resources (`herbarium://page/<id>`), and the server offers `save_page`, `ask_vault` and `review_session` prompts. To approve agent rewrites before they land, turn on Settings → Agents → Review agent edits.
 
 Pages open from links like `herbarium-app://open/<page-id>`, which `herbarium add` prints and agents can hand you.
 
