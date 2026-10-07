@@ -779,4 +779,13 @@ export const fr: Record<MessageKey, string> = {
   "search.filtersHelp": "Filtres : tag:rust · folder:notes · tool:claude · is:due · is:scheduled · is:unscheduled · has:note · has:source · due:7d · updated:7d · created:30d. Ajoutez - devant pour exclure.",
   "sidebar.savedSearches": "Recherches enregistrées",
   "sidebar.removeSearch": "Supprimer la recherche « {name} »",
+  "links.title": "Liens",
+  "links.copy": "Copier le lien",
+  "links.copyHint": "Copier le lien de cette page pour l'utiliser dans une autre",
+  "links.copied": "Lien copié. Utilisez-le comme href dans une autre page pour pointer ici.",
+  "links.copyFailed": "Impossible de copier le lien",
+  "links.to": "Pointe vers",
+  "links.from": "Cité par",
+  "links.brokenHint": "Aucune page avec cet identifiant",
+  "links.none": "Aucun lien pour l'instant. Les pages se lient avec herbarium-app://open/<id>.",
 };

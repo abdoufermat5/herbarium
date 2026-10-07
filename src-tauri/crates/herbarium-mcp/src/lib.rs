@@ -50,6 +50,8 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   `<p data-herbarium-recall=\"What does Cargo.lock pin?\">Exact versions…</p>`. \
   During review sessions (or when the user turns on \"Quiz me\") those elements \
   are hidden until the user reveals them; mark answers, not whole sections.
+- Link related pages with `<a href=\"herbarium-app://open/<id>\">`: clicking \
+  it in Herbarium opens that page, and pages_links lists links and backlinks.
 - Pass `source` to pages_create: `tool` (what you are, e.g. \"Claude Code\"), \
   `prompt` (the user's request, briefly) and `url` when the page came from the \
   web. The user sees it with the page and can search it.
@@ -144,6 +146,7 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("history.restore", "Restore page version", Effect::Mutating),
     ("agents.settings", "Agent settings", Effect::ReadOnly),
     ("searches.list", "List saved searches", Effect::ReadOnly),
+    ("pages.links", "Page links and backlinks", Effect::ReadOnly),
     ("searches.save", "Save search", Effect::Idempotent),
     (
         "searches.delete",

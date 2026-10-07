@@ -74,6 +74,16 @@ export interface ProposalSummary {
   stale: boolean;
 }
 
+/** A page's links (`pages.links`). */
+export interface PageLinks {
+  /** Pages this page links to. */
+  links: PageMeta[];
+  /** Linked ids with no page in the vault. */
+  broken: string[];
+  /** Pages linking to this page. */
+  backlinks: PageMeta[];
+}
+
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */
 export interface SavedSearch {
   name: string;

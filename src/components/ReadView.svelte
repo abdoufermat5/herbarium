@@ -11,13 +11,14 @@
     duplicatePage,
     nextReviewPage,
     goView,
+    openPage,
   } from "../lib/state.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
   import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
-  import type { Page, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
+  import type { Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
@@ -468,6 +469,35 @@
   }
 
   const pageSource = $derived(page?.meta.ext?.source ?? null);
+
+  let pageLinks = $state<PageLinks | null>(null);
+
+  // Links change when this page or any other is rewritten; refetch on both.
+  $effect(() => {
+    const p = page;
+    void app.vaultRevision;
+    if (!p) return;
+    const pageId = p.meta.id;
+    void p.meta.updatedAt;
+    api
+      .pageLinks(pageId)
+      .then((links) => {
+        if (page?.meta.id === pageId) pageLinks = links;
+      })
+      .catch((e) => console.error(e));
+  });
+
+  /** Copy the link other pages use to point here. */
+  async function copyPageLink() {
+    const p = page;
+    if (!p) return;
+    try {
+      await navigator.clipboard.writeText(`herbarium-app://open/${p.meta.id}`);
+      toast(t("links.copied"), "success");
+    } catch (e) {
+      toast(`${t("links.copyFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
   const sourceHost = $derived.by(() => {
     const url = pageSource?.url;
     if (!url) return "";
@@ -1374,6 +1404,38 @@
             </div>
           </section>
 
+          <section class="insp-section">
+            <div class="links-head">
+              <h2 class="eyebrow">{t("links.title")}</h2>
+              <button class="btn btn-xs btn-ghost" onclick={copyPageLink} title={t("links.copyHint")}>
+                {t("links.copy")}
+              </button>
+            </div>
+            {#if pageLinks && (pageLinks.links.length || pageLinks.backlinks.length || pageLinks.broken.length)}
+              {#if pageLinks.links.length || pageLinks.broken.length}
+                <h3 class="links-sub">{t("links.to")}</h3>
+                <ul class="links-list">
+                  {#each pageLinks.links as l (l.id)}
+                    <li><button class="link-btn" onclick={() => void openPage(l.id)}>{l.title}</button></li>
+                  {/each}
+                  {#each pageLinks.broken as id (id)}
+                    <li class="broken" title={t("links.brokenHint")}>{id}</li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if pageLinks.backlinks.length}
+                <h3 class="links-sub">{t("links.from")}</h3>
+                <ul class="links-list">
+                  {#each pageLinks.backlinks as l (l.id)}
+                    <li><button class="link-btn" onclick={() => void openPage(l.id)}>{l.title}</button></li>
+                  {/each}
+                </ul>
+              {/if}
+            {:else}
+              <p class="hint">{t("links.none")}</p>
+            {/if}
+          </section>
+
           {#if pageSource}
             <section class="insp-section">
               <h2 class="eyebrow">{t("insp.source")}</h2>
@@ -1875,6 +1937,41 @@
 
   .link-btn:hover {
     text-decoration: underline;
+  }
+
+  .links-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .links-sub {
+    margin: 8px 0 4px;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .links-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--fs-sm);
+  }
+
+  .links-list .link-btn {
+    text-align: left;
+  }
+
+  .links-list .broken {
+    color: var(--muted);
+    text-decoration: line-through;
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
   }
 
   .source-prompt {

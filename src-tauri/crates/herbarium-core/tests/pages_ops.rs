@@ -951,3 +951,72 @@ fn saved_searches_round_trip() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn links_and_backlinks_follow_the_files() {
+    let vault = temp_vault("links");
+    let host = open(&vault);
+    let target = create(&host, "Target", None, &[]);
+    let tid = target["id"].as_str().unwrap().to_string();
+    let linker = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": format!(
+                "<title>Linker</title><a href=\"herbarium-app://open/{tid}#part\">t</a>\
+                 <a href=\"HERBARIUM-APP://open/{tid}\">again</a>\
+                 <a href=\"herbarium-app://open/ghost\">g</a><a href=\"https://x.y/\">web</a>\
+                 <p>herbarium-app://open/not-a-link</p>"
+            ) }),
+        )
+        .unwrap();
+    let lid = linker["id"].as_str().unwrap().to_string();
+
+    let links = host
+        .call(Caller::Agent, "pages.links", json!({ "id": lid }))
+        .unwrap();
+    assert_eq!(links["links"].as_array().unwrap().len(), 1);
+    assert_eq!(links["links"][0]["id"], tid.as_str());
+    assert_eq!(links["broken"], json!(["ghost"]));
+    let back = host
+        .call(Caller::Agent, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert_eq!(back["backlinks"][0]["id"], lid.as_str());
+
+    // Rewriting the page drops the link; the index notices the change.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    host.call(
+        Caller::Ui,
+        "pages.set_html",
+        json!({ "id": lid, "html": "<title>Linker</title><p>no links</p>" }),
+    )
+    .unwrap();
+    let back = host
+        .call(Caller::Ui, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert!(back["backlinks"].as_array().unwrap().is_empty());
+
+    // A trashed linker no longer counts.
+    host.call(
+        Caller::Ui,
+        "pages.set_html",
+        json!({ "id": lid, "html": format!("<title>Linker</title><a href=\"herbarium-app://open/{tid}\">t</a>") }),
+    )
+    .unwrap();
+    assert_eq!(
+        host.call(Caller::Ui, "pages.links", json!({ "id": tid }))
+            .unwrap()["backlinks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    host.call(Caller::Ui, "pages.delete", json!({ "id": lid }))
+        .unwrap();
+    let back = host
+        .call(Caller::Ui, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert!(back["backlinks"].as_array().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

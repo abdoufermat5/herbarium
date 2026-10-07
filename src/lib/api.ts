@@ -9,6 +9,7 @@ import type {
   HistoryEntry,
   AgentSettings,
   SavedSearch,
+  PageLinks,
   ProposalSummary,
   ImportFile,
   ImportResult,
@@ -169,6 +170,11 @@ export const api = {
   /** Restore a saved version; `expectedUpdatedAt` rejects a stale overwrite with `conflict:`. */
   restoreHistory(id: string, at: number, expectedUpdatedAt?: number): Promise<PageMeta> {
     return op("history.restore", { id, at, expectedUpdatedAt });
+  },
+
+  /** Pages a page links to, broken links, and pages linking to it. */
+  pageLinks(id: string): Promise<PageLinks> {
+    return op("pages.links", { id });
   },
 
   savedSearches(): Promise<SavedSearch[]> {

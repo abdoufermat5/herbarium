@@ -769,6 +769,15 @@ export const en = {
   "search.filtersHelp": "Filters: tag:rust · folder:notes · tool:claude · is:due · is:scheduled · is:unscheduled · has:note · has:source · due:7d · updated:7d · created:30d. Put - in front to exclude.",
   "sidebar.savedSearches": "Saved searches",
   "sidebar.removeSearch": "Remove saved search “{name}”",
+  "links.title": "Links",
+  "links.copy": "Copy link",
+  "links.copyHint": "Copy this page's link to use in another page",
+  "links.copied": "Link copied. Use it as an href in another page to link here.",
+  "links.copyFailed": "Couldn't copy the link",
+  "links.to": "Links to",
+  "links.from": "Linked from",
+  "links.brokenHint": "No page with this id",
+  "links.none": "No links yet. Pages link to each other with herbarium-app://open/<id>.",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -3,6 +3,7 @@
 mod fsrs;
 mod history;
 mod library;
+mod links;
 mod network;
 mod pages;
 mod proposals;
@@ -24,6 +25,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(history::History),
         Box::new(proposals::Proposals),
         Box::new(searches::Searches),
+        Box::new(links::Links),
     ]
 }
 
