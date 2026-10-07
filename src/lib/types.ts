@@ -58,6 +58,28 @@ export interface HistoryEntry {
   bytes: number;
 }
 
+/** An agent's rewrite of a page waiting for approval (`proposals.list`). */
+export interface ProposalSummary {
+  /** The page id. */
+  id: string;
+  /** When the agent proposed it, unix ms. */
+  at: number;
+  baseUpdatedAt: number;
+  /** The `<title>` of the proposed HTML. */
+  title: string;
+  /** The page's current title. */
+  pageTitle: string;
+  bytes: number;
+  /** The page changed after the agent read it. */
+  stale: boolean;
+}
+
+/** Vault-wide agent settings (`.herbarium/agents.json`). */
+export interface AgentSettings {
+  /** Agent rewrites of a page's HTML wait for approval. */
+  reviewEdits: boolean;
+}
+
 export interface Page {
   meta: PageMeta;
   html: string;

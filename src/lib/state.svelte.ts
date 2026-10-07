@@ -10,6 +10,7 @@ import type {
   BulkUpdateResult,
   Config,
   PageMeta,
+  ProposalSummary,
   ReviewSettings,
   ReviewStats,
   TagCount,
@@ -82,6 +83,10 @@ interface AppState {
   inspectorOpen: boolean;
   /** The reader's version-history panel is open. */
   historyOpen: boolean;
+  /** Agent edits waiting for approval, newest first. */
+  proposals: ProposalSummary[];
+  /** The reader's proposal panel (review an agent's edit) is open. */
+  proposalOpen: boolean;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -158,6 +163,8 @@ export const app: AppState = $state({
   paletteOpen: false,
   inspectorOpen: prefs.detailsOpen,
   historyOpen: false,
+  proposals: [],
+  proposalOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -254,13 +261,14 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
     api.listPages(),
     api.reviewSettings(),
     api.reviewStats(),
+    api.listProposals(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -286,6 +294,10 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   }
   if (due.status === "fulfilled") void notifyDue(due.value);
   else console.error(due.reason);
+  if (proposals.status === "fulfilled") {
+    app.proposals = proposals.value;
+    announceProposals(proposals.value);
+  } else console.error(proposals.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -295,6 +307,37 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   app.library = library.value;
   armDueTimer(library.value);
   return library.value;
+}
+
+/** Proposals already announced (`id:at`); null until the vault's first load. */
+let knownProposals: Set<string> | null = null;
+
+/** Toast agent edits that arrived since the last refresh: on the vault's first
+ *  load, one summary of everything waiting; afterwards, each new proposal. */
+function announceProposals(list: ProposalSummary[]) {
+  const keys = new Set(list.map((p) => `${p.id}:${p.at}`));
+  const fresh = knownProposals ? list.filter((p) => !knownProposals!.has(`${p.id}:${p.at}`)) : list;
+  knownProposals = keys;
+  if (fresh.length === 0) return;
+  const first = fresh[0];
+  const message =
+    fresh.length === 1
+      ? t("proposal.arrived", { title: first.pageTitle })
+      : t("proposal.arrivedMany", { count: fresh.length });
+  toast(message, "info", 10000, {
+    label: t("proposal.review"),
+    run: () => void reviewProposal(first.id),
+  });
+}
+
+/** Open a page with its pending agent edit shown for review. */
+export async function reviewProposal(id: string): Promise<boolean> {
+  const opened = app.readId === id || (await openPage(id));
+  if (opened) {
+    app.historyOpen = false;
+    app.proposalOpen = true;
+  }
+  return opened;
 }
 
 /** Interval of the background refresh; a review due sooner gets its own timer. */
@@ -403,6 +446,9 @@ export function resetWorkspace() {
   app.readId = null;
   app.reviewSession = false;
   app.historyOpen = false;
+  app.proposals = [];
+  app.proposalOpen = false;
+  knownProposals = null;
   app.createRequest = null;
   app.loadError = null;
   app.reviewError = null;
@@ -517,6 +563,7 @@ async function go(action: () => void | Promise<void>): Promise<boolean> {
 export function openPage(id: string): Promise<boolean> {
   return go(() => {
     app.reviewSession = false;
+    app.proposalOpen = false;
     app.readId = id;
   });
 }

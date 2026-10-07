@@ -5,6 +5,7 @@ mod history;
 mod library;
 mod network;
 mod pages;
+mod proposals;
 mod review;
 mod storage;
 
@@ -20,6 +21,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(storage::Storage),
         Box::new(network::Network),
         Box::new(history::History),
+        Box::new(proposals::Proposals),
     ]
 }
 

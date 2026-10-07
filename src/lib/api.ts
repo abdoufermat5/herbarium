@@ -7,6 +7,8 @@ import type {
   Config,
   EditorInfo,
   HistoryEntry,
+  AgentSettings,
+  ProposalSummary,
   ImportFile,
   ImportResult,
   IndexReport,
@@ -166,6 +168,33 @@ export const api = {
   /** Restore a saved version; `expectedUpdatedAt` rejects a stale overwrite with `conflict:`. */
   restoreHistory(id: string, at: number, expectedUpdatedAt?: number): Promise<PageMeta> {
     return op("history.restore", { id, at, expectedUpdatedAt });
+  },
+
+  /** Agent edits waiting for approval, newest first. */
+  listProposals(): Promise<ProposalSummary[]> {
+    return op("proposals.list");
+  },
+
+  /** The HTML an agent proposed for a page. */
+  getProposal(id: string): Promise<{ proposal: ProposalSummary; html: string }> {
+    return op("proposals.get", { id });
+  },
+
+  /** Apply a proposal; without `force` a page changed since rejects with `conflict:`. */
+  acceptProposal(id: string, force = false): Promise<PageMeta> {
+    return op("proposals.accept", { id, force });
+  },
+
+  rejectProposal(id: string): Promise<{ rejected: string }> {
+    return op("proposals.reject", { id });
+  },
+
+  agentSettings(): Promise<AgentSettings> {
+    return op("agents.settings");
+  },
+
+  configureAgents(settings: AgentSettings): Promise<AgentSettings> {
+    return op("agents.configure", { ...settings });
   },
 
   duplicatePage(id: string): Promise<PageMeta> {

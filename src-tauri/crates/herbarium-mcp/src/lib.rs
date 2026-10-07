@@ -48,6 +48,10 @@ When writing a page for Herbarium (pages_create / pages_set_html):
 - Pass `source` to pages_create: `tool` (what you are, e.g. \"Claude Code\"), \
   `prompt` (the user's request, briefly) and `url` when the page came from the \
   web. The user sees it with the page and can search it.
+- The user may review agent edits (agents_settings): pages_set_html and \
+  history_restore then return `pendingApproval: true` and leave the page \
+  unchanged until the user accepts the proposal in Herbarium. Say so to the user \
+  instead of reporting the page as updated.
 - Prefer existing folders and tags (folders_list, tags_list) over new ones.
 
 Library behaviour:
@@ -133,6 +137,13 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("history.list", "List page versions", Effect::ReadOnly),
     ("history.get", "Read page version", Effect::ReadOnly),
     ("history.restore", "Restore page version", Effect::Mutating),
+    ("agents.settings", "Agent settings", Effect::ReadOnly),
+    (
+        "proposals.list",
+        "Edits awaiting approval",
+        Effect::ReadOnly,
+    ),
+    ("proposals.get", "Read proposed edit", Effect::ReadOnly),
 ];
 
 /// MCP tool annotations for an operation. Operations missing from

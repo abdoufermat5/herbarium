@@ -108,6 +108,8 @@ pub mod events {
     pub const PAGE_UPDATED: &str = "page.updated";
     pub const PAGE_DELETED: &str = "page.deleted";
     pub const VAULT_INDEXED: &str = "vault.indexed";
+    pub const PROPOSAL_CREATED: &str = "proposal.created";
+    pub const PROPOSAL_RESOLVED: &str = "proposal.resolved";
 }
 
 pub trait Extension: Send + Sync {

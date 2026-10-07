@@ -35,7 +35,40 @@
     }
   }
 
-  onMount(() => void loadNetwork());
+  let reviewEdits = $state(false);
+  let agentsLoaded = $state(false);
+  let agentsSaving = $state(false);
+  let agentsError = $state("");
+
+  async function loadAgents() {
+    try {
+      reviewEdits = (await api.agentSettings()).reviewEdits;
+    } catch (e) {
+      console.error(e);
+      agentsError = errorMessage(e);
+    } finally {
+      agentsLoaded = true;
+    }
+  }
+
+  async function setReviewEdits(value: boolean) {
+    if (agentsSaving) return;
+    agentsSaving = true;
+    try {
+      reviewEdits = (await api.configureAgents({ reviewEdits: value })).reviewEdits;
+      toast(value ? t("settings.reviewEditsOn") : t("settings.reviewEditsOff"), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.agentsSaveFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      agentsSaving = false;
+    }
+  }
+
+  onMount(() => {
+    void loadNetwork();
+    void loadAgents();
+  });
 
   async function rescan() {
     if (scanning) return;
@@ -265,6 +298,20 @@
   </SettingRow>
   {#if netError}
     <p class="net-error">{t("settings.networkReadFailed", { detail: netError })}</p>
+  {/if}
+</SettingsSection>
+
+<SettingsSection id="settings-agents" title={t("settings.agents")} note={t("settings.agentsNote")}>
+  <SettingRow title={t("settings.reviewEdits")} hint={t("settings.reviewEditsHint")}>
+    <Switch
+      checked={reviewEdits}
+      disabled={!agentsLoaded || agentsSaving || !!agentsError}
+      label={t("settings.reviewEdits")}
+      onchange={setReviewEdits}
+    />
+  </SettingRow>
+  {#if agentsError}
+    <p class="net-error">{t("settings.agentsReadFailed", { detail: agentsError })}</p>
   {/if}
 </SettingsSection>
 

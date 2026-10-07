@@ -23,6 +23,7 @@
   import PresetButtons from "./PresetButtons.svelte";
   import HtmlEditor from "./HtmlEditor.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
+  import ProposalPanel from "./ProposalPanel.svelte";
   import { prefs } from "../lib/prefs.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
   // Single source of truth for the page storage shim, shared with the Rust
@@ -591,6 +592,52 @@
     }
   }
 
+  /* ------------------------------------------------------- agent proposals */
+
+  const pendingProposal = $derived(app.proposals.find((x) => x.id === page?.meta.id) ?? null);
+
+  async function acceptProposal(): Promise<boolean> {
+    const p = page;
+    if (!p || pageGone) return false;
+    if (!(await confirmDiscardUnsaved())) return false;
+    try {
+      try {
+        await api.acceptProposal(p.meta.id);
+      } catch (e) {
+        if (!errorMessage(e).startsWith("conflict")) throw e;
+        const force = await confirmAction({
+          title: t("proposal.staleTitle"),
+          message: t("proposal.staleMessage"),
+          confirmLabel: t("proposal.acceptAnyway"),
+          danger: true,
+        });
+        if (!force) return false;
+        await api.acceptProposal(p.meta.id, true);
+      }
+      await load();
+      await reloadPages(true);
+      toast(t("proposal.accepted"), "success");
+      return true;
+    } catch (e) {
+      toast(`${t("proposal.acceptFailed")}: ${errorMessage(e)}`, "error");
+      return false;
+    }
+  }
+
+  async function rejectProposal(): Promise<boolean> {
+    const p = page;
+    if (!p) return false;
+    try {
+      await api.rejectProposal(p.meta.id);
+      await reloadPages(true);
+      toast(t("proposal.rejected"), "success");
+      return true;
+    } catch (e) {
+      toast(`${t("proposal.rejectFailed")}: ${errorMessage(e)}`, "error");
+      return false;
+    }
+  }
+
   /* ------------------------------------------------------ conflict handling */
 
   function keepEditing() {
@@ -1001,6 +1048,21 @@
       </div>
     {/if}
 
+    {#if pendingProposal && !app.proposalOpen}
+      <div class="banner proposal" role="status">
+        <Icon name="file-text" size={14} />
+        <div class="banner-text">
+          <strong>{t("proposal.bannerTitle")}</strong>
+          <span>{t("proposal.bannerMessage", { when: timeAgo(pendingProposal.at) })}</span>
+        </div>
+        <div class="banner-actions">
+          <button class="btn btn-xs btn-primary" onclick={() => (app.proposalOpen = true)}>
+            {t("proposal.review")}
+          </button>
+        </div>
+      </div>
+    {/if}
+
     {#if conflict}
       <div class="banner warn" role="alert">
         <Icon name="info" size={14} />
@@ -1365,6 +1427,16 @@
         onClose={() => (app.historyOpen = false)}
       />
     {/if}
+
+    {#if app.proposalOpen && pendingProposal}
+      <ProposalPanel
+        pageId={page.meta.id}
+        currentHtml={page.html}
+        onAccept={acceptProposal}
+        onReject={rejectProposal}
+        onClose={() => (app.proposalOpen = false)}
+      />
+    {/if}
   {:else}
     <div class="load">
       <span class="spinner"></span>
@@ -1457,6 +1529,11 @@
     background: var(--warn-soft);
     color: var(--warn);
     border-bottom-color: var(--warn-border);
+  }
+
+  .banner.proposal {
+    background: var(--raised);
+    color: var(--text);
   }
 
   .banner.danger {

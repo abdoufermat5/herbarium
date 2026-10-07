@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PageMeta, ReviewSettings, ReviewStats } from "./types";
+import type { PageMeta, ProposalSummary, ReviewSettings, ReviewStats } from "./types";
 
 const mocks = vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
   return {
     tags: vi.fn(), folders: vi.fn(), reviewToday: vi.fn(), listPages: vi.fn(),
-    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(),
+    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(),
   };
 });
 vi.mock("./api", () => ({ api: mocks }));
@@ -44,6 +44,7 @@ beforeEach(() => {
   mocks.listPages.mockResolvedValue([]);
   mocks.reviewSettings.mockResolvedValue(settings);
   mocks.reviewStats.mockResolvedValue(stats);
+  mocks.listProposals.mockResolvedValue([]);
 });
 afterEach(() => { resetWorkspace(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(() => vi.unstubAllGlobals());
@@ -113,5 +114,41 @@ describe("library state", () => {
     expect(app.library).toEqual([]);
     expect(app.dueCount).toBe(0);
     expect(app.reviewStats).toBeNull();
+  });
+});
+
+describe("agent proposals", () => {
+  const proposal = (id: string, at: number): ProposalSummary => ({
+    id, at, baseUpdatedAt: 1, title: `${id} v2`, pageTitle: id, bytes: 10, stale: false,
+  });
+
+  it("announces what is waiting once, then only proposals that arrive later", async () => {
+    mocks.listProposals.mockResolvedValue([proposal("a", 2), proposal("b", 1)]);
+    await refreshAll();
+    expect(app.proposals.map((p) => p.id)).toEqual(["a", "b"]);
+    expect(app.toasts).toHaveLength(1);
+    expect(app.toasts[0].message).toContain("2");
+
+    await refreshAll();
+    expect(app.toasts).toHaveLength(1);
+
+    mocks.listProposals.mockResolvedValue([proposal("a", 3), proposal("b", 1)]);
+    await refreshAll();
+    expect(app.toasts).toHaveLength(2);
+    expect(app.toasts[1].action).toBeDefined();
+  });
+
+  it("keeps the library when proposals cannot be read, and forgets them on reset", async () => {
+    mocks.listPages.mockResolvedValue([page("p")]);
+    mocks.listProposals.mockRejectedValue("proposals unreadable");
+    expect(await refreshAll()).toHaveLength(1);
+    expect(app.proposals).toEqual([]);
+
+    mocks.listProposals.mockResolvedValue([proposal("p", 1)]);
+    await refreshAll();
+    expect(app.proposals).toHaveLength(1);
+    resetWorkspace();
+    expect(app.proposals).toEqual([]);
+    expect(app.proposalOpen).toBe(false);
   });
 });

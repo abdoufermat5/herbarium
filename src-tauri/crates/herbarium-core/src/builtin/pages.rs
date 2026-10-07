@@ -7,6 +7,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
 use super::network::default_allow_cdn;
+use super::proposals::{delete_proposal, overwrite_or_propose};
 use super::review::{apply_schedule, load_settings};
 use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
@@ -156,7 +157,7 @@ fn clean_tags(tags: Vec<String>) -> Vec<String> {
     out
 }
 
-fn ensure_html(html: &str) -> OpResult<()> {
+pub(crate) fn ensure_html(html: &str) -> OpResult<()> {
     if looks_like_html(html) {
         Ok(())
     } else {
@@ -165,7 +166,11 @@ fn ensure_html(html: &str) -> OpResult<()> {
 }
 
 /// Reject an edit made against a stale copy of the page.
-fn check_base(vault: &Path, meta: &PageMeta, base_updated_at: Option<i64>) -> OpResult<()> {
+pub(crate) fn check_base(
+    vault: &Path,
+    meta: &PageMeta,
+    base_updated_at: Option<i64>,
+) -> OpResult<()> {
     if let Some(base) = base_updated_at {
         if base != meta.updated_at {
             return Err(CONFLICT.into());
@@ -258,6 +263,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
     // page must not inherit its history.
     if !vault::trash_entry_exists(&store.vault, &meta.id) {
         vault::delete_history(&store.vault, &meta.id)?;
+        delete_proposal(&store.vault, &meta.id)?;
     }
     vault::write_page(&store.vault, meta, html)?;
     // The bytes are on disk now; keep the returned `updatedAt` at least their
@@ -358,16 +364,18 @@ fn bulk_edit(
     Ok(meta)
 }
 
-/// Replace a page's HTML: the one code path shared by `pages.set_html` and
-/// `history.restore`. Snapshots the current on-disk HTML first (unless the new
-/// bytes are identical), enforces the same `baseUpdatedAt` conflict rule, keeps
-/// the title following the document unless the user renamed the page, and
-/// emits `page.updated`.
-pub(crate) fn overwrite_html(
+/// Replace a page's HTML: the one code path shared by `pages.set_html`,
+/// `history.restore` and `proposals.accept`. Snapshots the current on-disk HTML
+/// first (unless the new bytes are identical), tagged with `caller` (`ui` or
+/// `agent`), enforces the same `baseUpdatedAt` conflict rule, keeps the title
+/// following the document unless the user renamed the page, and emits
+/// `page.updated`.
+pub(crate) fn overwrite_html_by(
     ctx: &mut Ctx,
     id: &str,
     html: &str,
     base_updated_at: Option<i64>,
+    caller: &str,
 ) -> OpResult<PageMeta> {
     ensure_html(html)?;
     let mut meta = ctx.page(id)?;
@@ -382,13 +390,7 @@ pub(crate) fn overwrite_html(
     meta.updated_at = now_ms();
     let store = ctx.store;
     // Keep the bytes being replaced recoverable before they are overwritten.
-    vault::snapshot_history(
-        &store.vault,
-        &meta.id,
-        meta.folder.as_deref(),
-        html,
-        ctx.caller.tag(),
-    )?;
+    vault::snapshot_history(&store.vault, &meta.id, meta.folder.as_deref(), html, caller)?;
     vault::write_page(&store.vault, &meta, html)?;
     // The optimistic check compares `updatedAt` with the HTML's mtime, so the
     // value we hand back must not be older than the file just written.
@@ -585,7 +587,7 @@ impl Extension for Pages {
 
         r.add(Operation::new(
             "pages.set_html",
-            "Replace a page's HTML (e.g. to revise generated documentation). Tags, folder, note and review state are kept; the title follows the new <title> unless the user renamed the page. Pass `baseUpdatedAt` (the `updatedAt` you last read) to fail with a `conflict:` error instead of overwriting a newer edit.",
+            "Replace a page's HTML (e.g. to revise generated documentation). Tags, folder, note and review state are kept; the title follows the new <title> unless the user renamed the page. Pass `baseUpdatedAt` (the `updatedAt` you last read) to fail with a `conflict:` error instead of overwriting a newer edit. If the user reviews agent edits (see `agents_settings`), the page is left unchanged and the result is `{ pendingApproval: true, proposal, page }` until the user accepts it.",
             object(
                 json!({
                     "id": id_prop(),
@@ -594,7 +596,7 @@ impl Extension for Pages {
                 }),
                 &["id", "html"],
             ),
-            |ctx: &mut Ctx, a: SetHtmlArgs| overwrite_html(ctx, &a.id, &a.html, a.base_updated_at),
+            |ctx: &mut Ctx, a: SetHtmlArgs| overwrite_or_propose(ctx, &a.id, &a.html, a.base_updated_at),
         ))?;
 
         r.add(Operation::new(
