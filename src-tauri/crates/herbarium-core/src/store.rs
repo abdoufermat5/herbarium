@@ -121,7 +121,7 @@ impl Store {
                 meta.title,
                 tags,
                 meta.folder.as_deref().unwrap_or_default(),
-                meta.note,
+                fts_note(meta),
                 text,
             ],
         )?;
@@ -438,6 +438,20 @@ fn like_pattern(query: &str) -> String {
         })
         .collect();
     format!("%{esc}%")
+}
+
+/// The note as indexed for search: the page's source tool and prompt are
+/// searchable alongside it.
+fn fts_note(meta: &PageMeta) -> String {
+    let Some(source) = crate::models::PageSource::of(meta) else {
+        return meta.note.clone();
+    };
+    let mut out = meta.note.clone();
+    for part in [source.tool, source.prompt].into_iter().flatten() {
+        out.push('\n');
+        out.push_str(&part);
+    }
+    out
 }
 
 #[cfg(test)]

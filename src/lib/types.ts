@@ -25,7 +25,17 @@ export interface PageMeta {
   /** The `<title>` extracted from the HTML at its last write or index. */
   sourceTitle?: string | null;
   /** Extension-owned data keyed by extension id; absent when empty. */
-  ext?: Record<string, unknown> & { review?: ReviewHistory };
+  ext?: Record<string, unknown> & { review?: ReviewHistory; source?: PageSource };
+}
+
+/** Where a page came from (`ext.source`); every field is optional. */
+export interface PageSource {
+  /** http(s) address the page was saved from. */
+  url?: string;
+  /** Tool or model that generated the page. */
+  tool?: string;
+  /** The request that produced the page. */
+  prompt?: string;
 }
 
 /** A full-text hit: the page plus a `[match]`-marked excerpt of its text, when the match was there. */

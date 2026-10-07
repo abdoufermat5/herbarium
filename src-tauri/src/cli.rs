@@ -44,6 +44,10 @@ pub struct AddArgs {
     pub title: Option<String>,
     /// `--network` / `--no-network`; absent follows the vault default.
     pub network: Option<bool>,
+    /// `--tool`: what generated the pages, recorded as their source.
+    pub tool: Option<String>,
+    /// `--prompt`: the request that produced the pages.
+    pub prompt: Option<String>,
     pub inputs: Vec<String>,
 }
 
@@ -69,8 +73,11 @@ options:
   --title <title>   page title; only with a single input (default: the page's <title>)
   --network         allow the page to load from allowlisted CDNs
   --no-network      block all network access for the page (default: the vault setting)
+  --tool <name>     record the tool that generated the page, e.g. \"Claude Code\"
+  --prompt <text>   record the request that produced the page
   -h, --help        show this help
 
+A page fetched from a URL records that URL as its source.
 Fetched URLs time out after 30 s and are capped at 20 MiB.
 Exit status: 0 on success, 1 when any input failed, 2 on a usage error.";
 
@@ -115,6 +122,14 @@ pub fn parse_add(args: &[String]) -> Result<Option<AddArgs>, String> {
             }
             "--title" => {
                 parsed.title = Some(take_value(args, &mut i, "--title")?);
+                continue;
+            }
+            "--tool" => {
+                parsed.tool = Some(take_value(args, &mut i, "--tool")?);
+                continue;
+            }
+            "--prompt" => {
+                parsed.prompt = Some(take_value(args, &mut i, "--prompt")?);
                 continue;
             }
             "--network" => parsed.network = Some(true),
@@ -222,10 +237,11 @@ fn add(args: &AddArgs) -> Result<bool, String> {
 
 /// Import one input (file, `-`, or URL) and return the new page id.
 fn import_one(host: &Host, args: &AddArgs, input: &str) -> Result<String, String> {
+    let is_url = input.starts_with("http://") || input.starts_with("https://");
     let html = if input == "-" {
         let body = read_capped(std::io::stdin().lock(), "input")?;
         String::from_utf8(body).map_err(|_| "input is not valid UTF-8".to_string())?
-    } else if input.starts_with("http://") || input.starts_with("https://") {
+    } else if is_url {
         fetch(input)?
     } else {
         std::fs::read_to_string(input).map_err(|e| e.to_string())?
@@ -244,6 +260,19 @@ fn import_one(host: &Host, args: &AddArgs, input: &str) -> Result<String, String
     }
     if let Some(network) = args.network {
         op.insert("allowCdn".into(), Value::Bool(network));
+    }
+    let mut source = Map::new();
+    if is_url {
+        source.insert("url".into(), Value::String(input.to_string()));
+    }
+    if let Some(tool) = &args.tool {
+        source.insert("tool".into(), Value::String(tool.clone()));
+    }
+    if let Some(prompt) = &args.prompt {
+        source.insert("prompt".into(), Value::String(prompt.clone()));
+    }
+    if !source.is_empty() {
+        op.insert("source".into(), Value::Object(source));
     }
 
     // The user is invoking this directly, so the CLI counts as the UI; the
@@ -315,6 +344,10 @@ mod tests {
             "--title",
             "T",
             "--network",
+            "--tool",
+            "Claude Code",
+            "--prompt",
+            "explain cargo",
             "page.html",
         ]))
         .unwrap()
@@ -327,6 +360,8 @@ mod tests {
                 tags: vec!["rust".into(), "cargo".into()],
                 title: Some("T".into()),
                 network: Some(true),
+                tool: Some("Claude Code".into()),
+                prompt: Some("explain cargo".into()),
                 inputs: vec!["page.html".into()],
             }
         );

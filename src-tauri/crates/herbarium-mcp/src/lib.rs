@@ -41,6 +41,9 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   the Claude-artifact `window.storage` API (async `get`/`set`/`delete`/`list`, \
   with an optional `shared` flag) are persisted per page in the vault, capped \
   at 1 MiB per page. Use them for progress, preferences and small saved inputs.
+- Pass `source` to pages_create: `tool` (what you are, e.g. \"Claude Code\"), \
+  `prompt` (the user's request, briefly) and `url` when the page came from the \
+  web. The user sees it with the page and can search it.
 - Prefer existing folders and tags (folders_list, tags_list) over new ones.
 
 Library behaviour:

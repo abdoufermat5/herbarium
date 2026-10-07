@@ -730,3 +730,105 @@ fn ui_only_restrictions() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn source_is_recorded_cleaned_searchable_and_editable() {
+    let vault = temp_vault("source");
+    let host = open(&vault);
+
+    let page = host
+        .call(
+            Caller::Agent,
+            "pages.create",
+            json!({
+                "html": doc("Cargo"),
+                "source": { "url": " https://example.com/cargo ", "tool": "Claude Code", "prompt": "explain workspaces", }
+            }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap().to_string();
+    assert_eq!(page["ext"]["source"]["url"], "https://example.com/cargo");
+    assert_eq!(page["ext"]["source"]["tool"], "Claude Code");
+
+    // The prompt is searchable even though it is not in the page text.
+    let hits = host
+        .call(Caller::Ui, "pages.search", json!({ "query": "workspaces" }))
+        .unwrap();
+    assert_eq!(hits[0]["id"], id.as_str());
+
+    // The sidecar carries it, so it survives a rebuilt index.
+    let sidecar: Value =
+        serde_json::from_str(&std::fs::read_to_string(vault.join(format!("{id}.json"))).unwrap())
+            .unwrap();
+    assert_eq!(sidecar["ext"]["source"]["prompt"], "explain workspaces");
+
+    // A duplicate keeps where the original came from.
+    let copy = host
+        .call(Caller::Ui, "pages.duplicate", json!({ "id": id }))
+        .unwrap();
+    assert_eq!(copy["ext"]["source"]["tool"], "Claude Code");
+
+    // Blank fields are dropped; an all-blank source is no source.
+    let updated = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": { "tool": "ChatGPT", "url": "  " } }),
+        )
+        .unwrap();
+    assert_eq!(updated["ext"]["source"], json!({ "tool": "ChatGPT" }));
+    let cleared = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": null }),
+        )
+        .unwrap();
+    assert!(cleared["ext"].get("source").is_none());
+    let blank = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": { "tool": " " } }),
+        )
+        .unwrap();
+    assert!(blank["ext"].get("source").is_none());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn source_rejects_non_web_urls_before_writing() {
+    let vault = temp_vault("source-invalid");
+    let host = open(&vault);
+
+    let err = host
+        .call(
+            Caller::Agent,
+            "pages.create",
+            json!({ "html": doc("Bad"), "source": { "url": "javascript:alert(1)" } }),
+        )
+        .unwrap_err();
+    assert!(err.contains("http"), "{err}");
+    let pages = host.call(Caller::Ui, "pages.list", json!({})).unwrap();
+    assert_eq!(pages.as_array().unwrap().len(), 0, "nothing was written");
+
+    let page = create(&host, "Good", None, &[]);
+    let err = host
+        .call(
+            Caller::Agent,
+            "pages.update",
+            json!({ "id": page["id"], "source": { "url": "file:///etc/passwd" }, "folder": "moved" }),
+        )
+        .unwrap_err();
+    assert!(err.contains("http"), "{err}");
+    let after = host
+        .call(Caller::Ui, "pages.get", json!({ "id": page["id"] }))
+        .unwrap();
+    assert!(
+        after["meta"]["folder"].is_null(),
+        "a rejected update moves nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

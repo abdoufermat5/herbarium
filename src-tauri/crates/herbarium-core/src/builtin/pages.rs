@@ -11,7 +11,7 @@ use super::review::{apply_schedule, load_settings};
 use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
-use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta};
+use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource};
 use crate::store::Store;
 use crate::time::now_ms;
 use crate::vault;
@@ -34,6 +34,7 @@ struct CreateArgs {
     note: Option<String>,
     review_in_minutes: Option<i64>,
     allow_cdn: Option<bool>,
+    source: Option<PageSource>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +228,19 @@ fn reconcile_with_disk(store: &Store, mut meta: PageMeta) -> OpResult<PageMeta> 
     Ok(meta)
 }
 
+fn source_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "description": "Where the page came from, shown with the page and searchable.",
+        "properties": {
+            "url": { "type": "string", "description": "http(s) address the page was saved from." },
+            "tool": { "type": "string", "description": "Tool or model that generated the page, e.g. `Claude Code`." },
+            "prompt": { "type": "string", "description": "The request that produced the page." }
+        },
+        "additionalProperties": false
+    })
+}
+
 /// The explicit `limit`, else 50 for agents and unlimited for the UI.
 fn effective_limit(caller: Caller, limit: Option<usize>) -> usize {
     limit.unwrap_or(match caller {
@@ -302,6 +316,10 @@ fn create(
     meta.allow_cdn = args
         .allow_cdn
         .unwrap_or_else(|| default_allow_cdn(&store.vault));
+    PageSource::set(
+        &mut meta,
+        args.source.map(PageSource::clean).transpose()?.flatten(),
+    );
     if let Some(minutes) = args.review_in_minutes {
         apply_schedule(&mut meta, minutes);
     }
@@ -394,7 +412,7 @@ impl Extension for Pages {
     fn register(&self, r: &mut Registry) -> OpResult<()> {
         r.add(Operation::new(
             "pages.create",
-            "Save a new HTML page to the vault and return its metadata (including the new `id`, a readable slug of the title). The page must be one self-contained HTML document; its <title> (or first <h1>) becomes the page title unless `title` is given. Network access follows the vault's default (off unless the user enabled it): pass `allowCdn: true` if the page loads scripts or styles from a CDN; only allowlisted CDNs work.",
+            "Save a new HTML page to the vault and return its metadata (including the new `id`, a readable slug of the title). Pass `source` with the tool you are (`tool`) and the user's request (`prompt`) so the user can tell later where the page came from. The page must be one self-contained HTML document; its <title> (or first <h1>) becomes the page title unless `title` is given. Network access follows the vault's default (off unless the user enabled it): pass `allowCdn: true` if the page loads scripts or styles from a CDN; only allowlisted CDNs work.",
             object(
                 json!({
                     "html": { "type": "string", "description": "Complete HTML document." },
@@ -403,7 +421,8 @@ impl Extension for Pages {
                     "tags": { "type": "array", "items": { "type": "string" } },
                     "note": { "type": "string", "description": "Personal note shown next to the page." },
                     "reviewInMinutes": { "type": "integer", "minimum": 1, "description": "Schedule a review this many minutes from now (1 day = 1440)." },
-                    "allowCdn": { "type": "boolean", "description": "Allow loading from allowlisted CDNs. Defaults to the vault setting (normally false, which blocks all network access)." }
+                    "allowCdn": { "type": "boolean", "description": "Allow loading from allowlisted CDNs. Defaults to the vault setting (normally false, which blocks all network access)." },
+                    "source": source_schema()
                 }),
                 &["html"],
             ),
@@ -533,6 +552,7 @@ impl Extension for Pages {
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces all tags." },
                     "folder": { "type": ["string", "null"] },
                     "note": { "type": "string" },
+                    "source": { "anyOf": [source_schema(), { "type": "null" }], "description": "Replaces the page's source; `null` removes it." },
                     "baseUpdatedAt": { "type": "integer", "description": "The page's `updatedAt` when you read it; the edit is rejected if it changed since." }
                 }),
                 &["id"],
@@ -550,6 +570,9 @@ impl Extension for Pages {
                 }
                 if let Some(note) = p.note {
                     meta.note = note;
+                }
+                if let Some(source) = p.source {
+                    PageSource::set(&mut meta, source.map(PageSource::clean).transpose()?.flatten());
                 }
                 if let Some(folder) = p.folder {
                     vault::move_page(&ctx.store.vault, &mut meta, folder.as_deref())?;

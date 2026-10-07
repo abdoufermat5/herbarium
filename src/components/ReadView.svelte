@@ -461,6 +461,27 @@
     if (page) source = page.html;
   }
 
+  const pageSource = $derived(page?.meta.ext?.source ?? null);
+  const sourceHost = $derived.by(() => {
+    const url = pageSource?.url;
+    if (!url) return "";
+    try {
+      return new URL(url).host || url;
+    } catch {
+      return url;
+    }
+  });
+
+  /** The user clicked the recorded source link: open it in the browser. */
+  function openSourceUrl() {
+    const url = pageSource?.url;
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    api.openExternal(url).catch((e) => {
+      console.error(e);
+      toast(t("link.failed"), "error");
+    });
+  }
+
   async function openExternally() {
     const p = page;
     const choice = externalEditor;
@@ -1274,6 +1295,33 @@
             </div>
           </section>
 
+          {#if pageSource}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("insp.source")}</h2>
+              <dl class="facts">
+                {#if pageSource.tool}
+                  <div><dt>{t("insp.sourceTool")}</dt><dd>{pageSource.tool}</dd></div>
+                {/if}
+                {#if pageSource.url}
+                  <div>
+                    <dt>{t("insp.sourceUrl")}</dt>
+                    <dd>
+                      <button class="link-btn" onclick={openSourceUrl} title={pageSource.url}>
+                        {sourceHost}<Icon name="external-link" size={11} />
+                      </button>
+                    </dd>
+                  </div>
+                {/if}
+              </dl>
+              {#if pageSource.prompt}
+                <details class="source-prompt">
+                  <summary>{t("insp.sourcePrompt")}</summary>
+                  <p>{pageSource.prompt}</p>
+                </details>
+              {/if}
+            </section>
+          {/if}
+
           <section class="insp-section">
             <h2 class="eyebrow">{t("insp.activity")}</h2>
             <dl class="facts">
@@ -1717,6 +1765,41 @@
 
   .delete-btn {
     align-self: flex-start;
+  }
+
+  .link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .link-btn:hover {
+    text-decoration: underline;
+  }
+
+  .source-prompt {
+    margin-top: 8px;
+    font-size: var(--fs-sm);
+  }
+
+  .source-prompt summary {
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .source-prompt p {
+    margin: 6px 0 0;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
   }
 
   .hint {
