@@ -125,3 +125,45 @@ fn summary_lists_due_paths_recent_rediscover_and_on_this_day() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn samples_make_a_linked_getting_started_path_once() {
+    let vault = temp_vault("samples");
+    let host = open(&vault);
+    let first = call(&host, "vault.add_samples", json!({}));
+    assert_eq!(first["added"], 3);
+    assert_eq!(
+        first["pages"],
+        json!([
+            "herbarium-welcome",
+            "herbarium-spaced-repetition",
+            "herbarium-flexbox-playground"
+        ])
+    );
+    let again = call(&host, "vault.add_samples", json!({}));
+    assert_eq!(again["added"], 0, "samples are added once");
+    assert_eq!(again["pages"], first["pages"]);
+
+    let path = call(&host, "paths.get", json!({ "id": first["path"] }));
+    assert_eq!(path["pages"].as_array().unwrap().len(), 3);
+    assert_eq!(path["pages"][0]["folder"], "Getting started");
+    let links = call(&host, "pages.links", json!({ "id": "herbarium-welcome" }));
+    assert!(links["broken"].as_array().unwrap().is_empty());
+    assert_eq!(links["backlinks"].as_array().unwrap().len(), 2);
+
+    let s = call(
+        &host,
+        "today.summary",
+        json!({ "now": now_ms() + 2 * 60_000 }),
+    );
+    assert_eq!(
+        s["due"][0]["id"], "herbarium-welcome",
+        "something to review on day one"
+    );
+    assert!(
+        host.call(Caller::Agent, "vault.add_samples", json!({}))
+            .is_err(),
+        "UI only"
+    );
+    let _ = std::fs::remove_dir_all(&vault);
+}

@@ -60,6 +60,26 @@ export const api = {
     return invoke("set_close_to_tray", { enabled });
   },
 
+  /** Change the capture shortcut and watchers; rejects a shortcut the system refuses. */
+  setCapture(settings: { captureShortcut: string | null; watchDownloads: boolean; watchClipboard: boolean }): Promise<Config> {
+    return invoke("set_capture", { settings });
+  },
+
+  /** Save the clipboard's HTML as a page in the Inbox; resolves to its title. */
+  saveClipboardPage(): Promise<string> {
+    return invoke("save_clipboard_page");
+  },
+
+  /** Save a downloaded HTML file the watcher offered; resolves to its title. */
+  saveDownload(path: string): Promise<string> {
+    return invoke("save_download", { path });
+  },
+
+  /** Add the sample pages and their reading path (skipping any already added). */
+  addSamples(): Promise<{ added: number; pages: string[]; path: string }> {
+    return op("vault.add_samples");
+  },
+
   /** Invoke only after the shared unsaved-work navigation guards allow exit. */
   quitApp(): Promise<void> {
     return invoke("quit_app");

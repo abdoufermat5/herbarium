@@ -6,6 +6,21 @@ export interface Config {
   recentVaults: string[];
   /** Closing the window hides it to the tray instead of quitting. */
   closeToTray: boolean;
+  /** Global shortcut that saves the clipboard's HTML; null turns it off. */
+  captureShortcut: string | null;
+  /** Offer to save HTML files that appear in the Downloads folder. */
+  watchDownloads: boolean;
+  /** Offer to save whole HTML pages when they are copied. */
+  watchClipboard: boolean;
+}
+
+/** An HTML page offered by the Downloads or clipboard watcher. */
+export interface CaptureOffer {
+  title: string;
+  bytes: number;
+  /** Set for a downloaded file. */
+  path?: string;
+  name?: string;
 }
 
 export interface PageMeta {

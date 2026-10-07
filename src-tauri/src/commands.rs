@@ -477,6 +477,58 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Save the clipboard's HTML as a page (the UI's answer to a clipboard offer).
+#[tauri::command]
+pub async fn save_clipboard_page(app: tauri::AppHandle) -> CmdResult<String> {
+    crate::capture::save_clipboard(&app)
+}
+
+/// Save an HTML file the Downloads watcher offered.
+#[tauri::command]
+pub async fn save_download(app: tauri::AppHandle, path: String) -> CmdResult<String> {
+    crate::capture::save_download(&app, &path)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureSettings {
+    capture_shortcut: Option<String>,
+    watch_downloads: bool,
+    watch_clipboard: bool,
+}
+
+/// Change the capture shortcut and watchers; the shortcut is checked before
+/// anything is saved.
+#[tauri::command]
+pub async fn set_capture(
+    app: tauri::AppHandle,
+    watchers: State<'_, std::sync::Arc<crate::capture::Watchers>>,
+    settings: CaptureSettings,
+) -> CmdResult<Config> {
+    use std::sync::atomic::Ordering;
+    let mut cfg = config::load().unwrap_or_default();
+    let shortcut = settings
+        .capture_shortcut
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    if let Err(e) = crate::capture::set_shortcut(&app, shortcut.as_deref()) {
+        // Put the previous shortcut back before reporting the bad one.
+        let _ = crate::capture::set_shortcut(&app, cfg.capture_shortcut.as_deref());
+        return Err(e);
+    }
+    cfg.capture_shortcut = shortcut;
+    cfg.watch_downloads = settings.watch_downloads;
+    cfg.watch_clipboard = settings.watch_clipboard;
+    watchers
+        .downloads
+        .store(cfg.watch_downloads, Ordering::Relaxed);
+    watchers
+        .clipboard
+        .store(cfg.watch_clipboard, Ordering::Relaxed);
+    config::save(&cfg)?;
+    Ok(cfg)
+}
+
 #[derive(serde::Serialize)]
 pub struct BrowserStatus {
     browser: String,

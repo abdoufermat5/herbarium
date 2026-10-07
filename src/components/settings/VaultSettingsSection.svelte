@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "../../lib/api";
-  import { app, adoptVault, rescanVault, toast, errorMessage } from "../../lib/state.svelte";
+  import { app, adoptVault, rescanVault, reloadPages, toast, errorMessage } from "../../lib/state.svelte";
   import { navigate } from "../../lib/navigation.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { prefs, setPref } from "../../lib/prefs.svelte";
@@ -180,6 +180,16 @@
     }
   }
 
+  async function addSampleVaultPages() {
+    try {
+      const result = await api.addSamples();
+      await reloadPages(true);
+      toast(result.added > 0 ? t("samples.added", { count: result.added }) : t("samples.already"), "success");
+    } catch (e) {
+      toast(`${t("samples.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
   async function setNetworkDefault(value: boolean) {
     if (netSaving) return;
     netSaving = true;
@@ -211,6 +221,12 @@
     <button class="btn" disabled={exporting} onclick={exportVaultCopy}>
       <Icon name="upload" size={13} />
       {exporting ? t("settings.exporting") : t("settings.exportAction")}
+    </button>
+  </SettingRow>
+  <SettingRow title={t("samples.title")} hint={t("samples.hint")}>
+    <button class="btn" onclick={addSampleVaultPages}>
+      <Icon name="file-plus" size={13} />
+      {t("samples.action")}
     </button>
   </SettingRow>
   <SettingRow title={t("export.site")} hint={t("export.siteHint")}>

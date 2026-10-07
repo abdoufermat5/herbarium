@@ -10,6 +10,7 @@ pub use pages::import_key;
 mod paths;
 mod proposals;
 mod review;
+mod samples;
 mod searches;
 mod storage;
 mod today;
@@ -31,6 +32,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(links::Links),
         Box::new(paths::Paths),
         Box::new(today::Today),
+        Box::new(samples::Samples),
     ]
 }
 

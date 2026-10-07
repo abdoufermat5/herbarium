@@ -18,6 +18,7 @@
   import ReviewSettingsSection from "./settings/ReviewSettingsSection.svelte";
   import VaultSettingsSection from "./settings/VaultSettingsSection.svelte";
   import BrowserSettingsSection from "./settings/BrowserSettingsSection.svelte";
+  import CaptureSettingsSection from "./settings/CaptureSettingsSection.svelte";
 
   function setDetailsOpen(open: boolean) {
     setPref("detailsOpen", open);
@@ -259,6 +260,8 @@
     <VaultSettingsSection />
 
     <BrowserSettingsSection />
+
+    <CaptureSettingsSection />
 
     <SettingsSection id="settings-desktop" title={t("settings.desktop")}>
       <SettingRow title={t("settings.closeToTray")} hint={t("settings.closeToTrayHint")}>

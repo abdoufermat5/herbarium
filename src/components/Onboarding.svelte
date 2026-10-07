@@ -7,6 +7,8 @@
   import { t } from "../lib/i18n.svelte";
 
   let name = $state("Herbarium");
+  /** Start a new vault with the sample pages and their reading path. */
+  let withSamples = $state(true);
   let busy = $state<"create" | "open" | null>(null);
   let error = $state("");
 
@@ -22,6 +24,13 @@
       if (typeof parent !== "string") return;
       const folderName = name.trim() || "Herbarium";
       app.config = await api.createVault(parent, folderName);
+      if (withSamples) {
+        try {
+          await api.addSamples();
+        } catch (e) {
+          console.error(e);
+        }
+      }
       await reloadPages();
       toast(t("toast.vaultCreated", { name: folderName }), "success");
     } catch (e) {
@@ -84,6 +93,10 @@
           {busy === "create" ? t("onboard.creating") : t("onboard.create")}
         </button>
       </div>
+      <label class="samples">
+        <input type="checkbox" bind:checked={withSamples} disabled={busy !== null} />
+        {t("onboard.samples")}
+      </label>
     </section>
 
     <section class="card option" use:reveal>
@@ -222,5 +235,13 @@
     .cards {
       grid-template-columns: minmax(0, 420px);
     }
+  }
+  .samples {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--fs-sm);
+    color: var(--text-soft);
+    cursor: pointer;
   }
 </style>

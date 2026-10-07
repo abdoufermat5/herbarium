@@ -12,6 +12,13 @@ fn default_close_to_tray() -> bool {
     true
 }
 
+/// Saves the clipboard's HTML as a page from anywhere.
+pub const DEFAULT_CAPTURE_SHORTCUT: &str = "CommandOrControl+Alt+H";
+
+fn default_capture_shortcut() -> Option<String> {
+    Some(DEFAULT_CAPTURE_SHORTCUT.into())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
@@ -20,6 +27,15 @@ pub struct Config {
     pub recent_vaults: Vec<String>,
     #[serde(default = "default_close_to_tray")]
     pub close_to_tray: bool,
+    /// Global shortcut that saves the clipboard as a page; None turns it off.
+    #[serde(default = "default_capture_shortcut")]
+    pub capture_shortcut: Option<String>,
+    /// Offer to save HTML files that appear in the Downloads folder.
+    #[serde(default = "default_close_to_tray")]
+    pub watch_downloads: bool,
+    /// Offer to save when a whole HTML page is copied.
+    #[serde(default)]
+    pub watch_clipboard: bool,
 }
 
 impl Default for Config {
@@ -28,6 +44,9 @@ impl Default for Config {
             vault_path: None,
             recent_vaults: Vec::new(),
             close_to_tray: true,
+            capture_shortcut: default_capture_shortcut(),
+            watch_downloads: true,
+            watch_clipboard: false,
         }
     }
 }

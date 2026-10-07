@@ -54,20 +54,20 @@ pub fn normalize_url(url: &str) -> String {
 
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct CreateArgs {
-    html: String,
-    title: Option<String>,
-    folder: Option<String>,
-    tags: Option<Vec<String>>,
-    note: Option<String>,
-    review_in_minutes: Option<i64>,
-    allow_cdn: Option<bool>,
-    source: Option<PageSource>,
+pub(crate) struct CreateArgs {
+    pub(crate) html: String,
+    pub(crate) title: Option<String>,
+    pub(crate) folder: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
+    pub(crate) note: Option<String>,
+    pub(crate) review_in_minutes: Option<i64>,
+    pub(crate) allow_cdn: Option<bool>,
+    pub(crate) source: Option<PageSource>,
     /// When the page was originally made (unix ms), e.g. for an imported
     /// artifact; defaults to now. Never in the future.
-    created_at: Option<i64>,
+    pub(crate) created_at: Option<i64>,
     /// Identifies the imported original, so importing it again is skipped.
-    import_key: Option<String>,
+    pub(crate) import_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -325,7 +325,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
 /// `fallback_title` is used when neither `title` nor the HTML provides one;
 /// `id_source` (e.g. an imported file's stem) is slugged into the id instead
 /// of the title.
-fn create(
+pub(crate) fn create(
     ctx: &mut Ctx,
     args: CreateArgs,
     fallback_title: Option<&str>,

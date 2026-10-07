@@ -46,7 +46,7 @@ pub(crate) fn load(vault: &Path) -> Vec<ReadingPath> {
     })
 }
 
-fn store(vault: &Path, paths: &[ReadingPath]) -> OpResult<()> {
+pub(crate) fn store(vault: &Path, paths: &[ReadingPath]) -> OpResult<()> {
     let path = file(vault);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| format!("cannot create settings folder: {e}"))?;
@@ -90,7 +90,7 @@ fn clean_pages(ctx: &Ctx, pages: Vec<String>) -> OpResult<Vec<String>> {
 }
 
 /// A readable, unique id from `name`: lowercase ASCII words joined by `-`.
-fn new_id(name: &str, taken: &[ReadingPath]) -> String {
+pub(crate) fn new_id(name: &str, taken: &[ReadingPath]) -> String {
     let mut base = String::new();
     for c in name.chars() {
         if c.is_ascii_alphanumeric() {

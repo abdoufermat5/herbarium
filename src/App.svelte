@@ -25,6 +25,7 @@
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import type { ShortcutContext } from "./lib/shortcuts";
+  import type { CaptureOffer } from "./lib/types";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
@@ -280,6 +281,37 @@
         if (now - lastTrayNav < 500) return;
         lastTrayNav = now;
         void goView("review");
+      }),
+    );
+
+    // Quick capture: pages saved from outside the window, and offers from
+    // the Downloads and clipboard watchers.
+    keep(listen("vault-changed", () => void reloadPages(true)));
+    keep(
+      listen<CaptureOffer>("download-offer", (event) => {
+        const offer = event.payload;
+        if (!offer.path || !app.config?.vaultPath) return;
+        toast(t("capture.downloadOffer", { name: offer.name ?? offer.title }), "info", 15000, {
+          label: t("capture.save"),
+          run: () =>
+            void api
+              .saveDownload(offer.path!)
+              .then((title) => toast(t("capture.saved", { title }), "success"))
+              .catch((e) => toast(`${t("capture.failed")}: ${errorMessage(e)}`, "error")),
+        });
+      }),
+    );
+    keep(
+      listen<CaptureOffer>("clipboard-offer", (event) => {
+        if (!app.config?.vaultPath) return;
+        toast(t("capture.clipboardOffer", { title: event.payload.title }), "info", 15000, {
+          label: t("capture.save"),
+          run: () =>
+            void api
+              .saveClipboardPage()
+              .then((title) => toast(t("capture.saved", { title }), "success"))
+              .catch((e) => toast(`${t("capture.failed")}: ${errorMessage(e)}`, "error")),
+        });
       }),
     );
 

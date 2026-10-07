@@ -1,4 +1,5 @@
 mod ai_import;
+mod capture;
 pub mod cli;
 mod commands;
 mod config;
@@ -64,6 +65,17 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        capture::capture_clipboard(app);
+                    }
+                })
+                .build(),
+        )
+        .manage(std::sync::Arc::new(capture::Watchers::default()))
         .manage(AppState::new())
         .manage(PendingDeepLinks::default())
         .setup(|app| {
@@ -109,10 +121,30 @@ pub fn run() {
                 }
             }
 
+            // Quick capture: the global shortcut and the watchers, as configured.
+            let cfg = config::load().unwrap_or_default();
+            let watchers = app
+                .state::<std::sync::Arc<capture::Watchers>>()
+                .inner()
+                .clone();
+            watchers
+                .downloads
+                .store(cfg.watch_downloads, std::sync::atomic::Ordering::Relaxed);
+            watchers
+                .clipboard
+                .store(cfg.watch_clipboard, std::sync::atomic::Ordering::Relaxed);
+            if let Err(e) = capture::set_shortcut(app.handle(), cfg.capture_shortcut.as_deref()) {
+                eprintln!("herbarium: {e}");
+            }
+            capture::start_watchers(app.handle(), watchers);
+
             let open_item = MenuItem::with_id(app, "open", "Open Herbarium", true, None::<&str>)?;
+            let capture_item =
+                MenuItem::with_id(app, "capture", "Save clipboard as page", true, None::<&str>)?;
             let review_item = MenuItem::with_id(app, "review", "Review today", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_item, &review_item, &quit_item])?;
+            let menu =
+                Menu::with_items(app, &[&open_item, &review_item, &capture_item, &quit_item])?;
 
             let _tray = TrayIconBuilder::new()
                 .icon(tauri::include_image!("icons/32x32.png"))
@@ -136,6 +168,7 @@ pub fn run() {
                         }
                         let _ = app.emit("navigate", "review");
                     }
+                    "capture" => capture::capture_clipboard(app),
                     "quit" => {
                         if let Some(win) = app.get_webview_window("main") {
                             let _ = win.show();
@@ -177,6 +210,9 @@ pub fn run() {
             commands::browser_status,
             commands::connect_browsers,
             commands::reveal_extension,
+            commands::save_clipboard_page,
+            commands::save_download,
+            commands::set_capture,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,

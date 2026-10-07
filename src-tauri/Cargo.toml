@@ -33,8 +33,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2.8.1"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2.5.1"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }

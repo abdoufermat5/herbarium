@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Why reviewing works</title>
+<style>
+  :root { --bg: #fbfaf7; --card: #fff; --text: #2f3437; --muted: #6b6a68; --leaf: #346538; --faint: #b9c9b6; --line: #e6e4df; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --card: #232322; --text: #e6e5e3; --muted: #9b9a97; --leaf: #8cbf91; --faint: #4c5f4d; --line: #353533; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.65 Georgia, serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 24px 80px; }
+  .eyebrow { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--leaf); }
+  h1 { font-size: 36px; line-height: 1.2; margin: 10px 0 14px; font-weight: 500; }
+  h2 { font-size: 22px; margin: 40px 0 8px; font-weight: 500; }
+  .figure { margin: 20px 0; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); font-family: system-ui, sans-serif; }
+  svg { width: 100%; height: auto; display: block; }
+  .controls { display: flex; align-items: center; gap: 12px; margin-top: 10px; font-size: 14px; flex-wrap: wrap; }
+  .controls input { flex: 1; min-width: 160px; accent-color: var(--leaf); }
+  .readout { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; }
+  .quiz { margin-top: 12px; padding: 16px 20px; border-left: 3px solid var(--leaf); background: var(--card); border-radius: 0 12px 12px 0; }
+  .quiz p { margin: 0 0 6px; }
+  a { color: var(--leaf); }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Getting started · 2 of 3</p>
+  <h1>Why reviewing works</h1>
+  <p>In 1885 Hermann Ebbinghaus measured how fast he forgot nonsense syllables. Memory, he found, fades quickly at first and then more slowly: the <em>forgetting curve</em>. Each time you recall something just as it starts to fade, the curve gets flatter.</p>
+
+  <div class="figure">
+    <svg id="chart" viewBox="0 0 600 240" role="img" aria-label="Chance of remembering over 30 days, with and without reviews"></svg>
+    <div class="controls">
+      <label for="reviews">Reviews</label>
+      <input id="reviews" type="range" min="0" max="5" value="3">
+      <span class="readout" id="readout"></span>
+    </div>
+  </div>
+
+  <h2>What Herbarium does with it</h2>
+  <p>When you review a page and grade how well you remembered (<em>Again</em>, <em>Hard</em>, <em>Good</em> or <em>Easy</em>), Herbarium estimates how stable that memory is and schedules the next review for when you would recall it with about 90 % chance. Easy pages come back rarely; hard ones soon.</p>
+
+  <div class="quiz">
+    <p><strong>Why does the curve flatten after each review?</strong></p>
+    <p data-herbarium-recall="Why does reviewing flatten the curve?">Recalling something effortfully, just as it starts to fade, makes the memory more stable, so it decays more slowly afterwards.</p>
+  </div>
+  <div class="quiz">
+    <p><strong>When should the next review be?</strong></p>
+    <p data-herbarium-recall="When is the best time to review?">Shortly before you would forget: early enough to still recall it, late enough that recalling it takes some effort.</p>
+  </div>
+
+  <p>Next: <a href="herbarium-app://open/herbarium-flexbox-playground">a page that remembers its state</a>, or back to <a href="herbarium-app://open/herbarium-welcome">the welcome page</a>.</p>
+</main>
+<script>
+  const svg = document.getElementById("chart");
+  const slider = document.getElementById("reviews");
+  const readout = document.getElementById("readout");
+  const W = 600, H = 240, L = 40, B = 210, T = 16, DAYS = 30;
+  const x = (d) => L + (d / DAYS) * (W - L - 10);
+  const y = (p) => B - p * (B - T);
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function curve(reviews) {
+    // Stability grows with each review, spaced further apart each time.
+    const points = [];
+    let stability = 1.5, last = 0, next = 1;
+    for (let d = 0; d <= DAYS; d += 0.25) {
+      if (reviews > 0 && d >= next && points.length) {
+        last = d; stability *= 2.6; reviews--; next = d + stability * 0.6;
+      }
+      points.push([d, Math.exp(-(d - last) / stability)]);
+    }
+    return points;
+  }
+
+  function path(points) {
+    return points.map(([d, p], i) => `${i ? "L" : "M"}${x(d).toFixed(1)},${y(p).toFixed(1)}`).join(" ");
+  }
+
+  function draw() {
+    const n = Number(slider.value);
+    const withReviews = curve(n);
+    const without = curve(0);
+    const end = withReviews[withReviews.length - 1][1];
+    readout.textContent = `${n} review${n === 1 ? "" : "s"} · ${Math.round(end * 100)} % remembered after 30 days`;
+    svg.innerHTML = `
+      <line x1="${L}" y1="${B}" x2="${W - 10}" y2="${B}" stroke="${css("--line")}" />
+      <text x="${L}" y="${B + 22}" font-size="12" fill="${css("--muted")}">day 0</text>
+      <text x="${W - 10}" y="${B + 22}" font-size="12" fill="${css("--muted")}" text-anchor="end">day 30</text>
+      <text x="${L - 8}" y="${y(1) + 4}" font-size="12" fill="${css("--muted")}" text-anchor="end">100%</text>
+      <text x="${L - 8}" y="${y(0) + 4}" font-size="12" fill="${css("--muted")}" text-anchor="end">0%</text>
+      <path d="${path(without)}" fill="none" stroke="${css("--faint")}" stroke-width="2" />
+      <path d="${path(withReviews)}" fill="none" stroke="${css("--leaf")}" stroke-width="2.5" />
+      <text x="${x(4)}" y="${y(0.12)}" font-size="12" fill="${css("--muted")}">without review</text>`;
+  }
+  slider.addEventListener("input", draw);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", draw);
+  draw();
+</script>
+</body>
+</html>
