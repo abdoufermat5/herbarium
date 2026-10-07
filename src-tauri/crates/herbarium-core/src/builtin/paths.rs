@@ -21,21 +21,21 @@ const MAX_DESCRIPTION: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-struct ReadingPath {
+pub(crate) struct ReadingPath {
     /// Stable slug, unique among paths.
-    id: String,
-    name: String,
+    pub id: String,
+    pub name: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
-    description: String,
+    pub description: String,
     /// Page ids in reading order.
-    pages: Vec<String>,
+    pub pages: Vec<String>,
 }
 
 fn file(vault: &Path) -> PathBuf {
     vault.join(".herbarium").join("paths.json")
 }
 
-fn load(vault: &Path) -> Vec<ReadingPath> {
+pub(crate) fn load(vault: &Path) -> Vec<ReadingPath> {
     let path = file(vault);
     let Ok(raw) = std::fs::read_to_string(&path) else {
         return Vec::new();

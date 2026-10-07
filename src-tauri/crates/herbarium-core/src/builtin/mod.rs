@@ -12,6 +12,7 @@ mod proposals;
 mod review;
 mod searches;
 mod storage;
+mod today;
 
 use serde_json::{Map, Value, json};
 
@@ -29,6 +30,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(searches::Searches),
         Box::new(links::Links),
         Box::new(paths::Paths),
+        Box::new(today::Today),
     ]
 }
 

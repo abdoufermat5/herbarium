@@ -504,6 +504,11 @@ fn streaks(counts: &[usize]) -> (usize, usize) {
     (current, longest)
 }
 
+/// Consecutive days with a review, up to today.
+pub(crate) fn current_streak(ctx: &Ctx) -> OpResult<usize> {
+    stats(ctx, None).map(|s| s.streak)
+}
+
 fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
     let now = fixed_now.unwrap_or_else(now_ms);
     let today = utc_midnight(now);
