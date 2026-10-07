@@ -2,12 +2,14 @@
 
 mod appearance;
 mod fsrs;
+mod health;
 mod highlights;
 mod history;
 mod library;
 mod links;
 mod network;
 mod pages;
+pub use health::{SCRIPT_HOSTS, STYLE_HOSTS};
 pub(crate) use highlights::of as highlights_of;
 pub use pages::import_key;
 mod paths;
@@ -40,6 +42,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(appearance::Appearance),
         Box::new(previews::Previews),
         Box::new(highlights::Highlights),
+        Box::new(health::Health),
     ]
 }
 

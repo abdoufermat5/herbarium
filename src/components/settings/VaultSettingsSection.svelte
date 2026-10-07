@@ -223,6 +223,12 @@
       {exporting ? t("settings.exporting") : t("settings.exportAction")}
     </button>
   </SettingRow>
+  <SettingRow title={t("health.settingTitle")} hint={t("health.settingHint")}>
+    <button class="btn" onclick={() => (app.healthOpen = true)}>
+      <Icon name="circle-check" size={13} />
+      {t("health.check")}
+    </button>
+  </SettingRow>
   <SettingRow title={t("samples.title")} hint={t("samples.hint")}>
     <button class="btn" onclick={addSampleVaultPages}>
       <Icon name="file-plus" size={13} />

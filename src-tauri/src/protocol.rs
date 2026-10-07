@@ -540,6 +540,35 @@ mod tests {
     }
 
     #[test]
+    fn csp_matches_the_cdn_allowlist_health_checks_use() {
+        let directive = |name: &str| {
+            CSP_ALLOW
+                .split(';')
+                .map(str::trim)
+                .find(|d| d.starts_with(name))
+                .unwrap()
+                .to_string()
+        };
+        let script = directive("script-src");
+        let style = directive("style-src");
+        let hosts = |d: &str| -> Vec<String> {
+            d.split_whitespace()
+                .filter_map(|t| t.strip_prefix("https://"))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(
+            hosts(&script),
+            herbarium_core::SCRIPT_HOSTS.map(String::from)
+        );
+        let mut style_hosts = hosts(&style);
+        style_hosts.sort();
+        let mut expected = herbarium_core::STYLE_HOSTS.map(String::from).to_vec();
+        expected.sort();
+        assert_eq!(style_hosts, expected);
+    }
+
+    #[test]
     fn recall_script_is_injected_only_when_asked_and_after_the_shim() {
         let html = inject_base_tag(
             "<html><head><title>T</title></head><body><p data-herbarium-recall>A</p></body></html>",

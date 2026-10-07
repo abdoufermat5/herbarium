@@ -15,6 +15,6 @@ pub mod store;
 pub mod time;
 pub mod vault;
 
-pub use builtin::import_key;
+pub use builtin::{SCRIPT_HOSTS, STYLE_HOSTS, import_key};
 pub use extension::{Caller, Ctx, Event, Extension, OpResult, Operation, Registry, events};
 pub use host::Host;

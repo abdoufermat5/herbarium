@@ -20,7 +20,7 @@
   import { folderPickerState } from "../lib/folder-picker.svelte";
   import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
-  import type { Highlight, HighlightColor, Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
+  import type { HealthIssue, Highlight, HighlightColor, Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
@@ -722,6 +722,42 @@
   const pageSource = $derived(page?.meta.ext?.source ?? null);
 
   let pageLinks = $state<PageLinks | null>(null);
+  let healthIssues = $state<HealthIssue[]>([]);
+
+  // Health follows the page's content: recheck when it changes.
+  $effect(() => {
+    const p = page;
+    void app.vaultRevision;
+    if (!p) return;
+    const pageId = p.meta.id;
+    void p.meta.updatedAt;
+    void p.meta.allowCdn;
+    api
+      .pageHealth(pageId)
+      .then((r) => {
+        if (page?.meta.id === pageId) healthIssues = r.issues;
+      })
+      .catch((e) => console.error(e));
+  });
+
+  async function inlineAssets() {
+    const p = page;
+    if (!p || pageGone) return;
+    if (!(await confirmDiscardUnsaved())) return;
+    try {
+      await api.inlineAssets(p.meta.id);
+      await load();
+      void reloadPages(true);
+      toast(t("health.inlined"), "success");
+    } catch (e) {
+      toast(`${t("health.fixFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  function issueText(issue: HealthIssue): string {
+    const items = (issue.items ?? []).slice(0, 4).join(", ") + ((issue.items?.length ?? 0) > 4 ? "…" : "");
+    return t(`health.${issue.kind}`, { items, count: issue.items?.length ?? 0 });
+  }
 
   /** The reading path this page was opened from, when the page is in it. */
   const currentPath = $derived.by(() => {
@@ -1772,6 +1808,25 @@
             </section>
           {/if}
 
+          {#if healthIssues.length > 0}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("health.title")}</h2>
+              <ul class="health">
+                {#each healthIssues as issue (issue.kind)}
+                  <li data-level={issue.level}>
+                    <Icon name={issue.level === "info" ? "info" : "wifi-off"} size={13} />
+                    <span>{issueText(issue)}</span>
+                    {#if issue.fix === "enable-network"}
+                      <button class="btn btn-xs" onclick={toggleNetwork} disabled={pageGone}>{t("health.enableNetwork")}</button>
+                    {:else if issue.fix === "inline-assets"}
+                      <button class="btn btn-xs" onclick={inlineAssets} disabled={pageGone}>{t("health.inline")}</button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+
           <section class="insp-section">
             <h2 class="eyebrow">{t("hl.title")}</h2>
             {#if highlights.length === 0}
@@ -2438,6 +2493,41 @@
     gap: 8px;
     min-width: 0;
     cursor: pointer;
+  }
+
+  .health {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: var(--fs-sm);
+  }
+
+  .health li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    align-items: start;
+    color: var(--text-soft);
+  }
+
+  .health li[data-level="error"] {
+    color: var(--danger);
+  }
+
+  .health li[data-level="warn"] {
+    color: var(--warn);
+  }
+
+  .health li :global(svg) {
+    margin-top: 3px;
+  }
+
+  .health li .btn {
+    grid-column: 2;
+    justify-self: start;
   }
 
   .hl-list {

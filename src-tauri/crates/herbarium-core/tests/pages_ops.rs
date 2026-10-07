@@ -1173,3 +1173,106 @@ fn highlights_with_notes_are_kept_and_searchable() {
     assert!(removed["page"]["ext"].get("highlights").is_none());
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn health_finds_what_breaks_a_page_and_inlines_local_files() {
+    let vault = temp_vault("health");
+    let host = open(&vault);
+    let html = r#"<!doctype html><html><head><title>Sick</title>
+        <script src="https://cdn.jsdelivr.net/npm/x.js"></script>
+        <script src="https://evil.example/tracker.js"></script>
+        <link rel="stylesheet" href="style.css"></head>
+        <body><img src="img/gone.png"><a href="herbarium-app://open/nowhere">x</a></body></html>"#;
+    let page = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": html, "folder": "notes" }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap().to_string();
+    std::fs::write(vault.join("notes/style.css"), "p { color: red }").unwrap();
+
+    let report = host
+        .call(Caller::Agent, "health.check", json!({ "id": id }))
+        .unwrap();
+    let kinds: Vec<&str> = report["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "missing-asset",
+            "needs-network",
+            "broken-links",
+            "local-assets"
+        ],
+        "{report}"
+    );
+    assert_eq!(report["issues"][0]["items"], json!(["img/gone.png"]));
+    assert_eq!(report["issues"][1]["fix"], "enable-network");
+
+    // With network on, only the host outside the allowlist is a problem.
+    host.call(
+        Caller::Ui,
+        "network.set",
+        json!({ "id": id, "allowCdn": true }),
+    )
+    .unwrap();
+    let report = host
+        .call(Caller::Ui, "health.check", json!({ "id": id }))
+        .unwrap();
+    let blocked = report["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "blocked-host")
+        .unwrap();
+    assert_eq!(blocked["items"], json!(["evil.example"]));
+
+    let vault_report = host.call(Caller::Ui, "health.check", json!({})).unwrap();
+    assert_eq!(vault_report["pages"][0]["id"], id.as_str());
+
+    let fixed = host
+        .call(
+            Caller::Ui,
+            "health.fix",
+            json!({ "id": id, "fix": "inline-assets" }),
+        )
+        .unwrap();
+    assert_eq!(fixed["id"], id.as_str());
+    let html = host
+        .call(
+            Caller::Ui,
+            "pages.get",
+            json!({ "id": id, "format": "html" }),
+        )
+        .unwrap()["html"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        html.contains("data:text/css;charset=utf-8;base64,"),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"src="img/gone.png""#),
+        "missing files keep their URL"
+    );
+    let history = host
+        .call(Caller::Ui, "history.list", json!({ "id": id }))
+        .unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1, "the original is kept");
+    assert!(
+        host.call(
+            Caller::Agent,
+            "health.fix",
+            json!({ "id": id, "fix": "inline-assets" })
+        )
+        .is_err()
+    );
+    let _ = std::fs::remove_dir_all(&vault);
+}

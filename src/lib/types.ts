@@ -183,6 +183,14 @@ export interface Highlight {
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink";
 
+/** Something that may stop a page from working (`health.check`). */
+export interface HealthIssue {
+  kind: "missing-asset" | "needs-network" | "blocked-host" | "broken-links" | "local-assets" | "large" | "untitled";
+  level: "error" | "warn" | "info";
+  items?: string[];
+  fix?: "enable-network" | "inline-assets";
+}
+
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */
 export interface SavedSearch {
   name: string;

@@ -19,6 +19,7 @@
   import ImportDialog from "./components/ImportDialog.svelte";
   import AiImportDialog from "./components/AiImportDialog.svelte";
   import LookDialog from "./components/LookDialog.svelte";
+  import HealthDialog from "./components/HealthDialog.svelte";
   import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -402,6 +403,9 @@
 
 {#if app.config?.vaultPath && app.initialized}
   <Thumbnailer />
+{/if}
+{#if app.healthOpen}
+  <HealthDialog />
 {/if}
 {#if app.lookEdit}
   {#key app.lookEdit}

@@ -17,6 +17,7 @@ import type {
   PreviewDigest,
   Highlight,
   HighlightColor,
+  HealthIssue,
   LabelColor,
   ReadingPath,
   ProposalSummary,
@@ -253,6 +254,19 @@ export const api = {
 
   removeHighlight(page: string, id: string): Promise<{ page: PageMeta; highlights: Highlight[] }> {
     return op("highlights.remove", { page, id });
+  },
+
+  pageHealth(id: string): Promise<{ id: string; issues: HealthIssue[] }> {
+    return op("health.check", { id });
+  },
+
+  vaultHealth(): Promise<{ pages: Array<{ id: string; title: string; folder: string | null; issues: HealthIssue[] }> }> {
+    return op("health.check", {});
+  },
+
+  /** Inline a page's local files so it stands on its own. */
+  inlineAssets(id: string): Promise<PageMeta> {
+    return op("health.fix", { id, fix: "inline-assets" });
   },
 
   /** Current previews by page id, and the pages that need one. */
