@@ -7,6 +7,7 @@ pub mod content;
 pub mod extension;
 mod host;
 pub mod models;
+pub mod query;
 pub mod store;
 pub mod time;
 pub mod vault;

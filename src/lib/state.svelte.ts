@@ -13,6 +13,7 @@ import type {
   ProposalSummary,
   ReviewSettings,
   ReviewStats,
+  SavedSearch,
   TagCount,
 } from "./types";
 
@@ -87,6 +88,7 @@ interface AppState {
   proposals: ProposalSummary[];
   /** The reader's proposal panel (review an agent's edit) is open. */
   proposalOpen: boolean;
+  savedSearches: SavedSearch[];
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -165,6 +167,7 @@ export const app: AppState = $state({
   historyOpen: false,
   proposals: [],
   proposalOpen: false,
+  savedSearches: [],
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -261,7 +264,7 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats, proposals] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals, searches] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
@@ -269,6 +272,7 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     api.reviewSettings(),
     api.reviewStats(),
     api.listProposals(),
+    api.savedSearches(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -298,6 +302,8 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     app.proposals = proposals.value;
     announceProposals(proposals.value);
   } else console.error(proposals.reason);
+  if (searches.status === "fulfilled") app.savedSearches = searches.value;
+  else console.error(searches.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -448,6 +454,7 @@ export function resetWorkspace() {
   app.historyOpen = false;
   app.proposals = [];
   app.proposalOpen = false;
+  app.savedSearches = [];
   knownProposals = null;
   app.createRequest = null;
   app.loadError = null;
@@ -588,6 +595,38 @@ export function goAll(): Promise<boolean> {
     app.search = "";
     if (hadSearch) await reloadPages(true);
   });
+}
+
+/** Show the library searched for `query` (a saved search, filters included). */
+export function runSearch(query: string): Promise<boolean> {
+  return go(async () => {
+    app.reviewSession = false;
+    app.readId = null;
+    app.view = "list";
+    clearFilters();
+    app.search = query;
+    await reloadPages(true);
+  });
+}
+
+/** Save the search `query` under `name`; errors are toasted. */
+export async function saveSearch(name: string, query: string): Promise<boolean> {
+  try {
+    app.savedSearches = await api.saveSearch(name, query);
+    toast(t("search.saved", { name: name.trim() }), "success");
+    return true;
+  } catch (e) {
+    toast(`${t("search.saveFailed")}: ${errorMessage(e)}`, "error");
+    return false;
+  }
+}
+
+export async function deleteSavedSearch(name: string) {
+  try {
+    app.savedSearches = await api.deleteSearch(name);
+  } catch (e) {
+    toast(`${t("search.deleteFailed")}: ${errorMessage(e)}`, "error");
+  }
 }
 
 /** The list filtered to a folder and its subfolders. */

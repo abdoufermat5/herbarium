@@ -74,6 +74,12 @@ export interface ProposalSummary {
   stale: boolean;
 }
 
+/** A named search (`.herbarium/searches.json`); `query` may include filters. */
+export interface SavedSearch {
+  name: string;
+  query: string;
+}
+
 /** Vault-wide agent settings (`.herbarium/agents.json`). */
 export interface AgentSettings {
   /** Agent rewrites of a page's HTML wait for approval. */

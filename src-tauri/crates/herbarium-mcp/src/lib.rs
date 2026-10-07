@@ -143,6 +143,13 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("history.get", "Read page version", Effect::ReadOnly),
     ("history.restore", "Restore page version", Effect::Mutating),
     ("agents.settings", "Agent settings", Effect::ReadOnly),
+    ("searches.list", "List saved searches", Effect::ReadOnly),
+    ("searches.save", "Save search", Effect::Idempotent),
+    (
+        "searches.delete",
+        "Delete saved search",
+        Effect::DestructiveIdempotent,
+    ),
     (
         "proposals.list",
         "Edits awaiting approval",

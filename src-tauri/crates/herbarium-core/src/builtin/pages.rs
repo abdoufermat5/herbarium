@@ -13,6 +13,7 @@ use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource};
+use crate::query::{FILTER_HELP, Query};
 use crate::store::Store;
 use crate::time::now_ms;
 use crate::vault;
@@ -530,17 +531,23 @@ impl Extension for Pages {
 
         r.add(Operation::new(
             "pages.search",
-            "Full-text search over titles, tags, folders, notes and page text; best matches first (title matches rank highest). Each hit is the page metadata plus an optional `snippet` of matching text with the match in [brackets]. An empty query lists every page. Returns at most `limit` hits (default 50).",
+            &format!("Full-text search over titles, tags, folders, notes, page text and source prompts; best matches first (title matches rank highest). Each hit is the page metadata plus an optional `snippet` of matching text with the match in [brackets]. An empty query lists every page. Returns at most `limit` hits (default 50). {FILTER_HELP}"),
             object(
                 json!({
-                    "query": { "type": "string", "description": "Words to find; all must match." },
+                    "query": { "type": "string", "description": "Words to find (all must match), plus optional filters such as `tag:rust is:due`." },
                     "limit": { "type": "integer", "minimum": 1, "description": "Maximum number of hits (default 50)." }
                 }),
                 &["query"],
             ),
             |ctx: &mut Ctx, a: SearchArgs| {
                 let limit = effective_limit(ctx.caller, a.limit);
-                ctx.store.search(&a.query, limit).map_err(|e| e.to_string())
+                let query = Query::parse(&a.query)?;
+                if !query.has_filters() {
+                    return ctx.store.search(&query.text, limit).map_err(|e| e.to_string());
+                }
+                let now = now_ms();
+                let hits = ctx.store.search(&query.text, usize::MAX).map_err(|e| e.to_string())?;
+                Ok(hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect())
             },
         ))?;
 

@@ -832,3 +832,122 @@ fn source_rejects_non_web_urls_before_writing() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn search_filters_narrow_results_before_the_limit() {
+    let vault = temp_vault("filters");
+    let host = open(&vault);
+    for i in 0..5 {
+        create(&host, &format!("Rust {i}"), Some("lang/rust"), &["rust"]);
+    }
+    create(
+        &host,
+        "Rust in python folder",
+        Some("lang/python"),
+        &["python"],
+    );
+    let due = create(&host, "Due page", None, &["rust"]);
+    host.call(
+        Caller::Ui,
+        "review.schedule",
+        json!({ "id": due["id"], "intervalMinutes": 1 }),
+    )
+    .unwrap();
+
+    let ids = |q: &str, limit: Option<usize>| -> Vec<String> {
+        let mut args = json!({ "query": q });
+        if let Some(l) = limit {
+            args["limit"] = json!(l);
+        }
+        host.call(Caller::Ui, "pages.search", args)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    assert_eq!(ids("rust folder:lang/python", None).len(), 1);
+    assert_eq!(ids("tag:rust", None).len(), 6);
+    assert_eq!(
+        ids("tag:rust -folder:lang", None),
+        vec![due["id"].as_str().unwrap()]
+    );
+    // The limit applies after filtering, so a filtered match is never cut off.
+    assert_eq!(ids("folder:lang/python", Some(1)).len(), 1);
+    assert_eq!(
+        ids("is:scheduled due:1d", None),
+        vec![due["id"].as_str().unwrap()]
+    );
+    assert_eq!(ids("is:unscheduled", None).len(), 6);
+
+    let err = host
+        .call(
+            Caller::Ui,
+            "pages.search",
+            json!({ "query": "is:whatever" }),
+        )
+        .unwrap_err();
+    assert!(err.contains("is:whatever"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn saved_searches_round_trip() {
+    let vault = temp_vault("saved");
+    let host = open(&vault);
+    let list = host
+        .call(
+            Caller::Agent,
+            "searches.save",
+            json!({ "name": "Rust due", "query": "tag:rust is:due" }),
+        )
+        .unwrap();
+    assert_eq!(
+        list,
+        json!([{ "name": "Rust due", "query": "tag:rust is:due" }])
+    );
+    // Same name, any case: replaced in place.
+    host.call(
+        Caller::Ui,
+        "searches.save",
+        json!({ "name": "rust due", "query": "tag:rust" }),
+    )
+    .unwrap();
+    host.call(
+        Caller::Ui,
+        "searches.save",
+        json!({ "name": "Notes", "query": "has:note" }),
+    )
+    .unwrap();
+    let list = host.call(Caller::Ui, "searches.list", json!({})).unwrap();
+    assert_eq!(list[0], json!({ "name": "rust due", "query": "tag:rust" }));
+    assert_eq!(list[1]["name"], "Notes");
+
+    assert!(
+        host.call(
+            Caller::Ui,
+            "searches.save",
+            json!({ "name": "Bad", "query": "is:nope" })
+        )
+        .is_err()
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "searches.save",
+            json!({ "name": " ", "query": "x" })
+        )
+        .is_err()
+    );
+
+    let list = host
+        .call(Caller::Ui, "searches.delete", json!({ "name": "RUST DUE" }))
+        .unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert!(vault.join(".herbarium/searches.json").exists());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

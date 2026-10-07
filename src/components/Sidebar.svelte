@@ -9,6 +9,8 @@
     duplicatePage,
     errorMessage,
     goAll,
+    runSearch,
+    deleteSavedSearch,
     goView,
     inFolder,
     movePages,
@@ -823,6 +825,39 @@
       </button>
     </nav>
 
+    {#if app.savedSearches.length > 0}
+      <div class="group">
+        <div class="group-head">
+          <div class="group-title static">{t("sidebar.savedSearches")}</div>
+        </div>
+        <nav class="nav" aria-label={t("sidebar.savedSearches")}>
+          {#each app.savedSearches as s (s.name)}
+            {@const active = !app.readId && app.view === "list" && app.search === s.query}
+            <div class="saved-row">
+              <button
+                class="nav-item"
+                class:active
+                aria-current={active ? "page" : undefined}
+                title={s.query}
+                onclick={() => void runSearch(s.query)}
+              >
+                <span class="nav-icon"><Icon name="search" size={14} /></span>
+                <span class="nav-label ellipsis">{s.name}</span>
+              </button>
+              <button
+                class="tool saved-remove"
+                title={t("sidebar.removeSearch", { name: s.name })}
+                aria-label={t("sidebar.removeSearch", { name: s.name })}
+                onclick={() => void deleteSavedSearch(s.name)}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          {/each}
+        </nav>
+      </div>
+    {/if}
+
     <div
       class="group"
       class:drop-root={dropTarget === ""}
@@ -1192,5 +1227,24 @@
     font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: center;
+  }
+  .saved-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .saved-row .nav-item {
+    flex: 1;
+    min-width: 0;
+    padding-right: 26px;
+  }
+  .saved-remove {
+    position: absolute;
+    right: 4px;
+    opacity: 0;
+  }
+  .saved-row:hover .saved-remove,
+  .saved-remove:focus-visible {
+    opacity: 1;
   }
 </style>

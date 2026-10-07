@@ -15,6 +15,7 @@
     deletePages,
     duplicatePage,
     errorMessage,
+    saveSearch,
     type SortKey,
   } from "../lib/state.svelte";
   import { api } from "../lib/api";
@@ -107,6 +108,28 @@
       lastSearch = app.search;
       void reloadPages();
     }, 250);
+  }
+
+  /** Name being typed for the current search, or null when not saving. */
+  let saveName = $state<string | null>(null);
+  const searchSaved = $derived(app.savedSearches.some((s) => s.query === app.search.trim()));
+
+  async function commitSaveSearch() {
+    const name = saveName?.trim();
+    const query = app.search.trim();
+    if (!name || !query) return;
+    if (await saveSearch(name, query)) saveName = null;
+  }
+
+  function onSaveNameKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitSaveSearch();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      saveName = null;
+    }
   }
 
   function clearSearch() {
@@ -337,6 +360,7 @@
           oninput={onSearch}
           placeholder={t("list.searchPlaceholder")}
           aria-label={t("list.searchLabel")}
+          title={t("search.filtersHelp")}
           spellcheck="false"
           autocomplete="off"
         />
@@ -348,6 +372,31 @@
           <kbd class="kbd slash">/</kbd>
         {/if}
       </div>
+
+      {#if saveName !== null}
+        <!-- svelte-ignore a11y_autofocus -->
+        <input
+          class="save-name"
+          type="text"
+          bind:value={saveName}
+          onkeydown={onSaveNameKey}
+          onblur={() => (saveName = null)}
+          placeholder={t("search.namePlaceholder")}
+          aria-label={t("search.nameLabel")}
+          maxlength="80"
+          autofocus
+        />
+      {:else if searching && !searchSaved}
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          onclick={() => (saveName = app.search.trim())}
+          title={t("search.saveHint")}
+        >
+          <Icon name="plus" size={12} />
+          {t("search.save")}
+        </button>
+      {/if}
 
       <div class="tools">
         <Select
@@ -692,6 +741,9 @@
     padding-left: 32px;
     padding-right: 40px;
     background: var(--surface);
+  }
+  .save-name {
+    width: 200px;
   }
   .slash {
     position: absolute;

@@ -759,6 +759,16 @@ export const en = {
   "shortcuts.filter": "Filter shortcuts…",
   "shortcuts.empty": "No shortcut matches your filter.",
   "shortcuts.sections": "Shortcut sections",
+  "search.saved": "Saved search “{name}”",
+  "search.saveFailed": "Couldn't save the search",
+  "search.deleteFailed": "Couldn't remove the saved search",
+  "search.save": "Save search",
+  "search.saveHint": "Keep this search in the sidebar",
+  "search.namePlaceholder": "Name, then Enter",
+  "search.nameLabel": "Saved search name",
+  "search.filtersHelp": "Filters: tag:rust · folder:notes · tool:claude · is:due · is:scheduled · is:unscheduled · has:note · has:source · due:7d · updated:7d · created:30d. Put - in front to exclude.",
+  "sidebar.savedSearches": "Saved searches",
+  "sidebar.removeSearch": "Remove saved search “{name}”",
 } as const;
 
 export type MessageKey = keyof typeof en;

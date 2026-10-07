@@ -7,6 +7,7 @@ mod network;
 mod pages;
 mod proposals;
 mod review;
+mod searches;
 mod storage;
 
 use serde_json::{Map, Value, json};
@@ -22,6 +23,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(network::Network),
         Box::new(history::History),
         Box::new(proposals::Proposals),
+        Box::new(searches::Searches),
     ]
 }
 

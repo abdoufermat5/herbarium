@@ -8,6 +8,7 @@ import type {
   EditorInfo,
   HistoryEntry,
   AgentSettings,
+  SavedSearch,
   ProposalSummary,
   ImportFile,
   ImportResult,
@@ -168,6 +169,19 @@ export const api = {
   /** Restore a saved version; `expectedUpdatedAt` rejects a stale overwrite with `conflict:`. */
   restoreHistory(id: string, at: number, expectedUpdatedAt?: number): Promise<PageMeta> {
     return op("history.restore", { id, at, expectedUpdatedAt });
+  },
+
+  savedSearches(): Promise<SavedSearch[]> {
+    return op("searches.list");
+  },
+
+  /** Save (or replace, by name) a search; resolves to every saved search. */
+  saveSearch(name: string, query: string): Promise<SavedSearch[]> {
+    return op("searches.save", { name, query });
+  },
+
+  deleteSearch(name: string): Promise<SavedSearch[]> {
+    return op("searches.delete", { name });
   },
 
   /** Agent edits waiting for approval, newest first. */
