@@ -1412,6 +1412,11 @@
     flex: 1;
     text-align: left;
   }
+  @media (max-height: 700px) {
+    .shortcut-hint {
+      display: none;
+    }
+  }
   .shortcut-hint {
     font-size: var(--fs-2xs);
     color: var(--muted);

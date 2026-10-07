@@ -1561,7 +1561,7 @@
     {:else if !app.focusMode}
       <div class="review-bar">
         {#if page.meta.nextReview}
-          <button class="btn btn-xs btn-primary done" onclick={() => grade("good")} disabled={saving}>
+          <button class="btn btn-xs done" onclick={() => grade("good")} disabled={saving}>
             <Icon name="check" size={12} />{t("review.done")}
           </button>
           <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.nextReview")}</span>
@@ -2083,6 +2083,41 @@
     flex: none;
   }
 
+  /* Quiet toolbar: borderless until hovered or switched on. */
+  .actions :global(:where(.btn.btn-sm)) {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    color: var(--muted);
+  }
+  .actions :global(:where(.btn.btn-sm):hover:not(:disabled)) {
+    background: var(--sunken);
+    color: var(--text);
+  }
+
+  .done {
+    color: var(--ok);
+    background: var(--ok-soft);
+    border-color: transparent;
+  }
+  .done:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+
+  /* Narrow windows: the review bar keeps to one line. */
+  @media (max-width: 1240px) {
+    .review-bar .rb-label {
+      font-size: 0;
+      gap: 0;
+    }
+    .review-bar .rb-label:not(:has(:global(svg))) {
+      display: none;
+    }
+    .review-bar .rb-sep {
+      display: none;
+    }
+  }
+
   /* Narrow windows: icons only (every button keeps its tooltip). */
   @media (max-width: 1240px) {
     .actions :global(.btn.btn-sm) {
@@ -2148,7 +2183,7 @@
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    padding: 8px 16px;
+    padding: 5px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--raised);
     font-size: var(--fs-sm);

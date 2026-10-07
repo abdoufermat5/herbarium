@@ -1100,6 +1100,13 @@ export const en = {
   "proposal.titleRemix": "Remixed by Claude",
   "proposal.summaryRemix": "Claude remixed this page {when}.",
   "proposal.bannerTitleRemix": "A remix of this page is waiting",
+  "settings.tab.general": "General",
+  "settings.tab.review": "Review",
+  "settings.tab.vault": "Vault",
+  "settings.tab.capture": "Capture",
+  "settings.tab.ai": "AI & sharing",
+  "settings.tab.about": "About",
+  "import.bigPaste": "Pasted page · {size} MB, ready to import",
 } as const;
 
 export type MessageKey = keyof typeof en;

@@ -11,6 +11,22 @@
    */
   const SETTLE_MS = 700;
   const ANSWER_MS = 3000;
+  /** Only work after this long without input: the hidden frame shares the
+   *  window's thread, so a page loading there would stall a click or a keystroke. */
+  const QUIET_MS = 1500;
+
+  let lastInput = 0;
+  const onInput = () => (lastInput = performance.now());
+  for (const type of ["pointerdown", "keydown", "wheel", "pointermove"]) {
+    window.addEventListener(type, onInput, { passive: true, capture: true });
+  }
+
+  async function quiet() {
+    // Also wait while a page is open in the reader.
+    while (!stopped && (performance.now() - lastInput < QUIET_MS || app.readId)) {
+      await new Promise((r) => setTimeout(r, 400));
+    }
+  }
 
   let frame: HTMLIFrameElement | undefined = $state();
   let src = $state("about:blank");
@@ -55,6 +71,7 @@
       const { previews, missing } = await api.listPreviews();
       app.previews = previews;
       for (const id of missing) {
+        await quiet();
         if (stopped || !app.config?.vaultPath) break;
         const loaded = waitForLoad();
         src = `herbarium://page/${encodeURIComponent(id)}?v=preview-${++nonce}`;
@@ -64,7 +81,7 @@
         if (!digest) continue;
         try {
           await api.savePreview(id, digest);
-          app.previews = { ...app.previews, [id]: digest };
+          app.previews[id] = digest;
         } catch (e) {
           console.warn("preview not saved", id, e);
         }
@@ -87,6 +104,9 @@
 
   onDestroy(() => {
     stopped = true;
+    for (const type of ["pointerdown", "keydown", "wheel", "pointermove"]) {
+      window.removeEventListener(type, onInput, { capture: true });
+    }
   });
 </script>
 

@@ -30,7 +30,8 @@ export function tempDir(tag) {
 }
 
 export function cleanup(...dirs) {
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  // Retries: a process that just exited may still be finishing its writes.
+  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
 /** Every page in a vault: `{ id, folder, meta, html }`, read from the files. */

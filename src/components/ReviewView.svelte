@@ -228,19 +228,19 @@
       <dl class="stats">
         <div class="stat">
           <dt class="stat-l">{t("review.stat.due")}</dt>
-          <dd class="stat-n">{shownStats.dueTotal}</dd>
+          <dd class="stat-n" class:zero={shownStats.dueTotal === 0}>{shownStats.dueTotal}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.overdue")}</dt>
-          <dd class="stat-n" class:hot={shownStats.overdue > 0}>{shownStats.overdue}</dd>
+          <dd class="stat-n" class:hot={shownStats.overdue > 0} class:zero={shownStats.overdue === 0}>{shownStats.overdue}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.today")}</dt>
-          <dd class="stat-n">{shownStats.reviewedToday}</dd>
+          <dd class="stat-n" class:zero={shownStats.reviewedToday === 0}>{shownStats.reviewedToday}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.total")}</dt>
-          <dd class="stat-n">{shownStats.totalReviews}</dd>
+          <dd class="stat-n" class:zero={shownStats.totalReviews === 0}>{shownStats.totalReviews}</dd>
         </div>
       </dl>
       {#if statsError}
@@ -549,7 +549,7 @@
     flex-wrap: wrap;
   }
   h1 {
-    font-size: var(--fs-4xl);
+    font-size: var(--fs-3xl);
   }
   .sub {
     font-size: var(--fs-base);
@@ -559,20 +559,23 @@
 
   /* ------------------------------------------------------------- statistics */
 
+  /* One strip, hairlines between the figures. */
   .stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     margin: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
   }
   .stat {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 16px 18px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
+    justify-content: space-between;
+    gap: 6px;
+    padding: 12px 18px;
+    box-shadow: -1px 0 0 var(--border);
   }
   .stat-l {
     font-size: var(--fs-2xs);
@@ -584,11 +587,14 @@
   .stat-n {
     margin: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-3xl);
+    font-size: var(--fs-2xl);
     font-weight: 500;
     line-height: 1;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+  }
+  .stat-n.zero {
+    color: var(--faint, var(--muted));
   }
   .stat-n.hot {
     color: var(--danger);

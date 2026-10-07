@@ -21,6 +21,9 @@ pub(crate) struct Previews;
 const MAX_BLOCKS: usize = 120;
 const MAX_COORD: f64 = 4000.0;
 const MAX_IMAGE: usize = 80 * 1024;
+/// Pages larger than this get no preview: laying them out in a hidden frame
+/// would stall the app for seconds, for a picture of the first screen.
+const MAX_PAGE_BYTES: u64 = 1_500_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct Block {
@@ -216,7 +219,7 @@ impl Extension for Previews {
         r.add(
             Operation::new(
                 "previews.list",
-                "Preview digests of every page whose preview is current (`previews`), and the ids of pages that need one (`missing`).",
+                "Preview digests of every page whose preview is current (`previews`), and the ids of pages that need one (`missing`; pages over 1.5 MB never get one).",
                 object(json!({}), &[]),
                 |ctx: &mut Ctx, _: NoArgs| {
                     let vault = ctx.store.vault.clone();
@@ -231,7 +234,14 @@ impl Extension for Previews {
                             Some(s) if s.updated_at == meta.updated_at => {
                                 previews.insert(meta.id, serde_json::to_value(s.digest).unwrap_or(Value::Null));
                             }
-                            _ => missing.push(meta.id),
+                            _ => {
+                                let size = std::fs::metadata(vault::html_path(&vault, &meta.id, meta.folder.as_deref()))
+                                    .map(|m| m.len())
+                                    .unwrap_or(0);
+                                if size <= MAX_PAGE_BYTES {
+                                    missing.push(meta.id);
+                                }
+                            }
                         }
                     }
                     Ok(json!({ "previews": previews, "missing": missing }))

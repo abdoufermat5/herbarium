@@ -137,7 +137,12 @@
     const pad = 80;
     const minX = Math.min(...xs) - pad;
     const minY = Math.min(...ys) - pad;
-    view = { x: minX, y: minY, w: Math.max(...xs) + pad - minX, h: Math.max(...ys) + pad - minY };
+    const w = Math.max(...xs) + pad - minX;
+    const h = Math.max(...ys) + pad - minY;
+    // Never zoom in past life size: a small graph stays small, centred.
+    const vw = Math.max(w, 900);
+    const vh = Math.max(h, 560);
+    view = { x: minX - (vw - w) / 2, y: minY - (vh - h) / 2, w: vw, h: vh };
   }
 
   function radius(n: Node): number {

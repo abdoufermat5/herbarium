@@ -184,8 +184,31 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     await shot("graph");
   });
 
+  await step("big paste", async () => {
+    // A multi-megabyte paste is held aside, not laid out in the textarea.
+    await app.click("All pages", "aside button, nav button, button");
+    await app.click("Import", ".btn-primary");
+    await app.click("Paste", "[role=tab]");
+    const rows = Array.from({ length: 30000 }, (_, i) => `<tr><td>${i}</td><td>row ${i} of a big table</td></tr>`).join("");
+    const big = `<!doctype html><html><head><title>Big pasted table</title></head><body><table>${rows}</table></body></html>`;
+    assert.ok(big.length > 1_000_000);
+    await app.exec((html) => {
+      const ta = document.querySelector("#panel-paste textarea");
+      const data = new DataTransfer();
+      data.setData("text/plain", html);
+      ta.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
+    }, big);
+    await app.find("Big pasted table", ".big-paste strong");
+    const t = Date.now();
+    await app.exec(() => 1);
+    assert.ok(Date.now() - t < 500, "the window stays responsive");
+    await app.click("Import", ".foot .btn-primary");
+    await app.waitFor(() => vaultPages(vault).some((p) => p.meta.title === "Big pasted table"), "the big page imported", 60000);
+  });
+
   await step("settings", async () => {
     await app.click("Settings", "aside button, nav button, button");
+    await app.click("AI & sharing", "[role=tab]");
     await app.waitText("Remix with");
     await app.waitText("Connected as octo.");
     await app.waitText("https://octo.github.io/herbarium-pages/");

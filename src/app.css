@@ -585,6 +585,10 @@ body,
 .chip-muted {
   background: var(--sunken);
   color: var(--muted);
+  /* Tags and dates read as words, not labels. */
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: var(--fs-xs);
 }
 
 .chip-warn {
@@ -831,4 +835,11 @@ textarea {
 
 .empty .btn {
   margin-top: 10px;
+}
+
+/* Small windows: a narrower sidebar leaves the page room. */
+@media (max-width: 1024px) {
+  :root {
+    --sidebar-w: 216px;
+  }
 }

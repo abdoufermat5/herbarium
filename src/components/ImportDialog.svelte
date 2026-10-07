@@ -14,6 +14,22 @@
 
   let tab = $state<Tab>("files");
   let pasted = $state("");
+  /** A large paste, kept out of the textarea: laying out megabytes of text
+   *  there would freeze the window. Shown as a summary instead. */
+  let bigPaste = $state<string | null>(null);
+  const BIG_PASTE = 100_000;
+  const pasteContent = $derived(bigPaste ?? pasted);
+  const bigPasteTitle = $derived(
+    bigPaste ? (/<title[^>]*>([^<]{0,200})/i.exec(bigPaste.slice(0, 20_000))?.[1]?.trim() ?? "") : "",
+  );
+
+  function onPaste(e: ClipboardEvent) {
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (text.length < BIG_PASTE) return;
+    e.preventDefault();
+    bigPaste = text;
+    pasted = "";
+  }
   let dragDepth = $state(0);
   let staged = $state<File[]>([]);
   let dragOver = $derived(dragDepth > 0);
@@ -200,6 +216,7 @@
         staged = [];
         void reloadPages();
         busy = false;
+        bigPaste = null;
         close(true);
       } else {
         message = t("import.nothing");
@@ -213,7 +230,7 @@
   }
 
   async function pasteImport() {
-    const content = pasted.trim();
+    const content = pasteContent.trim();
     if (!content || busy) return;
     busy = true;
     message = "";
@@ -228,6 +245,7 @@
         toast(t("toast.imported", { count: res.imported }), "success");
         void reloadPages();
         busy = false;
+        bigPaste = null;
         close(true);
       }
     } catch (e) {
@@ -419,14 +437,28 @@
       </div>
     {:else}
       <div class="panel" role="tabpanel" id="panel-paste" aria-labelledby="tab-paste">
-        <textarea
-          bind:this={pasteArea}
-          bind:value={pasted}
-          rows={6}
-          aria-label={t("import.tabPaste")}
-          placeholder={t("import.pastePlaceholder")}
-          spellcheck={false}
-        ></textarea>
+        {#if bigPaste !== null}
+          <div class="big-paste">
+            <Icon name="file-text" size={16} />
+            <span class="bp-text">
+              <strong>{bigPasteTitle || t("common.untitled")}</strong>
+              <small>{t("import.bigPaste", { size: (bigPaste.length / 1024 / 1024).toFixed(1) })}</small>
+            </span>
+            <button class="btn btn-sm btn-ghost" onclick={() => ((bigPaste = null), queueMicrotask(() => pasteArea?.focus()))}>
+              {t("common.clear")}
+            </button>
+          </div>
+        {:else}
+          <textarea
+            bind:this={pasteArea}
+            bind:value={pasted}
+            onpaste={onPaste}
+            rows={6}
+            aria-label={t("import.tabPaste")}
+            placeholder={t("import.pastePlaceholder")}
+            spellcheck={false}
+          ></textarea>
+        {/if}
       </div>
     {/if}
 
@@ -453,7 +485,7 @@
       {#if tab === "paste"}
         <button
           class="btn btn-primary"
-          disabled={busy || !pasted.trim()}
+          disabled={busy || !pasteContent.trim()}
           onclick={pasteImport}
         >
           {busy ? t("import.importing") : t("import.button")}
@@ -624,6 +656,33 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .big-paste {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--sunken);
+    color: var(--muted);
+  }
+  .bp-text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .bp-text strong {
+    color: var(--text);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .bp-text small {
+    font-size: var(--fs-xs);
+  }
   textarea {
     width: 100%;
     min-height: 130px;

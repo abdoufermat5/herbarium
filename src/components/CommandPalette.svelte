@@ -62,7 +62,7 @@
     }
     debounceTimer = setTimeout(() => {
       void api
-        .searchPages(query)
+        .searchPages(query, 12)
         .then((hits) => {
           if (seq === searchSeq) results = { query, hits };
         })
@@ -70,7 +70,7 @@
           console.error(e);
           if (seq === searchSeq) results = { query, hits: [] };
         });
-    }, 160);
+    }, 90);
   });
 
   const currentPage = $derived(

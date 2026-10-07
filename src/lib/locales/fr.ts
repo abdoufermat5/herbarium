@@ -1110,4 +1110,11 @@ export const fr: Record<MessageKey, string> = {
   "proposal.titleRemix": "Remanié par Claude",
   "proposal.summaryRemix": "Claude a remanié cette page {when}.",
   "proposal.bannerTitleRemix": "Un remaniement de cette page attend",
+  "settings.tab.general": "Général",
+  "settings.tab.review": "Révision",
+  "settings.tab.vault": "Coffre",
+  "settings.tab.capture": "Capture",
+  "settings.tab.ai": "IA et partage",
+  "settings.tab.about": "À propos",
+  "import.bigPaste": "Page collée · {size} Mo, prête à importer",
 };

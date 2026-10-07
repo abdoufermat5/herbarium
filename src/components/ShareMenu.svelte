@@ -1,6 +1,6 @@
 <script lang="ts">
   import { api } from "../lib/api";
-  import { app, errorMessage, goView, toast } from "../lib/state.svelte";
+  import { app, errorMessage, openSettings, toast } from "../lib/state.svelte";
   import { confirmAction } from "../lib/confirm.svelte";
   import { t } from "../lib/i18n.svelte";
   import { digestPng, shareCard } from "../lib/share";
@@ -32,9 +32,7 @@
     toast(t("share.connectFirst"), "info", 8000, {
       label: t("remix.openSettings"),
       run: async () => {
-        if (await goView("settings")) {
-          setTimeout(() => document.getElementById("settings-publish")?.scrollIntoView({ block: "start" }), 50);
-        }
+        await openSettings("ai");
       },
     });
     return null;

@@ -198,7 +198,7 @@
     gap: 10px;
   }
   h1 {
-    font-size: var(--fs-4xl);
+    font-size: var(--fs-3xl);
     padding-bottom: 2px;
   }
   .sub {

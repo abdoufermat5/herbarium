@@ -4,6 +4,7 @@
     app,
     visiblePages,
     reloadPages,
+    searchLibrary,
     toast,
     clearFilters,
     setLayout,
@@ -46,6 +47,37 @@
   let menu = $state<{ x: number; y: number; items: DropdownMenuItem[] } | null>(null);
 
   const pages = $derived(visiblePages(app.pages) as Row[]);
+
+  /* Windowed rendering: a big library draws the first cards at once and
+     the rest as they come near the viewport, so searching, filtering and
+     switching views stay instant whatever the vault's size. */
+  const WINDOW = 24;
+  let limit = $state(WINDOW);
+  const shown = $derived(pages.length > limit ? pages.slice(0, limit) : pages);
+  let sentinel: HTMLDivElement | undefined = $state();
+
+  // A new search, filter, sort or layout starts from the top.
+  $effect(() => {
+    void app.search;
+    void app.folderFilter;
+    void app.tagFilter;
+    void app.sort;
+    void app.layout;
+    limit = WINDOW;
+  });
+
+  $effect(() => {
+    const el = sentinel;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) limit += WINDOW * 2;
+      },
+      { rootMargin: "1200px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  });
   const selectedIds = $derived([...selected]);
   const searching = $derived(!!app.search.trim());
   const filtersActive = $derived(!!(app.folderFilter || app.tagFilter));
@@ -108,8 +140,8 @@
     timer = setTimeout(() => {
       app.search = searchInput.trim();
       lastSearch = app.search;
-      void reloadPages();
-    }, 250);
+      void searchLibrary();
+    }, 120);
   }
 
   /** Name being typed for the current search, or null when not saving. */
@@ -139,7 +171,7 @@
     searchInput = "";
     app.search = "";
     lastSearch = "";
-    void reloadPages();
+    void searchLibrary();
   }
 
   /* ------------------------------------------------------------- selection */
@@ -562,8 +594,8 @@
         {/if}
       </div>
     {:else}
-      <div class="grid" class:list={app.layout === "list"}>
-        {#each pages as p (p.id)}
+      <div class="grid" class:list={app.layout === "list"} class:selecting={selected.size > 0}>
+        {#each shown as p (p.id)}
           {@const due = dueInfo(p.nextReview)}
           {@const selectedRow = selected.has(p.id)}
           <article
@@ -580,9 +612,15 @@
               aria-label={p.title || t("common.untitled")}
               onclick={(e) => onOpenPage(e, p.id)}
             ></button>
-            {#if app.layout === "grid" && app.previews[p.id]}
-              <div class="preview" aria-hidden="true">
-                <Miniature digest={app.previews[p.id]} />
+            {#if app.layout === "grid"}
+              <div class="preview" class:no-preview={!app.previews[p.id]} data-color={folderLook(p.folder).color} aria-hidden="true">
+                {#if app.previews[p.id]}
+                  <Miniature digest={app.previews[p.id]} />
+                {:else if p.ext?.look?.icon}
+                  <span class="placeholder-emoji">{p.ext.look.icon}</span>
+                {:else}
+                  <Icon name="leaf" size={22} />
+                {/if}
               </div>
             {/if}
             <div class="page-open">
@@ -667,6 +705,9 @@
           </article>
         {/each}
       </div>
+      {#if shown.length < pages.length}
+        <div class="more" bind:this={sentinel} aria-hidden="true"></div>
+      {/if}
     {/if}
   </div>
 </section>
@@ -708,7 +749,7 @@
     gap: 10px;
   }
   h1 {
-    font-size: var(--fs-4xl);
+    font-size: var(--fs-3xl);
     padding-bottom: 2px;
   }
   .head-meta {
@@ -874,12 +915,18 @@
   /* ---- Grid: bento cards ---- */
   .grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 16px;
   }
 
+  .more {
+    height: 1px;
+  }
   .page {
     position: relative;
+    /* Off-screen cards skip layout and paint. */
+    content-visibility: auto;
+    contain-intrinsic-size: auto 240px;
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -924,10 +971,14 @@
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 18px;
-    padding: 24px;
+    gap: 10px;
+    padding: 14px 16px 16px;
     text-align: left;
     border-radius: inherit;
+  }
+  /* The grid shows the page itself; the icon lives in its preview. */
+  .grid:not(.list) .thumb {
+    display: none;
   }
   .thumb {
     flex: none;
@@ -949,7 +1000,7 @@
   }
   .page-title {
     font-family: var(--font-display);
-    font-size: var(--fs-lg);
+    font-size: 17px;
     font-weight: 500;
     line-height: 1.25;
     letter-spacing: -0.015em;
@@ -1013,9 +1064,9 @@
   .page-side {
     position: absolute;
     z-index: 2;
-    top: 20px;
-    right: 18px;
-    left: 66px;
+    top: 8px;
+    right: 8px;
+    left: 8px;
     display: flex;
     justify-content: flex-end;
     align-items: center;
@@ -1026,7 +1077,26 @@
     pointer-events: auto;
   }
   .check {
-    margin-right: 2px;
+    margin-right: auto;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    opacity: 0;
+    transition: opacity var(--t-fast) var(--ease-out);
+  }
+  .page:hover .check,
+  .page:focus-within .check,
+  .page.selected .check,
+  .selecting .check {
+    opacity: 1;
+  }
+  .grid:not(.list) .page-side .due,
+  .grid:not(.list) .page-side .del {
+    background: color-mix(in srgb, var(--surface) 88%, transparent);
+    backdrop-filter: blur(4px);
   }
 
   .del {
@@ -1129,7 +1199,7 @@
     line-height: 1;
   }
   .preview {
-    height: 128px;
+    height: 120px;
     margin: -1px -1px 0;
     border-bottom: 1px solid var(--border);
     border-radius: var(--radius) var(--radius) 0 0;
@@ -1139,5 +1209,20 @@
   }
   .list .preview {
     display: none;
+  }
+  .preview.no-preview {
+    display: grid;
+    place-items: center;
+    background: var(--sunken);
+    color: var(--muted);
+    opacity: 0.9;
+  }
+  .preview.no-preview[data-color] {
+    background: var(--chip-wash);
+    color: var(--chip-ink);
+  }
+  .placeholder-emoji {
+    font-size: 30px;
+    line-height: 1;
   }
 </style>

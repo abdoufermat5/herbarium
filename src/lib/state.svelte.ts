@@ -23,6 +23,7 @@ import type {
 export type View = "today" | "list" | "review" | "settings" | "trash" | "graph";
 export type Layout = "grid" | "list";
 /** `relevance` keeps the backend's full-text ranking while searching and falls back to recent otherwise. */
+export type SettingsTab = "general" | "review" | "vault" | "capture" | "ai" | "about";
 export type SortKey = "relevance" | "recent" | "title" | "review";
 /** The theme actually shown. */
 export type Theme = "light" | "dark";
@@ -107,6 +108,8 @@ interface AppState {
   healthOpen: boolean;
   /** The folder or tag whose icon and colour are being edited. */
   lookEdit: { kind: "folder" | "tag"; key: string } | null;
+  /** The Settings tab shown. */
+  settingsTab: SettingsTab;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -195,6 +198,7 @@ export const app: AppState = $state({
   focusMode: false,
   aiImportOpen: false,
   lookEdit: null,
+  settingsTab: "general",
   healthOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
@@ -449,6 +453,22 @@ export async function reloadPages(quiet = false) {
   }
 }
 
+/** Show the results of `app.search` (or the whole library when empty)
+ *  without reloading everything else. */
+export async function searchLibrary() {
+  const seq = ++reloadSeq;
+  const q = app.search.trim();
+  try {
+    const pages = q ? await api.searchPages(q) : app.library;
+    if (seq !== reloadSeq) return;
+    app.pages = pages;
+  } catch (e) {
+    if (seq !== reloadSeq) return;
+    console.error(e);
+    toast(`${t("toast.loadFailed")} ${errorMessage(e)}`, "error");
+  }
+}
+
 /** Pick up changes made while the window was in the background (agents over
  *  MCP, edits or sync tools touching the vault folder). */
 async function resync() {
@@ -618,6 +638,12 @@ export function openPage(id: string): Promise<boolean> {
 }
 
 /** Show a top-level view (leaves the reader). */
+/** Open Settings on one tab. */
+export function openSettings(tab: SettingsTab): Promise<boolean> {
+  app.settingsTab = tab;
+  return goView("settings");
+}
+
 export function goView(view: View): Promise<boolean> {
   return go(() => {
     app.reviewSession = false;

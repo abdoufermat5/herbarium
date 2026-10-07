@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { getVersion } from "@tauri-apps/api/app";
   import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
-  import { app, setTheme, setLayout, setSort, goView, toast, errorMessage, type ThemeChoice } from "../lib/state.svelte";
+  import { app, setTheme, setLayout, setSort, toast, errorMessage, type SettingsTab, type ThemeChoice } from "../lib/state.svelte";
+  import type { IconName } from "../lib/icons";
   import { navigate } from "../lib/navigation.svelte";
   import { api } from "../lib/api";
   import { confirmAction } from "../lib/confirm.svelte";
@@ -21,6 +22,33 @@
   import CaptureSettingsSection from "./settings/CaptureSettingsSection.svelte";
   import AiSettingsSection from "./settings/AiSettingsSection.svelte";
   import PublishSettingsSection from "./settings/PublishSettingsSection.svelte";
+
+  const TABS: Array<{ id: SettingsTab; icon: IconName }> = [
+    { id: "general", icon: "settings" },
+    { id: "review", icon: "calendar-clock" },
+    { id: "vault", icon: "folder" },
+    { id: "capture", icon: "upload" },
+    { id: "ai", icon: "sparkle" },
+    { id: "about", icon: "info" },
+  ];
+
+  let scroller: HTMLDivElement | undefined = $state();
+
+  function pickTab(tab: SettingsTab) {
+    app.settingsTab = tab;
+    scroller?.scrollTo({ top: 0 });
+  }
+
+  /** Arrow keys move between tabs, as in any tab list. */
+  function onTabKey(e: KeyboardEvent) {
+    const i = TABS.findIndex((x) => x.id === app.settingsTab);
+    const next = e.key === "ArrowRight" ? i + 1 : e.key === "ArrowLeft" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? TABS.length - 1 : null;
+    if (next === null) return;
+    e.preventDefault();
+    const tab = TABS[(next + TABS.length) % TABS.length];
+    pickTab(tab.id);
+    document.getElementById(`settings-tab-${tab.id}`)?.focus();
+  }
 
   function setDetailsOpen(open: boolean) {
     setPref("detailsOpen", open);
@@ -143,20 +171,30 @@
   }
 </script>
 
-<div class="settings">
+<div class="settings" bind:this={scroller}>
   <div class="settings-inner">
     <header class="head">
-      <div class="head-text">
-        <span class="eyebrow">Herbarium</span>
-        <h1 class="display">{t("settings.title")}</h1>
-        <p class="sub">{t("settings.sub")}</p>
+      <h1 class="display">{t("settings.title")}</h1>
+      <div class="tabs" role="tablist" aria-label={t("settings.title")} tabindex="-1" onkeydown={onTabKey}>
+        {#each TABS as tab (tab.id)}
+          <button
+            id={`settings-tab-${tab.id}`}
+            role="tab"
+            class="tab"
+            aria-selected={app.settingsTab === tab.id}
+            aria-controls="settings-panel"
+            tabindex={app.settingsTab === tab.id ? 0 : -1}
+            onclick={() => pickTab(tab.id)}
+          >
+            <Icon name={tab.icon} size={14} />
+            {t(`settings.tab.${tab.id}`)}
+          </button>
+        {/each}
       </div>
-      <button class="btn" onclick={() => void goView("list")}>
-        <Icon name="arrow-left" size={14} />
-        {t("sidebar.all")}
-      </button>
     </header>
 
+    <div id="settings-panel" class="panel" role="tabpanel" aria-labelledby={`settings-tab-${app.settingsTab}`}>
+    {#if app.settingsTab === "general"}
     <SettingsSection id="settings-appearance" title={t("settings.appearance")}>
       <SettingRow title={t("prefs.theme")} hint={t("settings.themeHint")}>
         <Select
@@ -205,7 +243,7 @@
           fill
           size="md"
           align="right"
-          value={app.sort}
+          value={app.sort === "relevance" ? "recent" : app.sort}
           ariaLabel={t("list.sort")}
           options={[
             { value: "recent", label: t("list.sortRecent") },
@@ -258,18 +296,6 @@
 
     <EditorSettingsSection />
 
-    <ReviewSettingsSection />
-
-    <VaultSettingsSection />
-
-    <BrowserSettingsSection />
-
-    <CaptureSettingsSection />
-
-    <AiSettingsSection />
-
-    <PublishSettingsSection />
-
     <SettingsSection id="settings-desktop" title={t("settings.desktop")}>
       <SettingRow title={t("settings.closeToTray")} hint={t("settings.closeToTrayHint")}>
         <Switch
@@ -288,6 +314,17 @@
       </SettingRow>
     </SettingsSection>
 
+    {:else if app.settingsTab === "review"}
+      <ReviewSettingsSection />
+    {:else if app.settingsTab === "vault"}
+      <VaultSettingsSection />
+    {:else if app.settingsTab === "capture"}
+      <BrowserSettingsSection />
+      <CaptureSettingsSection />
+    {:else if app.settingsTab === "ai"}
+      <AiSettingsSection />
+      <PublishSettingsSection />
+    {:else}
     <SettingsSection
       id="settings-updates"
       title={t("settings.updates")}
@@ -330,6 +367,9 @@
       {/if}
     </SettingsSection>
 
+    {/if}
+    </div>
+
     <p class="save-hint"><Icon name="check" size={14} />{t("settings.saved")}</p>
   </div>
 </div>
@@ -339,7 +379,7 @@
     height: 100%;
     overflow-x: hidden;
     overflow-y: auto;
-    padding: 48px 40px 72px;
+    padding: 40px 40px 56px;
     /* lets rows restack when the pane is narrow, whatever the window or sidebar width */
     container: settings / inline-size;
   }
@@ -348,28 +388,65 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 40px;
+    gap: 28px;
     min-width: 0;
   }
   .head {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-end;
-    flex-wrap: wrap;
-    gap: 16px 24px;
-  }
-  .head-text {
-    display: flex;
     flex-direction: column;
-    gap: 10px;
-    min-width: 0;
+    gap: 14px;
   }
   h1 {
-    font-size: var(--fs-4xl);
+    font-size: var(--fs-3xl);
   }
-  .sub {
+  .tabs {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    border-bottom: 1px solid var(--border);
+    margin: 0 -4px;
+    padding: 0 4px;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tab {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 12px 10px;
+    margin-bottom: -1px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: none;
     color: var(--muted);
-    font-size: var(--fs-base);
+    font: inherit;
+    font-size: var(--fs-sm);
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      color var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out);
+  }
+  .tab:hover {
+    color: var(--text);
+  }
+  .tab[aria-selected="true"] {
+    color: var(--text);
+    border-bottom-color: var(--leaf);
+  }
+  .tab:focus-visible {
+    outline: 2px solid var(--leaf);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
+  }
+  .panel {
+    display: flex;
+    flex-direction: column;
+    gap: 36px;
+    min-width: 0;
   }
   .save-hint {
     display: flex;
@@ -380,9 +457,28 @@
     padding-bottom: 8px;
   }
 
+  @media (max-width: 760px) {
+    .settings {
+      padding: 24px 18px 40px;
+    }
+  }
+
+  /* Every tab stays visible: icons go first, then padding. */
+  @container settings (max-width: 720px) {
+    .tab :global(svg) {
+      display: none;
+    }
+    .tab {
+      padding: 9px 9px 10px;
+    }
+  }
+
   @container settings (max-width: 560px) {
     .settings-inner {
-      gap: 32px;
+      gap: 24px;
+    }
+    .panel {
+      gap: 28px;
     }
   }
 

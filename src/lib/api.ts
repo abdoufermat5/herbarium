@@ -113,8 +113,8 @@ export const api = {
   },
 
   /** Ranked full-text hits (best first) with optional `[match]` snippets. */
-  searchPages(query: string): Promise<SearchHit[]> {
-    return op("pages.search", { query });
+  searchPages(query: string, limit?: number): Promise<SearchHit[]> {
+    return op("pages.search", limit ? { query, limit } : { query });
   },
 
   getPage(id: string): Promise<Page> {

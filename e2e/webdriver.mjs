@@ -162,9 +162,18 @@ export class Session {
     );
   }
 
+  /** Click it; a click intercepted for a moment (a toast, a fade-in) is retried. */
   async click(text, selector) {
-    const el = await this.find(text, selector);
-    await this.cmd("POST", `/element/${el[ELEMENT]}/click`, {});
+    for (let attempt = 0; ; attempt++) {
+      const el = await this.find(text, selector);
+      try {
+        await this.cmd("POST", `/element/${el[ELEMENT]}/click`, {});
+        return;
+      } catch (e) {
+        if (attempt >= 10 || !/intercepted|not interactable|stale/.test(e.message)) throw e;
+        await sleep(200);
+      }
+    }
   }
 
   async type(selector, value) {

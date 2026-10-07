@@ -2,7 +2,7 @@
   import { onDestroy, onMount } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
   import { api } from "../lib/api";
-  import { app, errorMessage, goView, toast } from "../lib/state.svelte";
+  import { app, errorMessage, openSettings, toast } from "../lib/state.svelte";
   import { t } from "../lib/i18n.svelte";
   import type { AiSettings, RemixPreset } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
@@ -79,11 +79,9 @@
     }
   }
 
-  async function openSettings() {
+  async function toSettings() {
     onClose();
-    if (await goView("settings")) {
-      setTimeout(() => document.getElementById("settings-ai")?.scrollIntoView({ block: "start" }), 50);
-    }
+    await openSettings("ai");
   }
 
   onMount(async () => {
@@ -120,7 +118,7 @@
     {#if needsKey}
       <div class="notice">
         <span>{t("remix.needsKey")}</span>
-        <button class="btn btn-sm" onclick={openSettings}>{t("remix.openSettings")}</button>
+        <button class="btn btn-sm" onclick={toSettings}>{t("remix.openSettings")}</button>
       </div>
     {/if}
 
@@ -284,12 +282,30 @@
     color: var(--danger);
     font-size: var(--fs-sm);
   }
+  /* The actions stay on screen however short the window. */
   .foot {
+    position: sticky;
+    bottom: -22px;
+    margin: 0 -24px -22px;
+    padding: 12px 24px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
     flex-wrap: wrap;
+  }
+  @media (max-height: 640px) {
+    .overlay {
+      padding-top: 4vh;
+    }
+    .dialog {
+      max-height: 92vh;
+    }
+    .preset span {
+      display: none;
+    }
   }
   .buttons {
     display: flex;

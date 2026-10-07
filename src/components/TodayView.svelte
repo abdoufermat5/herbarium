@@ -4,12 +4,12 @@
   import {
     app,
     errorMessage,
-    goView,
     openInPath,
     openPage,
     reloadPages,
     startReviewSession,
     toast,
+    openSettings,
   } from "../lib/state.svelte";
   import { fmtDate, plural, timeAgo } from "../lib/format";
   import { i18n, t, LOCALES } from "../lib/i18n.svelte";
@@ -91,7 +91,7 @@
             <Icon name="files" size={18} />
             <span><strong>{t("today.ctaExport")}</strong><small>{t("today.ctaExportHint")}</small></span>
           </button>
-          <button class="cta" onclick={() => void goView("settings")}>
+          <button class="cta" onclick={() => void openSettings("capture")}>
             <Icon name="external-link" size={18} />
             <span><strong>{t("today.ctaBrowser")}</strong><small>{t("today.ctaBrowserHint")}</small></span>
           </button>
@@ -212,7 +212,7 @@
     margin: 0 0 6px;
   }
   .head h1 {
-    font-size: var(--fs-3xl, 34px);
+    font-size: var(--fs-3xl);
     margin: 0;
   }
   .sub {
@@ -354,11 +354,21 @@
     margin: 0;
     font-size: var(--fs-xl, 20px);
   }
+  /* Not the big empty-state heading the global .empty styles give <strong>. */
+  .cta strong {
+    font-family: var(--font);
+    font-size: var(--fs-base);
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1.35;
+  }
   .empty p {
     margin: 0;
     color: var(--text-soft);
   }
   .ctas {
+    width: 100%;
+    max-width: 640px;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
     gap: 10px;
