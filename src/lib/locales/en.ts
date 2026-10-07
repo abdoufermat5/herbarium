@@ -778,6 +778,22 @@ export const en = {
   "links.from": "Linked from",
   "links.brokenHint": "No page with this id",
   "links.none": "No links yet. Pages link to each other with herbarium-app://open/<id>.",
+  "unit.review_one": "{count} review",
+  "unit.review_other": "{count} reviews",
+  "review.activity.title": "Activity",
+  "review.activity.hint": "{total} reviews in the last year, by UTC day",
+  "review.activity.streak": "Current streak",
+  "review.activity.longest": "Longest streak",
+  "review.activity.empty": "Reviews you complete will show up here.",
+  "review.activity.label": "Review activity: {total} reviews in the last year, current streak {streak} days, longest {longest} days",
+  "review.activity.less": "Less",
+  "review.activity.more": "More",
+  "review.cfg.excludeFolders": "Skip folders",
+  "review.cfg.excludeFoldersHint": "Pages in these folders and their subfolders keep their schedule but stay out of the queue, the due count and reminders.",
+  "review.cfg.excludeFoldersPlaceholder": "archive, reference",
+  "review.cfg.excludeTags": "Skip tags",
+  "review.cfg.excludeTagsHint": "Same, for pages carrying any of these tags.",
+  "review.cfg.excludeTagsPlaceholder": "someday, reference",
 } as const;
 
 export type MessageKey = keyof typeof en;

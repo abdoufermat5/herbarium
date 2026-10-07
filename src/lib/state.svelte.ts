@@ -108,6 +108,8 @@ const DEFAULT_REVIEW: ReviewSettings = {
   desiredRetention: 0.9,
   importReviewMinutes: null,
   queueLimit: null,
+  excludeFolders: [],
+  excludeTags: [],
 };
 
 function storedLayout(): Layout {

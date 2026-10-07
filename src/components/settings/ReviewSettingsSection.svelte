@@ -30,6 +30,18 @@
     }
   }
 
+  /** Exclusion lists are edited as comma-separated text. */
+  async function commitList(e: Event, key: "excludeFolders" | "excludeTags") {
+    const input = e.currentTarget as HTMLInputElement;
+    const list = input.value
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const ok = await update({ [key]: list });
+    input.value = app.review[key].join(", ");
+    if (!ok) return;
+  }
+
   async function commitMultiplier(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const ok = input.value.trim() !== "" && (await update({ multiplier: Number(input.value) }));
@@ -168,4 +180,34 @@
       onchange={(n) => void update({ queueLimit: n || null })}
     />
   </SettingRow>
+
+  <SettingRow title={t("review.cfg.excludeFolders")} hint={t("review.cfg.excludeFoldersHint")}>
+    <input
+      type="text"
+      class="list-input"
+      value={app.review.excludeFolders.join(", ")}
+      placeholder={t("review.cfg.excludeFoldersPlaceholder")}
+      aria-label={t("review.cfg.excludeFolders")}
+      disabled={saving}
+      onchange={(e) => void commitList(e, "excludeFolders")}
+    />
+  </SettingRow>
+
+  <SettingRow title={t("review.cfg.excludeTags")} hint={t("review.cfg.excludeTagsHint")}>
+    <input
+      type="text"
+      class="list-input"
+      value={app.review.excludeTags.join(", ")}
+      placeholder={t("review.cfg.excludeTagsPlaceholder")}
+      aria-label={t("review.cfg.excludeTags")}
+      disabled={saving}
+      onchange={(e) => void commitList(e, "excludeTags")}
+    />
+  </SettingRow>
 </SettingsSection>
+
+<style>
+  .list-input {
+    width: 220px;
+  }
+</style>

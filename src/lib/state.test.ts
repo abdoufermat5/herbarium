@@ -28,8 +28,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const settings: ReviewSettings = { presets: [1440], strategy: "ladder", multiplier: 2,
-  maxIntervalMinutes: 525600, desiredRetention: 0.9, importReviewMinutes: null, queueLimit: 1 };
-const stats: ReviewStats = { dueTotal: 250, overdue: 100, reviewedToday: 0, upcoming: [], totalReviews: 0 };
+  maxIntervalMinutes: 525600, desiredRetention: 0.9, importReviewMinutes: null, queueLimit: 1,
+  excludeFolders: [], excludeTags: [] };
+const stats: ReviewStats = { dueTotal: 250, overdue: 100, reviewedToday: 0, upcoming: [], totalReviews: 0,
+  activity: [], streak: 0, longestStreak: 0 };
 
 beforeEach(() => {
   vi.useFakeTimers();

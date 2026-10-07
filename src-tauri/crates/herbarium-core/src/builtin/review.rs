@@ -71,6 +71,11 @@ pub struct ReviewSettings {
     pub import_review_minutes: Option<i64>,
     /// Show at most this many pages in the review queue; none = all due.
     pub queue_limit: Option<usize>,
+    /// Pages in these folders (and their subfolders) keep their schedule but
+    /// stay out of the review queue, due counts and reminders.
+    pub exclude_folders: Vec<String>,
+    /// Same, for pages carrying any of these tags.
+    pub exclude_tags: Vec<String>,
 }
 
 impl Default for ReviewSettings {
@@ -83,8 +88,32 @@ impl Default for ReviewSettings {
             desired_retention: 0.9,
             import_review_minutes: None,
             queue_limit: None,
+            exclude_folders: Vec::new(),
+            exclude_tags: Vec::new(),
         }
     }
+}
+
+/// Most entries in an exclusion list.
+const MAX_EXCLUDED: usize = 50;
+
+/// Trim, normalise, drop blanks and duplicates, and cap an exclusion list.
+fn clean_list(
+    items: Vec<String>,
+    name: &str,
+    normalise: impl Fn(&str) -> String,
+) -> OpResult<Vec<String>> {
+    let mut out: Vec<String> = Vec::new();
+    for item in items {
+        let item = normalise(item.trim());
+        if !item.is_empty() && !out.contains(&item) {
+            out.push(item);
+        }
+    }
+    if out.len() > MAX_EXCLUDED {
+        return Err(format!("{name}: at most {MAX_EXCLUDED} entries"));
+    }
+    Ok(out)
 }
 
 impl ReviewSettings {
@@ -126,7 +155,25 @@ impl ReviewSettings {
         if self.queue_limit == Some(0) {
             return Err("queueLimit: must be at least 1 (or null for no limit)".into());
         }
+        self.exclude_folders = clean_list(self.exclude_folders, "excludeFolders", |f| {
+            f.trim_matches('/').to_string()
+        })?;
+        self.exclude_tags = clean_list(self.exclude_tags, "excludeTags", str::to_string)?;
         Ok(self)
+    }
+
+    /// Whether `meta` is left out of the review queue and reminders.
+    pub fn excludes(&self, meta: &PageMeta) -> bool {
+        let in_folder = |want: &String| {
+            meta.folder.as_deref().is_some_and(|have| {
+                have == want
+                    || have
+                        .strip_prefix(want.as_str())
+                        .is_some_and(|r| r.starts_with('/'))
+            })
+        };
+        self.exclude_folders.iter().any(in_folder)
+            || meta.tags.iter().any(|t| self.exclude_tags.contains(t))
     }
 
     /// Interval, in minutes, that follows a completed review of a page currently
@@ -428,12 +475,42 @@ struct Stats {
     reviewed_today: usize,
     upcoming: Vec<DayCount>,
     total_reviews: u64,
+    /// Reviews per UTC day over the last `ACTIVITY_DAYS`, oldest first.
+    activity: Vec<DayCount>,
+    /// Consecutive days with a review, ending today (or yesterday when
+    /// nothing is reviewed yet today).
+    streak: usize,
+    /// Longest such run within `activity`.
+    longest_streak: usize,
+}
+
+/// Days covered by `review.stats` `activity`.
+const ACTIVITY_DAYS: i64 = 365;
+
+/// `(current, longest)` streaks over `counts`, oldest day first, the last
+/// entry being today.
+fn streaks(counts: &[usize]) -> (usize, usize) {
+    let (mut longest, mut run) = (0, 0);
+    for &c in counts {
+        run = if c > 0 { run + 1 } else { 0 };
+        longest = longest.max(run);
+    }
+    let mut days = counts.iter().rev();
+    // Today without a review yet does not break the streak.
+    if counts.last() == Some(&0) {
+        days.next();
+    }
+    let current = days.take_while(|c| **c > 0).count();
+    (current, longest)
 }
 
 fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
     let now = fixed_now.unwrap_or_else(now_ms);
     let today = utc_midnight(now);
-    let due_total = ctx.store.due_count(now).map_err(|e| e.to_string())?;
+    let settings = load_settings(&ctx.store.vault);
+    let mut due_total = 0;
+    let first_day = today - (ACTIVITY_DAYS - 1) * DAY_MS;
+    let mut per_day: BTreeMap<i64, usize> = BTreeMap::new();
     let mut upcoming: Vec<DayCount> = (0..UPCOMING_DAYS)
         .map(|d| DayCount {
             day: day_label(today + d * DAY_MS),
@@ -442,7 +519,23 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
         .collect();
     let (mut overdue, mut reviewed_today, mut total_reviews) = (0, 0, 0);
     for meta in ctx.store.all().map_err(|e| e.to_string())? {
+        let h = history(&meta);
+        let mut days: Vec<i64> = h.days.keys().copied().collect();
+        days.extend(h.log.iter().map(|e| utc_midnight(e.at)));
+        days.sort_unstable();
+        days.dedup();
+        for day in days.into_iter().filter(|d| *d >= first_day && *d <= today) {
+            *per_day.entry(day).or_default() += h.on_day(day) as usize;
+        }
+        if settings.excludes(&meta) {
+            total_reviews += h.count;
+            reviewed_today += h.on_day(today) as usize;
+            continue;
+        }
         if let Some(next) = meta.next_review {
+            if next <= now {
+                due_total += 1;
+            }
             if next < today {
                 overdue += 1;
             } else if next > now {
@@ -452,16 +545,29 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
                 }
             }
         }
-        let h = history(&meta);
         total_reviews += h.count;
         reviewed_today += h.on_day(today) as usize;
     }
+    let activity: Vec<DayCount> = (0..ACTIVITY_DAYS)
+        .map(|d| {
+            let day = first_day + d * DAY_MS;
+            DayCount {
+                day: day_label(day),
+                count: per_day.get(&day).copied().unwrap_or(0),
+            }
+        })
+        .collect();
+    let counts: Vec<usize> = activity.iter().map(|d| d.count).collect();
+    let (streak, longest_streak) = streaks(&counts);
     Ok(Stats {
         due_total,
         overdue,
         reviewed_today,
         upcoming,
         total_reviews,
+        activity,
+        streak,
+        longest_streak,
     })
 }
 
@@ -572,7 +678,7 @@ impl Extension for Review {
 
         r.add(Operation::new(
             "review.due",
-            "Pages due for review now, earliest first (at most the vault's queue limit, if one is set).",
+            "Pages due for review now, earliest first (at most the vault's queue limit, if one is set). Pages in the settings' excluded folders or tags are left out.",
             object(
                 json!({
                     "now": { "type": ["integer", "null"], "description": "Reference timestamp in unix ms; defaults to now." }
@@ -581,8 +687,10 @@ impl Extension for Review {
             ),
             |ctx: &mut Ctx, a: DueArgs| {
                 let now = a.now.unwrap_or_else(now_ms);
+                let settings = load_settings(&ctx.store.vault);
                 let mut due = ctx.store.due(now).map_err(|e| e.to_string())?;
-                if let Some(limit) = load_settings(&ctx.store.vault).queue_limit {
+                due.retain(|m| !settings.excludes(m));
+                if let Some(limit) = settings.queue_limit {
                     due.truncate(limit);
                 }
                 Ok(due)
@@ -591,7 +699,7 @@ impl Extension for Review {
 
         r.add(Operation::new(
             "review.stats",
-            "Review overview: `dueTotal` (every page due now, ignoring the queue limit), `overdue` (due before today, UTC), `reviewedToday` (reviews completed since UTC midnight), `upcoming` (pages coming due on each of the next 14 UTC days) and `totalReviews` (all completed reviews).",
+            "Review overview: `dueTotal` (every page due now, ignoring the queue limit), `overdue` (due before today, UTC), `reviewedToday` (reviews completed since UTC midnight), `upcoming` (pages coming due on each of the next 14 UTC days), `totalReviews` (all completed reviews), `activity` (reviews on each of the last 365 UTC days, oldest first), `streak` (consecutive days with a review up to today) and `longestStreak`. Due counts leave out excluded folders and tags.",
             object(
                 json!({
                     "now": { "type": ["integer", "null"], "description": "Reference timestamp in unix ms; defaults to now." }
@@ -625,7 +733,9 @@ impl Extension for Review {
                         "maxIntervalMinutes": { "type": "integer", "minimum": 1, "maximum": MAX_MINUTES },
                         "desiredRetention": { "type": "number", "minimum": MIN_RETENTION, "maximum": MAX_RETENTION, "description": "Target recall probability for the `fsrs` strategy." },
                         "importReviewMinutes": { "type": ["integer", "null"], "minimum": 1, "maximum": MAX_MINUTES },
-                        "queueLimit": { "type": ["integer", "null"], "minimum": 1 }
+                        "queueLimit": { "type": ["integer", "null"], "minimum": 1 },
+                        "excludeFolders": { "type": "array", "items": { "type": "string" }, "description": "Folders (with subfolders) left out of the review queue and reminders." },
+                        "excludeTags": { "type": "array", "items": { "type": "string" }, "description": "Tags whose pages are left out of the review queue and reminders." }
                     }),
                     &[],
                 ),
@@ -643,6 +753,14 @@ impl Extension for Review {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaks_tolerate_an_empty_today() {
+        assert_eq!(streaks(&[]), (0, 0));
+        assert_eq!(streaks(&[1, 1, 0, 1, 1, 1, 0]), (3, 3));
+        assert_eq!(streaks(&[1, 1, 1, 0, 1, 1]), (2, 3));
+        assert_eq!(streaks(&[1, 0, 0]), (0, 1), "two empty days end it");
+    }
 
     const DAY: i64 = 1440;
 

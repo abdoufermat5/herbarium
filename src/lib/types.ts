@@ -209,6 +209,11 @@ export interface ReviewStats {
   upcoming: ReviewDay[];
   /** All completed reviews. */
   totalReviews: number;
+  /** Reviews on each of the last 365 UTC days, oldest first (last = today). */
+  activity: ReviewDay[];
+  /** Consecutive days with a review up to today. */
+  streak: number;
+  longestStreak: number;
 }
 
 /** Output of `check_update`; null when this build is current. */
@@ -242,6 +247,10 @@ export interface ReviewSettings {
   importReviewMinutes: number | null;
   /** Cap on the review queue; null = show everything due. */
   queueLimit: number | null;
+  /** Folders (with subfolders) kept out of the queue, due counts and reminders. */
+  excludeFolders: string[];
+  /** Tags whose pages are kept out of the queue, due counts and reminders. */
+  excludeTags: string[];
 }
 
 /** A file the rescan could not index. */

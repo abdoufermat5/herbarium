@@ -611,3 +611,94 @@ fn non_fsrs_hard_and_easy_interval_rules() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn stats_report_activity_and_streaks() {
+    let vault = temp_vault("streak");
+    let host = open(&vault);
+    let id = create(&host, "Streaky");
+    let now = now_ms();
+    let today = utc_midnight(now);
+    let mut meta = call(&host, "pages.get", json!({ "id": id }))["meta"].clone();
+    // Reviews yesterday and the day before, and a lone one a week ago;
+    // nothing yet today, which must not break the streak.
+    let days = json!({
+        (today - DAY_MS).to_string(): 2,
+        (today - 2 * DAY_MS).to_string(): 1,
+        (today - 7 * DAY_MS).to_string(): 1,
+        (today - 400 * DAY_MS).to_string(): 5,
+    });
+    meta["ext"] = json!({ "review": { "count": 9, "log": [], "days": days } });
+    write_sidecar(&host, &vault, &id, &meta);
+
+    let stats = call(&host, "review.stats", json!({ "now": now }));
+    let activity = stats["activity"].as_array().unwrap();
+    assert_eq!(activity.len(), 365);
+    assert_eq!(activity[364]["count"], 0, "the last entry is today");
+    assert_eq!(activity[363]["count"], 2);
+    assert_eq!(activity[357]["count"], 1);
+    let total: u64 = activity.iter().map(|d| d["count"].as_u64().unwrap()).sum();
+    assert_eq!(total, 4, "days older than a year are left out");
+    assert_eq!(stats["streak"], 2);
+    assert_eq!(stats["longestStreak"], 2);
+
+    // Reviewing today extends the streak.
+    call(&host, "review.complete", json!({ "id": id }));
+    let stats = call(&host, "review.stats", json!({}));
+    assert_eq!(stats["streak"], 3);
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn excluded_folders_and_tags_stay_out_of_the_queue() {
+    let vault = temp_vault("exclude");
+    let host = open(&vault);
+    let keep = create(&host, "Study");
+    let tagged = create(&host, "Reference");
+    let foldered = create(&host, "Archived");
+    call(
+        &host,
+        "pages.update",
+        json!({ "id": tagged, "tags": ["reference"] }),
+    );
+    call(
+        &host,
+        "pages.update",
+        json!({ "id": foldered, "folder": "archive/2025" }),
+    );
+    for id in [&keep, &tagged, &foldered] {
+        call(
+            &host,
+            "review.schedule",
+            json!({ "id": id, "intervalMinutes": 1 }),
+        );
+    }
+    let later = now_ms() + 2 * 60_000;
+    assert_eq!(
+        call(&host, "review.due", json!({ "now": later }))
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+
+    let settings = call(
+        &host,
+        "review.configure",
+        json!({ "excludeFolders": ["/archive/", " "], "excludeTags": ["reference", "reference"] }),
+    );
+    assert_eq!(settings["excludeFolders"], json!(["archive"]));
+    assert_eq!(settings["excludeTags"], json!(["reference"]));
+
+    let due = call(&host, "review.due", json!({ "now": later }));
+    assert_eq!(due.as_array().unwrap().len(), 1);
+    assert_eq!(due[0]["id"], keep.as_str());
+    let stats = call(&host, "review.stats", json!({ "now": later }));
+    assert_eq!(stats["dueTotal"], 1);
+    // Excluded pages keep their schedule.
+    let page = call(&host, "pages.get", json!({ "id": foldered }));
+    assert!(page["meta"]["nextReview"].is_i64());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
