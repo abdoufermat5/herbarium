@@ -6,6 +6,7 @@ mod library;
 mod links;
 mod network;
 mod pages;
+pub use pages::import_key;
 mod paths;
 mod proposals;
 mod review;

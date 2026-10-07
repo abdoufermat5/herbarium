@@ -6,6 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+percent-encoding = "2.3"
 chrono = { version = "0.4.45", features = ["serde"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 scraper = "0.27.0"

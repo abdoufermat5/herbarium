@@ -430,6 +430,16 @@
       </div>
     {/if}
 
+    <button
+      class="btn btn-ghost btn-sm ai-link"
+      onclick={() => {
+        app.importOpen = false;
+        app.aiImportOpen = true;
+      }}
+    >
+      <Icon name="files" size={13} />{t("aiImport.fromDialog")}
+    </button>
+
     <footer class="foot">
       <p class="message" class:err={messageErr} aria-live="polite">{message}</p>
       {#if busy}
@@ -691,5 +701,8 @@
   .cdn-hint {
     font-size: var(--fs-xs);
     color: var(--muted);
+  }
+  .ai-link {
+    align-self: flex-start;
   }
 </style>

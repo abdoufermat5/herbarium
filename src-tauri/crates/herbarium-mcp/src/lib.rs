@@ -149,6 +149,11 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("agents.settings", "Agent settings", Effect::ReadOnly),
     ("searches.list", "List saved searches", Effect::ReadOnly),
     ("pages.links", "Page links and backlinks", Effect::ReadOnly),
+    (
+        "pages.find_by_url",
+        "Find pages by source URL",
+        Effect::ReadOnly,
+    ),
     ("paths.list", "List reading paths", Effect::ReadOnly),
     ("paths.get", "Read reading path", Effect::ReadOnly),
     ("paths.create", "Create reading path", Effect::Additive),

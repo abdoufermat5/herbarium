@@ -1020,3 +1020,60 @@ fn links_and_backlinks_follow_the_files() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn created_at_import_key_and_find_by_url() {
+    let vault = temp_vault("import-key");
+    let host = open(&vault);
+    let page = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({
+                "html": doc("Old"),
+                "createdAt": 1_600_000_000_000i64,
+                "importKey": "claude:c1:solar",
+                "source": { "url": "https://Claude.AI/chat/c1#frag" }
+            }),
+        )
+        .unwrap();
+    assert_eq!(page["createdAt"], 1_600_000_000_000i64);
+    assert_eq!(page["ext"]["import"]["key"], "claude:c1:solar");
+
+    // A future date is clamped to now.
+    let future = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": doc("Future"), "createdAt": i64::MAX / 2 }),
+        )
+        .unwrap();
+    assert!(future["createdAt"].as_i64().unwrap() <= now_ms());
+
+    let keys = herbarium_core::importer::imported_keys(host.store().unwrap()).unwrap();
+    assert!(keys.contains("claude:c1:solar") && keys.len() == 1);
+
+    for url in [
+        "https://claude.ai/chat/c1",
+        "https://claude.ai/chat/c1/",
+        "HTTPS://CLAUDE.AI/chat/c1#other",
+    ] {
+        let found = host
+            .call(Caller::Agent, "pages.find_by_url", json!({ "url": url }))
+            .unwrap();
+        assert_eq!(found.as_array().unwrap().len(), 1, "{url}");
+    }
+    let none = host
+        .call(
+            Caller::Agent,
+            "pages.find_by_url",
+            json!({ "url": "https://claude.ai/chat/C1" }),
+        )
+        .unwrap();
+    assert!(
+        none.as_array().unwrap().is_empty(),
+        "paths stay case-sensitive"
+    );
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

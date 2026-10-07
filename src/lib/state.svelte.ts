@@ -95,6 +95,8 @@ interface AppState {
   pathId: string | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
+  /** The "import from a Claude or ChatGPT export" dialog is open. */
+  aiImportOpen: boolean;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -179,6 +181,7 @@ export const app: AppState = $state({
   paths: [],
   pathId: null,
   focusMode: false,
+  aiImportOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),

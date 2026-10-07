@@ -1599,6 +1599,7 @@ name = "herbarium-core"
 version = "0.2.1"
 dependencies = [
  "chrono",
+ "percent-encoding",
  "rusqlite",
  "scraper",
  "serde",

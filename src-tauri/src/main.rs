@@ -12,6 +12,7 @@ fn main() {
         // `add` runs in-process against the vault, so it must not start Tauri
         // (nor the single-instance plugin); dispatch happens before `run()`.
         Some("add") => std::process::exit(herbarium_lib::cli::run_add(&args[1..])),
+        Some("import") => std::process::exit(herbarium_lib::cli::run_import(&args[1..])),
         Some("help" | "--help" | "-h") => println!("{}", herbarium_lib::cli::USAGE),
         // No command — or a deep-link URL — opens the window.
         _ => herbarium_lib::run(),

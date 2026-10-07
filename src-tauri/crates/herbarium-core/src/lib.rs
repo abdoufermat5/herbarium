@@ -2,10 +2,12 @@
 //! SQLite), the extension API, and the built-in features. Front ends (the
 //! desktop app, the MCP server) run everything through [`Host::call`].
 
+pub mod assets;
 mod builtin;
 pub mod content;
 pub mod extension;
 mod host;
+pub mod importer;
 pub mod models;
 pub mod query;
 pub mod rewrite;

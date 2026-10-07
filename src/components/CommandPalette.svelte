@@ -187,6 +187,16 @@
         },
       },
       {
+        key: "import-ai",
+        group,
+        label: t("aiImport.title"),
+        hint: t("aiImport.paletteHint"),
+        icon: "files",
+        run: () => {
+          app.aiImportOpen = true;
+        },
+      },
+      {
         key: "rescan",
         group,
         label: t("palette.rescan"),

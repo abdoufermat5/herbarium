@@ -1,3 +1,4 @@
+mod ai_import;
 pub mod cli;
 mod commands;
 mod config;
@@ -6,8 +7,6 @@ mod export;
 mod navigation;
 mod protocol;
 mod updater;
-
-use std::sync::Mutex;
 
 use herbarium_core::Host;
 use tauri::menu::{Menu, MenuItem};
@@ -63,9 +62,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState {
-            host: Mutex::new(Host::new()),
-        })
+        .manage(AppState::new())
         .manage(PendingDeepLinks::default())
         .setup(|app| {
             let win = navigation::build_main_window(app)?;
@@ -173,6 +170,8 @@ pub fn run() {
             commands::export_page,
             commands::export_page_html,
             commands::export_site,
+            commands::scan_ai_export,
+            commands::import_ai_export,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,

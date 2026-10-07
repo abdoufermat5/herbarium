@@ -56,6 +56,7 @@ pub const USAGE: &str = "Herbarium — keep generated HTML pages in a local vaul
 usage:
   herbarium                              open the desktop app
   herbarium add [options] <file|-|url>…  save pages into the vault
+  herbarium import [options] <export>    import artifacts from a Claude or ChatGPT data export
   herbarium mcp [--vault <path>]         serve the MCP protocol on stdin/stdout
   herbarium help                         show this help
 
@@ -188,6 +189,97 @@ pub fn parse_deep_link(url: &str) -> Option<DeepLink> {
 }
 
 /// Process exit code for `herbarium add …`.
+pub const IMPORT_USAGE: &str = "usage: herbarium import [options] <export.zip|conversations.json>
+
+Import every HTML artifact from a Claude or ChatGPT data export into the
+vault, each with its prompt, its original date and a link to the
+conversation. Artifacts imported before are skipped.
+
+options:
+  --vault <path>    vault to write to (default: HERBARIUM_VAULT, then the app's last vault)
+  --folder <path>   destination folder (default: the vault root)
+  --dry-run         list what would be imported without saving anything
+  -h, --help        show this help
+
+Exit status: 0 on success, 1 when any artifact failed, 2 on a usage error.";
+
+/// `herbarium import …`: returns the exit status.
+pub fn run_import(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut folder = None;
+    let mut dry_run = false;
+    let mut inputs = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{IMPORT_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--folder" => take_value(args, &mut i, "--folder").map(|v| folder = Some(v)),
+            "--dry-run" => {
+                dry_run = true;
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                inputs.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium import: {e}\n\n{IMPORT_USAGE}");
+            return 2;
+        }
+    }
+    let [input] = inputs.as_slice() else {
+        eprintln!("herbarium import: pass exactly one export file\n\n{IMPORT_USAGE}");
+        return 2;
+    };
+    let run = || -> Result<i32, String> {
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        let (scan, listing) = crate::ai_import::scan_file(&host, std::path::Path::new(input))?;
+        let fresh = listing
+            .candidates
+            .iter()
+            .filter(|c| !c.already_imported)
+            .count();
+        println!(
+            "{} artifacts in {} conversations ({} new, {} not standalone pages)",
+            listing.candidates.len(),
+            listing.conversations,
+            fresh,
+            listing.unsupported
+        );
+        if dry_run {
+            for c in listing.candidates.iter().filter(|c| !c.already_imported) {
+                println!(
+                    "{}\t{}\t{}",
+                    c.candidate.tool, c.candidate.title, c.candidate.key
+                );
+            }
+            return Ok(0);
+        }
+        let report = crate::ai_import::import(&host, &scan.candidates, None, folder.as_deref())?;
+        println!("imported {}, skipped {}", report.imported, report.skipped);
+        for e in &report.errors {
+            eprintln!("herbarium import: {e}");
+        }
+        Ok(if report.errors.is_empty() { 0 } else { 1 })
+    };
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("herbarium import: {e}");
+            1
+        }
+    }
+}
+
 pub fn run_add(args: &[String]) -> i32 {
     let parsed = match parse_add(args) {
         Ok(Some(parsed)) => parsed,

@@ -26,6 +26,32 @@ const AGENT_DEFAULT_LIMIT: usize = 50;
 
 const CONFLICT: &str = "conflict: page changed since it was loaded";
 
+/// Key of `{ key }` in `PageMeta::ext` naming the original a page was
+/// imported from.
+pub(crate) const IMPORT_KEY: &str = "import";
+
+/// The import key recorded on `meta`, if any.
+pub fn import_key(meta: &PageMeta) -> Option<&str> {
+    meta.ext.get(IMPORT_KEY)?.get("key")?.as_str()
+}
+
+/// A URL reduced to what identifies a page: scheme and host lowercased, no
+/// fragment, no trailing slash.
+pub fn normalize_url(url: &str) -> String {
+    let url = url.trim();
+    let url = url.split('#').next().unwrap_or(url);
+    let (scheme_host, rest) = match url.find("://") {
+        Some(i) => {
+            let after = &url[i + 3..];
+            let end = after.find(['/', '?']).map_or(url.len(), |j| i + 3 + j);
+            (url[..end].to_ascii_lowercase(), &url[end..])
+        }
+        None => (url.to_string(), ""),
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    format!("{scheme_host}{rest}")
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 struct CreateArgs {
@@ -37,6 +63,11 @@ struct CreateArgs {
     review_in_minutes: Option<i64>,
     allow_cdn: Option<bool>,
     source: Option<PageSource>,
+    /// When the page was originally made (unix ms), e.g. for an imported
+    /// artifact; defaults to now. Never in the future.
+    created_at: Option<i64>,
+    /// Identifies the imported original, so importing it again is skipped.
+    import_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +129,11 @@ struct SetHtmlArgs {
 #[derive(Deserialize)]
 struct IdArgs {
     id: String,
+}
+
+#[derive(Deserialize)]
+struct UrlArgs {
+    url: String,
 }
 
 #[derive(Deserialize)]
@@ -327,6 +363,19 @@ fn create(
         &mut meta,
         args.source.map(PageSource::clean).transpose()?.flatten(),
     );
+    if let Some(at) = args.created_at.filter(|at| *at > 0) {
+        meta.created_at = at.min(meta.created_at);
+    }
+    if let Some(key) = args
+        .import_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
+        if key.len() > 200 {
+            return Err("importKey is longer than 200 characters".into());
+        }
+        meta.ext.insert(IMPORT_KEY.into(), json!({ "key": key }));
+    }
     if let Some(minutes) = args.review_in_minutes {
         apply_schedule(&mut meta, minutes);
     }
@@ -425,7 +474,9 @@ impl Extension for Pages {
                     "note": { "type": "string", "description": "Personal note shown next to the page." },
                     "reviewInMinutes": { "type": "integer", "minimum": 1, "description": "Schedule a review this many minutes from now (1 day = 1440)." },
                     "allowCdn": { "type": "boolean", "description": "Allow loading from allowlisted CDNs. Defaults to the vault setting (normally false, which blocks all network access)." },
-                    "source": source_schema()
+                    "source": source_schema(),
+                    "createdAt": { "type": "integer", "description": "When the page was originally made (unix ms), e.g. an older artifact; defaults to now." },
+                    "importKey": { "type": "string", "description": "Identifies the original this page is imported from, so a later import can skip it." }
                 }),
                 &["html"],
             ),
@@ -548,6 +599,27 @@ impl Extension for Pages {
                 let now = now_ms();
                 let hits = ctx.store.search(&query.text, usize::MAX).map_err(|e| e.to_string())?;
                 Ok(hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect())
+            },
+        ))?;
+
+        r.add(Operation::new(
+            "pages.find_by_url",
+            "Pages saved from a web address (their source `url`), compared without the `#fragment` or a trailing slash. Use it to avoid saving the same page twice.",
+            object(json!({ "url": { "type": "string" } }), &["url"]),
+            |ctx: &mut Ctx, a: UrlArgs| {
+                let want = normalize_url(&a.url);
+                if want.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let pages = ctx.store.all().map_err(|e| e.to_string())?;
+                Ok(pages
+                    .into_iter()
+                    .filter(|m| {
+                        PageSource::of(m)
+                            .and_then(|s| s.url)
+                            .is_some_and(|u| normalize_url(&u) == want)
+                    })
+                    .collect::<Vec<_>>())
             },
         ))?;
 

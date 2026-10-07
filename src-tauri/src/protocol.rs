@@ -2,8 +2,10 @@
 // iframe. Injects a Content-Security-Policy and never grants same-origin access.
 
 use std::borrow::Cow;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
+pub use herbarium_core::assets::{mime_for_path, resolve_safe_asset_path};
 use percent_encoding::percent_decode_str;
 use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::{AppHandle, Manager, UriSchemeContext, UriSchemeResponder};
@@ -42,43 +44,6 @@ pub fn handle<R: tauri::Runtime>(
 ) {
     let app = ctx.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || responder.respond(serve(&app, &request)));
-}
-
-pub fn mime_for_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("html" | "htm") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("avif") => "image/avif",
-        Some("bmp") => "image/bmp",
-        Some("mp3") => "audio/mpeg",
-        Some("wav") => "audio/wav",
-        Some("ogg" | "oga") => "audio/ogg",
-        Some("mp4") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("ogv") => "video/ogg",
-        Some("woff2") => "font/woff2",
-        Some("woff") => "font/woff",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("txt" | "text") => "text/plain; charset=utf-8",
-        Some("csv") => "text/csv; charset=utf-8",
-        Some("xml") => "application/xml",
-        Some("pdf") => "application/pdf",
-        Some("wasm") => "application/wasm",
-        _ => "application/octet-stream",
-    }
 }
 
 /// Percent-decode one path segment exactly once. `None` for invalid UTF-8, an
@@ -162,7 +127,7 @@ pub fn parse_uri_and_referer(uri: &Uri, referer: Option<&str>) -> Option<ParsedR
     if let Some((ref_id, validated_rel)) = referer
         .and_then(extract_page_id_from_referer)
         .filter(|id| id != decoded_first.as_ref())
-        .and_then(|id| validate_relative_path(first_seg).map(|rel| (id, rel)))
+        .zip(validate_relative_path(first_seg))
     {
         return Some(ParsedRequest {
             page_id: ref_id,
@@ -182,52 +147,6 @@ pub fn extract_page_id_from_referer(referer: &str) -> Option<String> {
     let trimmed = raw_path.trim_start_matches('/');
     let id_part = trimmed.split('/').next()?;
     decode_segment(id_part).map(Cow::into_owned)
-}
-
-/// Resolve `rel_path` under `page_folder`, which itself must canonically live
-/// inside `vault` (an indexed folder may have been swapped for a symlink).
-pub fn resolve_safe_asset_path(
-    vault: &Path,
-    page_folder: &Path,
-    rel_path: &str,
-) -> Option<PathBuf> {
-    let canon_vault = vault.canonicalize().ok()?;
-    let canon_folder = page_folder.canonicalize().ok()?;
-    if !canon_folder.is_dir() || !canon_folder.starts_with(&canon_vault) {
-        return None;
-    }
-
-    let mut current = canon_folder.clone();
-    for seg in rel_path.split('/') {
-        if seg.is_empty() || seg.starts_with('.') || seg == ".." {
-            return None;
-        }
-        current.push(seg);
-        let meta = std::fs::symlink_metadata(&current).ok()?;
-        if meta.file_type().is_symlink() {
-            return None; // Reject symlinks
-        }
-    }
-
-    if !current.is_file() {
-        return None;
-    }
-
-    let canon_file = current.canonicalize().ok()?;
-    if !canon_file.starts_with(&canon_folder) {
-        return None;
-    }
-
-    if canon_file
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("json"))
-        .unwrap_or(false)
-    {
-        return None;
-    }
-
-    Some(current)
 }
 
 pub fn inject_base_tag(html: &str, base_href: &str) -> String {

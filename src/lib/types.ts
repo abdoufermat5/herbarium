@@ -93,6 +93,26 @@ export interface ReadingPath {
   pages: string[];
 }
 
+/** An HTML artifact found in a Claude or ChatGPT data export. */
+export interface AiExportCandidate {
+  key: string;
+  title: string;
+  bytes: number;
+  createdAt: number;
+  tool: string;
+  url: string;
+  prompt: string;
+  conversation: string;
+  alreadyImported: boolean;
+}
+
+export interface AiExportListing {
+  candidates: AiExportCandidate[];
+  conversations: number;
+  /** Artifacts that are not standalone pages (React components, code…). */
+  unsupported: number;
+}
+
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */
 export interface SavedSearch {
   name: string;

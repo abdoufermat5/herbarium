@@ -6,18 +6,11 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
+use herbarium_core::assets::inline_local_assets;
 use herbarium_core::content::PAGE_LINK_PREFIX;
-use herbarium_core::rewrite::{is_asset_attr, relative_path, rewrite_attrs};
+use herbarium_core::rewrite::rewrite_attrs;
 use herbarium_core::vault;
-use percent_encoding::percent_decode_str;
 use serde::Serialize;
-
-use crate::protocol::{mime_for_path, resolve_safe_asset_path};
-
-/// Largest single asset inlined; bigger ones keep their relative URL.
-const MAX_ASSET: u64 = 25 * 1024 * 1024;
-/// Most bytes inlined into one page, before encoding.
-const MAX_INLINED: u64 = 100 * 1024 * 1024;
 
 /// One page to export, read while the vault was locked.
 pub struct ExportPage {
@@ -28,56 +21,10 @@ pub struct ExportPage {
     pub html: String,
 }
 
-fn base64(bytes: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            chunk.get(1).copied().unwrap_or(0),
-            chunk.get(2).copied().unwrap_or(0),
-        ];
-        let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
-        out.push(TABLE[(n >> 18) as usize & 63] as char);
-        out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            TABLE[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            TABLE[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
-}
-
-/// The page's HTML with its local assets inlined. Assets are looked up the
-/// way the reader serves them: under the page's folder, never outside the
-/// vault, never through a symlink.
+/// The page's HTML with its local assets inlined (see
+/// [`herbarium_core::assets::inline_local_assets`]).
 pub fn standalone(vault_dir: &Path, page: &ExportPage) -> String {
-    let html_file = vault::html_path(vault_dir, &page.id, page.folder.as_deref());
-    let page_folder = html_file.parent().unwrap_or(vault_dir).to_path_buf();
-    let mut budget = MAX_INLINED;
-    rewrite_attrs(&page.html, |tag, attr, value| {
-        if !is_asset_attr(tag, attr) {
-            return None;
-        }
-        let rel = relative_path(value)?;
-        let rel = percent_decode_str(rel).decode_utf8().ok()?;
-        let file = resolve_safe_asset_path(vault_dir, &page_folder, &rel)?;
-        let size = std::fs::metadata(&file).ok()?.len();
-        if size > MAX_ASSET || size > budget {
-            return None;
-        }
-        let bytes = std::fs::read(&file).ok()?;
-        budget -= size;
-        // `text/css; charset=utf-8` → `text/css;charset=utf-8`: no spaces in a data URI.
-        let mime = mime_for_path(&file).replace(' ', "");
-        Some(format!("data:{mime};base64,{}", base64(&bytes)))
-    })
+    inline_local_assets(vault_dir, &page.id, page.folder.as_deref(), &page.html)
 }
 
 /// Point `herbarium-app://open/<id>` links at `<id>.html` for exported pages.
@@ -233,19 +180,6 @@ mod tests {
             folder: folder.map(str::to_string),
             tags: vec!["t&t".into()],
             html: html.into(),
-        }
-    }
-
-    #[test]
-    fn base64_matches_known_vectors() {
-        for (input, want) in [
-            ("", ""),
-            ("f", "Zg=="),
-            ("fo", "Zm8="),
-            ("foo", "Zm9v"),
-            ("foobar", "Zm9vYmFy"),
-        ] {
-            assert_eq!(base64(input.as_bytes()), want);
         }
     }
 

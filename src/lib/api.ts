@@ -10,6 +10,7 @@ import type {
   AgentSettings,
   SavedSearch,
   PageLinks,
+  AiExportListing,
   ReadingPath,
   ProposalSummary,
   ImportFile,
@@ -345,6 +346,19 @@ export const api = {
   /** Publish the vault (or `folder`) as a static site in a new or empty folder. */
   exportSite(folder: string | null, title: string, destDir: string): Promise<{ pages: number; index: string }> {
     return invoke("export_site", { folder, title, destDir });
+  },
+
+  /** List the HTML artifacts in a Claude or ChatGPT export (.zip or conversations.json). */
+  scanAiExport(path: string): Promise<AiExportListing> {
+    return invoke("scan_ai_export", { path });
+  },
+
+  /** Import the chosen artifacts (by key) of the last scanned export. */
+  importAiExport(
+    keys: string[],
+    folder: string | null,
+  ): Promise<{ imported: number; skipped: number; errors: string[] }> {
+    return invoke("import_ai_export", { keys, folder });
   },
 
   /** A newer signed release, or null when this build is current. */

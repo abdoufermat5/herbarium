@@ -15,6 +15,7 @@
   import TrashView from "./components/TrashView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
+  import AiImportDialog from "./components/AiImportDialog.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
   import TitleBar from "./components/TitleBar.svelte";
@@ -359,6 +360,11 @@
 </div>
 </div>
 
+{#if app.aiImportOpen}
+  <div inert={app.paletteOpen || !!confirmState.pending}>
+    <AiImportDialog />
+  </div>
+{/if}
 {#if app.importOpen}
   <div inert={app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
     <ImportDialog />

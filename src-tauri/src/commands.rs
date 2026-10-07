@@ -15,6 +15,23 @@ use crate::editors::{self, Choice, EditorInfo};
 
 pub struct AppState {
     pub host: Mutex<Host>,
+    /// The last AI export scanned, waiting for the user to pick what to import.
+    pub ai_scan: Mutex<Option<herbarium_core::importer::Scan>>,
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        AppState {
+            host: Mutex::new(Host::new()),
+            ai_scan: Mutex::new(None),
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -365,6 +382,54 @@ pub async fn export_site(
         return Err("there are no pages to publish".into());
     }
     crate::export::write_site(&vault, &title, &pages, &PathBuf::from(dest_dir))
+}
+
+/// List the HTML artifacts in a Claude or ChatGPT data export (.zip or
+/// conversations.json) and mark those already imported.
+#[tauri::command]
+pub async fn scan_ai_export(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<crate::ai_import::Listing> {
+    // Parsing a large export happens before the vault is locked.
+    let scan =
+        herbarium_core::importer::scan(&crate::ai_import::read_conversations(Path::new(&path))?)?;
+    let have = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        herbarium_core::importer::imported_keys(host.store().ok_or("no vault open")?)?
+    };
+    let listing = crate::ai_import::Listing {
+        candidates: scan
+            .candidates
+            .iter()
+            .map(|c| crate::ai_import::Listed {
+                already_imported: have.contains(&c.key),
+                candidate: c.clone(),
+            })
+            .collect(),
+        conversations: scan.conversations,
+        unsupported: scan.unsupported,
+    };
+    *state.ai_scan.lock().map_err(|e| e.to_string())? = Some(scan);
+    Ok(listing)
+}
+
+/// Import the chosen artifacts (by key) of the last scanned export.
+#[tauri::command]
+pub async fn import_ai_export(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+    folder: Option<String>,
+) -> CmdResult<crate::ai_import::ImportReport> {
+    let scan = state
+        .ai_scan
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take()
+        .ok_or("scan the export again before importing")?;
+    let keys: std::collections::HashSet<String> = keys.into_iter().collect();
+    let host = state.host.lock().map_err(|e| e.to_string())?;
+    crate::ai_import::import(&host, &scan.candidates, Some(&keys), folder.as_deref())
 }
 
 #[tauri::command]
