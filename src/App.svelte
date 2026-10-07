@@ -11,11 +11,15 @@
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
+  import TodayView from "./components/TodayView.svelte";
+  import GraphView from "./components/GraphView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
   import TrashView from "./components/TrashView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
   import AiImportDialog from "./components/AiImportDialog.svelte";
+  import LookDialog from "./components/LookDialog.svelte";
+  import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
   import TitleBar from "./components/TitleBar.svelte";
@@ -376,6 +380,10 @@
         {#key app.readId}
           <ReadView id={app.readId} />
         {/key}
+      {:else if app.view === "today"}
+        <TodayView />
+      {:else if app.view === "graph"}
+        <GraphView />
       {:else if app.view === "review"}
         <ReviewView />
       {:else if app.view === "settings"}
@@ -392,6 +400,14 @@
 </div>
 </div>
 
+{#if app.config?.vaultPath && app.initialized}
+  <Thumbnailer />
+{/if}
+{#if app.lookEdit}
+  {#key app.lookEdit}
+    <LookDialog />
+  {/key}
+{/if}
 {#if app.aiImportOpen}
   <div inert={app.paletteOpen || !!confirmState.pending}>
     <AiImportDialog />

@@ -22,6 +22,8 @@
   import type { BulkError, PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { reveal } from "../lib/reveal";
+  import { folderLook, tagColor } from "../lib/appearance";
+  import Miniature from "./Miniature.svelte";
   import Select from "./Select.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import type { DropdownMenuItem } from "./DropdownMenu.svelte";
@@ -578,8 +580,15 @@
               aria-label={p.title || t("common.untitled")}
               onclick={(e) => onOpenPage(e, p.id)}
             ></button>
+            {#if app.layout === "grid" && app.previews[p.id]}
+              <div class="preview" aria-hidden="true">
+                <Miniature digest={app.previews[p.id]} />
+              </div>
+            {/if}
             <div class="page-open">
-              <span class="thumb"><Icon name="leaf" size={15} /></span>
+              <span class="thumb" data-color={folderLook(p.folder).color}>
+                {#if p.ext?.look?.icon}<span class="thumb-emoji">{p.ext.look.icon}</span>{:else}<Icon name="leaf" size={15} />{/if}
+              </span>
               <span class="page-body">
                 <span class="page-title">{p.title || t("common.untitled")}</span>
                 {#if searching && p.snippet}
@@ -597,6 +606,7 @@
                       <button
                         type="button"
                         class="loc chip-link"
+                        style:color={folderLook(p.folder).color ? `var(--c-${folderLook(p.folder).color})` : undefined}
                         title={t("list.showFolder", { folder: p.folder })}
                         onclick={() => void showFolder(p.folder!)}
                       >
@@ -607,8 +617,14 @@
                       <button
                         type="button"
                         class="chip chip-muted chip-link"
+                        data-color={tagColor(tag)}
                         title={t("list.showTag", { tag })}
                         onclick={() => void showTag(tag)}
+                        oncontextmenu={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          app.lookEdit = { kind: "tag", key: tag };
+                        }}
                       >
                         {tag}
                       </button>
@@ -1103,5 +1119,25 @@
     50% {
       opacity: 0.5;
     }
+  }
+  .thumb[data-color] {
+    background: var(--chip-wash);
+    color: var(--chip-ink);
+  }
+  .thumb-emoji {
+    font-size: 16px;
+    line-height: 1;
+  }
+  .preview {
+    height: 128px;
+    margin: -1px -1px 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    overflow: hidden;
+    color: var(--text);
+    pointer-events: none;
+  }
+  .list .preview {
+    display: none;
   }
 </style>

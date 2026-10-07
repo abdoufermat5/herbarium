@@ -12,13 +12,15 @@ import type {
   PageMeta,
   ProposalSummary,
   ReadingPath,
+  Appearance,
+  PreviewDigest,
   ReviewSettings,
   ReviewStats,
   SavedSearch,
   TagCount,
 } from "./types";
 
-export type View = "list" | "review" | "settings" | "trash";
+export type View = "today" | "list" | "review" | "settings" | "trash" | "graph";
 export type Layout = "grid" | "list";
 /** `relevance` keeps the backend's full-text ranking while searching and falls back to recent otherwise. */
 export type SortKey = "relevance" | "recent" | "title" | "review";
@@ -91,12 +93,18 @@ interface AppState {
   proposalOpen: boolean;
   savedSearches: SavedSearch[];
   paths: ReadingPath[];
+  /** Icons and colours of folders and tags. */
+  appearance: Appearance;
+  /** Page previews by id (made in the background by the Thumbnailer). */
+  previews: Record<string, PreviewDigest>;
   /** The reading path the reader was opened from, for previous/next. */
   pathId: string | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
   aiImportOpen: boolean;
+  /** The folder or tag whose icon and colour are being edited. */
+  lookEdit: { kind: "folder" | "tag"; key: string } | null;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -179,9 +187,12 @@ export const app: AppState = $state({
   proposalOpen: false,
   savedSearches: [],
   paths: [],
+  appearance: { folders: {}, tags: {} },
+  previews: {},
   pathId: null,
   focusMode: false,
   aiImportOpen: false,
+  lookEdit: null,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -278,7 +289,7 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats, proposals, searches, paths] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals, searches, paths, looks] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
@@ -288,6 +299,7 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     api.listProposals(),
     api.savedSearches(),
     api.listPaths(),
+    api.appearance(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -321,6 +333,8 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   else console.error(searches.reason);
   if (paths.status === "fulfilled") app.paths = paths.value;
   else console.error(paths.reason);
+  if (looks.status === "fulfilled") app.appearance = looks.value;
+  else console.error(looks.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -473,6 +487,8 @@ export function resetWorkspace() {
   app.proposalOpen = false;
   app.savedSearches = [];
   app.paths = [];
+  app.appearance = { folders: {}, tags: {} };
+  app.previews = {};
   app.pathId = null;
   app.focusMode = false;
   knownProposals = null;

@@ -6,7 +6,7 @@
 const KEY = "herbarium.prefs";
 const LAST_IMPORT_KEY = "herbarium.lastImportFolder";
 
-export type StartView = "list" | "review";
+export type StartView = "today" | "list" | "review";
 export type ImportTarget = "browsing" | "root" | "last";
 export type PreviewLayout = "right" | "below" | "off";
 export type EditorFont = "app" | "system";
@@ -42,7 +42,7 @@ export interface Prefs {
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  startView: "list",
+  startView: "today",
   importTarget: "browsing",
   detailsOpen: false,
   refreshOnFocus: true,
@@ -82,7 +82,7 @@ function sanitize(raw: unknown): Prefs {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_PREFS;
   return {
-    startView: oneOf(r.startView, ["list", "review"], d.startView),
+    startView: oneOf(r.startView, ["today", "list", "review"], d.startView),
     importTarget: oneOf(r.importTarget, ["browsing", "root", "last"], d.importTarget),
     detailsOpen: bool(r.detailsOpen, d.detailsOpen),
     refreshOnFocus: bool(r.refreshOnFocus, d.refreshOnFocus),

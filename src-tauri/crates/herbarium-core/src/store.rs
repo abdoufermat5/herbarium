@@ -316,6 +316,18 @@ impl Store {
         tx.commit()
     }
 
+    /// Every link between two pages that both exist, as `(from, to)`.
+    pub fn all_links(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        self.conn
+            .prepare(
+                "SELECT l.src, l.dst FROM links l
+                 JOIN pages a ON a.id = l.src JOIN pages b ON b.id = l.dst
+                 ORDER BY l.src, l.dst",
+            )?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    }
+
     /// Ids `id` links to (existing or not), in id order.
     pub fn links_from(&self, id: &str) -> rusqlite::Result<Vec<String>> {
         self.conn

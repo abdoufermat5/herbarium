@@ -27,6 +27,7 @@
   import HtmlEditor from "./HtmlEditor.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import { exportPageFile } from "../lib/exports";
+  import { ICON_CHOICES, tagColor } from "../lib/appearance";
   import ProposalPanel from "./ProposalPanel.svelte";
   import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
@@ -341,6 +342,7 @@
       await flushStorage();
       const loaded = await api.getPage(id);
       page = loaded;
+      void api.markRead(id).catch((e) => console.error(e));
       baseUpdatedAt = loaded.meta.updatedAt;
       source = loaded.html;
       syncDraft(loaded.meta);
@@ -494,6 +496,22 @@
 
   function toggleInspector() {
     app.inspectorOpen = !app.inspectorOpen;
+  }
+
+  let iconPicker = $state(false);
+
+  /** Set or clear the page's icon; saved right away, like the network switch. */
+  async function setIcon(icon: string | null) {
+    const p = page;
+    if (!p || pageGone) return;
+    iconPicker = false;
+    try {
+      p.meta = await api.setPageIcon(p.meta.id, icon);
+      baseUpdatedAt = p.meta.updatedAt;
+      void reloadPages(true);
+    } catch (e) {
+      toast(`${t("look.failed")}: ${errorMessage(e)}`, "error");
+    }
   }
 
   /* ------------------------------------------------------------ page actions */
@@ -1117,6 +1135,7 @@
     {#if page}
       <div class="identity">
         <h1 class="title ellipsis" title={page.meta.title || t("common.untitled")}>
+          {#if page.meta.ext?.look?.icon}<span class="title-icon">{page.meta.ext.look.icon}</span>{/if}
           {page.meta.title || t("common.untitled")}
         </h1>
         <div class="meta">
@@ -1124,7 +1143,7 @@
             <span class="loc"><Icon name="folder" size={12} />{page.meta.folder}</span>
           {/if}
           {#each page.meta.tags as tag (tag)}
-            <span class="chip chip-muted">{tag}</span>
+            <span class="chip chip-muted" data-color={tagColor(tag)}>{tag}</span>
           {/each}
         </div>
       </div>
@@ -1476,7 +1495,30 @@
             <h2 class="eyebrow">{t("read.details")}</h2>
             <div class="field">
               <label for="d-title">{t("insp.title")}</label>
-              <input id="d-title" type="text" bind:value={dTitle} />
+              <div class="title-row">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-expanded={iconPicker}
+                  onclick={() => (iconPicker = !iconPicker)}
+                  title={t("look.pageIcon")}
+                  aria-label={t("look.pageIcon")}
+                  disabled={pageGone}
+                >
+                  {#if page.meta.ext?.look?.icon}{page.meta.ext.look.icon}{:else}<Icon name="leaf" size={13} />{/if}
+                </button>
+                <input id="d-title" type="text" bind:value={dTitle} />
+              </div>
+              {#if iconPicker}
+                <div class="icon-grid" role="group" aria-label={t("look.pageIcon")}>
+                  {#each ICON_CHOICES as choice (choice)}
+                    <button type="button" onclick={() => void setIcon(choice)}>{choice}</button>
+                  {/each}
+                  <button type="button" class="clear-icon" onclick={() => void setIcon(null)} title={t("look.noIcon")}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              {/if}
             </div>
             <div class="field">
               <label for="d-folder">{t("insp.folder")}</label>
@@ -1992,6 +2034,57 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm, 6px);
     background: var(--surface);
+  }
+
+  .title-icon {
+    margin-right: 6px;
+  }
+
+  .title-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .title-row input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .icon-btn {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 2px;
+    margin-top: 6px;
+  }
+
+  .icon-grid button {
+    height: 26px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .icon-grid button:hover {
+    background: var(--sunken);
+  }
+
+  .icon-grid .clear-icon {
+    color: var(--muted);
   }
 
   .tag-chip {

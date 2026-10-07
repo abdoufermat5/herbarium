@@ -40,7 +40,7 @@ export interface PageMeta {
   /** The `<title>` extracted from the HTML at its last write or index. */
   sourceTitle?: string | null;
   /** Extension-owned data keyed by extension id; absent when empty. */
-  ext?: Record<string, unknown> & { review?: ReviewHistory; source?: PageSource };
+  ext?: Record<string, unknown> & { review?: ReviewHistory; source?: PageSource; look?: { icon?: string } };
 }
 
 /** Where a page came from (`ext.source`); every field is optional. */
@@ -126,6 +126,43 @@ export interface AiExportListing {
   conversations: number;
   /** Artifacts that are not standalone pages (React components, code…). */
   unsupported: number;
+}
+
+/** `today.summary`: what to do with the library now. */
+export interface TodaySummary {
+  dueTotal: number;
+  due: PageMeta[];
+  continue: Array<{ pathId: string; pathName: string; position: number; total: number; page: PageMeta }>;
+  recent: PageMeta[];
+  rediscover: PageMeta | null;
+  onThisDay: PageMeta[];
+  streak: number;
+  totalPages: number;
+}
+
+/** Label colours offered for folders and tags (see app.css `--c-*`). */
+export type LabelColor = "sage" | "sky" | "plum" | "rose" | "amber" | "clay" | "teal" | "slate";
+
+/** Icons and colours of folders and tags (`.herbarium/appearance.json`). */
+export interface Appearance {
+  folders: Record<string, { icon?: string; color?: LabelColor }>;
+  tags: Record<string, LabelColor>;
+}
+
+/** `pages.graph`: linked pages and their links. */
+export interface PageGraph {
+  nodes: Array<{ id: string; title: string; folder: string | null; degree: number }>;
+  /** `[from, to]` page ids. */
+  edges: Array<[string, string]>;
+}
+
+/** A page's first-screen layout, drawn as its miniature (see previews.rs). */
+export interface PreviewDigest {
+  w: number;
+  h: number;
+  bg: string;
+  blocks: Array<{ k: "box" | "text" | "img"; x: number; y: number; w: number; h: number; c?: string; r?: number; s?: number; lh?: number }>;
+  image?: { x: number; y: number; w: number; h: number; src: string };
 }
 
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */

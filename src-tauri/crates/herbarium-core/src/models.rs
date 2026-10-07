@@ -176,6 +176,42 @@ pub struct MetaPatch {
     /// `null` removes the page's source.
     #[serde(default, deserialize_with = "present")]
     pub source: Option<Option<PageSource>>,
+    /// A short emoji or symbol shown with the page; `null` removes it.
+    #[serde(default, deserialize_with = "present")]
+    pub icon: Option<Option<String>>,
+}
+
+/// Key of `{ icon }` in `PageMeta::ext`.
+pub const LOOK_KEY: &str = "look";
+
+/// Most characters in a page or folder icon (an emoji with modifiers).
+const MAX_ICON_CHARS: usize = 8;
+
+/// A trimmed icon, `None` for blank; rejects long text and markup.
+pub fn clean_icon(icon: &str) -> Result<Option<String>, String> {
+    let icon = icon.trim();
+    if icon.is_empty() {
+        return Ok(None);
+    }
+    if icon.chars().count() > MAX_ICON_CHARS || icon.contains(['<', '>', '&', '"']) {
+        return Err(format!(
+            "an icon is an emoji or symbol of at most {MAX_ICON_CHARS} characters"
+        ));
+    }
+    Ok(Some(icon.to_string()))
+}
+
+/// Set or clear the page's icon.
+pub fn set_icon(meta: &mut PageMeta, icon: Option<String>) {
+    match icon {
+        Some(icon) => {
+            meta.ext
+                .insert(LOOK_KEY.into(), serde_json::json!({ "icon": icon }));
+        }
+        None => {
+            meta.ext.remove(LOOK_KEY);
+        }
+    }
 }
 
 /// Distinguishes an explicit `null` (Some(None)) from an absent field (None).

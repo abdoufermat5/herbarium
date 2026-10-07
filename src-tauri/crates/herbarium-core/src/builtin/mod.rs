@@ -1,5 +1,6 @@
 // Built-in features, written against the same `Extension` API a plugin uses.
 
+mod appearance;
 mod fsrs;
 mod history;
 mod library;
@@ -8,6 +9,7 @@ mod network;
 mod pages;
 pub use pages::import_key;
 mod paths;
+mod previews;
 mod proposals;
 mod review;
 mod samples;
@@ -33,6 +35,8 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(paths::Paths),
         Box::new(today::Today),
         Box::new(samples::Samples),
+        Box::new(appearance::Appearance),
+        Box::new(previews::Previews),
     ]
 }
 

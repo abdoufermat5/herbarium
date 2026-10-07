@@ -221,6 +221,7 @@
           value={prefs.startView}
           ariaLabel={t("settings.startView")}
           options={[
+            { value: "today", label: t("sidebar.today") },
             { value: "list", label: t("sidebar.all") },
             { value: "review", label: t("sidebar.review") },
           ]}

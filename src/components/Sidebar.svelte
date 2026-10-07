@@ -1,5 +1,6 @@
 <script lang="ts">
   import { publishSite } from "../lib/exports";
+  import { folderLook } from "../lib/appearance";
   import { tick } from "svelte";
   import { flip } from "svelte/animate";
   import {
@@ -503,11 +504,21 @@
         onclick: () => toggleFolder(path),
       },
       { divider: true },
+      { id: "look", label: t("look.menu"), icon: "leaf", onclick: () => (app.lookEdit = { kind: "folder", key: path }) },
       { id: "publish", label: t("export.siteFolder"), icon: "upload", onclick: () => void publishSite(path) },
       { id: "move", label: t("folderPicker.move"), icon: "folder", onclick: () => void moveFolder(row) },
       { id: "rename", label: t("sidebar.rename"), icon: "folder", shortcut: shortcutHint("renameItem"), onclick: () => startRename(row) },
       { id: "delete", label: t("sidebar.deleteFolder"), icon: "trash-2", danger: true, shortcut: shortcutHint("deleteItem"), onclick: () => void confirmDeleteFolder(path, row.name) },
     ]);
+  }
+
+  /** A folder's own icon, and its colour (or its nearest coloured parent's). */
+  function folderIcon(path: string | undefined): string | undefined {
+    return path ? app.appearance.folders[path]?.icon : undefined;
+  }
+  function folderColor(path: string | undefined): string | undefined {
+    const color = folderLook(path).color;
+    return color ? `var(--c-${color})` : undefined;
   }
 
   /* ---------------------------------------------------------- reading paths */
@@ -801,7 +812,9 @@
         onclick={() => void showFolder(row.path!)}
         oncontextmenu={(e) => folderMenu(e, row)}
       >
-        <span class="nav-icon"><Icon name={row.expanded ? "folder-open" : "folder"} size={14} /></span>
+        <span class="nav-icon" style:color={folderColor(row.path)}>
+          {#if folderIcon(row.path)}<span class="row-emoji">{folderIcon(row.path)}</span>{:else}<Icon name={row.expanded ? "folder-open" : "folder"} size={14} />{/if}
+        </span>
         <span class="nav-label ellipsis">{row.name}</span>
       </button>
       <span class="row-actions">
@@ -852,7 +865,9 @@
         ondragover={(e) => e.stopPropagation()}
         ondrop={(e) => e.stopPropagation()}
       >
-        <span class="nav-icon"><Icon name="file-text" size={14} /></span>
+        <span class="nav-icon">
+          {#if row.page?.ext?.look?.icon}<span class="row-emoji">{row.page.ext.look.icon}</span>{:else}<Icon name="file-text" size={14} />{/if}
+        </span>
         <span class="nav-label ellipsis">{row.name}</span>
       </button>
     {/if}
@@ -872,6 +887,15 @@
 
   <div class="body">
     <nav class="nav" aria-label={t("sidebar.library")}>
+      <button
+        class="nav-item"
+        class:active={!app.readId && app.view === "today"}
+        aria-current={!app.readId && app.view === "today" ? "page" : undefined}
+        onclick={() => void goView("today")}
+      >
+        <span class="nav-icon"><Icon name="sun" size={15} /></span>
+        <span class="nav-label ellipsis">{t("sidebar.today")}</span>
+      </button>
       <button
         class="nav-item"
         class:active={!app.readId && app.view === "list" && !app.folderFilter && !app.tagFilter}
@@ -898,6 +922,15 @@
         {#if app.dueCount > 0}
           <span class="badge">{app.dueCount}</span>
         {/if}
+      </button>
+      <button
+        class="nav-item"
+        class:active={!app.readId && app.view === "graph"}
+        aria-current={!app.readId && app.view === "graph" ? "page" : undefined}
+        onclick={() => void goView("graph")}
+      >
+        <span class="nav-icon"><Icon name="hash" size={15} /></span>
+        <span class="nav-label ellipsis">{t("sidebar.graph")}</span>
       </button>
     </nav>
 
@@ -1431,5 +1464,9 @@
   .muted-badge {
     background: transparent;
     color: var(--muted);
+  }
+  .row-emoji {
+    font-size: 13px;
+    line-height: 1;
   }
 </style>

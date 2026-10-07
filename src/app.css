@@ -5,6 +5,16 @@
    ============================================================ */
 
 :root {
+  /* Label palette for folders and tags (ink + wash), see appearance.rs */
+  --c-sage: #3f6b43; --c-sage-soft: #e7efe5;
+  --c-sky: #2a6390; --c-sky-soft: #e2edf6;
+  --c-plum: #74498a; --c-plum-soft: #efe6f3;
+  --c-rose: #9c3f55; --c-rose-soft: #f7e5ea;
+  --c-amber: #8a5b00; --c-amber-soft: #f6ecd6;
+  --c-clay: #93512f; --c-clay-soft: #f4e6dd;
+  --c-teal: #1f6e67; --c-teal-soft: #ddefec;
+  --c-slate: #4f5965; --c-slate-soft: #e9ecef;
+
   color-scheme: light;
 
   /* Surfaces — warm bone canvas, white cards */
@@ -117,6 +127,15 @@
 /* ============ Dark theme ============ */
 
 :root[data-theme="dark"] {
+  --c-sage: #9cc79f; --c-sage-soft: #24302a;
+  --c-sky: #8fbfe6; --c-sky-soft: #1f2c37;
+  --c-plum: #c9a6d9; --c-plum-soft: #2d2433;
+  --c-rose: #e7a0b1; --c-rose-soft: #35232a;
+  --c-amber: #e3bd6e; --c-amber-soft: #33291a;
+  --c-clay: #e0a585; --c-clay-soft: #33261f;
+  --c-teal: #86cfc6; --c-teal-soft: #1c302e;
+  --c-slate: #b5bec8; --c-slate-soft: #2a2e33;
+
   color-scheme: dark;
 
   --bg: #191919;
@@ -548,6 +567,20 @@ body,
   letter-spacing: 0.05em;
   white-space: nowrap;
 }
+
+/* A folder or tag with a colour from the label palette. */
+.chip[data-color] {
+  background: var(--chip-wash);
+  color: var(--chip-ink);
+}
+[data-color="sage"] { --chip-ink: var(--c-sage); --chip-wash: var(--c-sage-soft); }
+[data-color="sky"] { --chip-ink: var(--c-sky); --chip-wash: var(--c-sky-soft); }
+[data-color="plum"] { --chip-ink: var(--c-plum); --chip-wash: var(--c-plum-soft); }
+[data-color="rose"] { --chip-ink: var(--c-rose); --chip-wash: var(--c-rose-soft); }
+[data-color="amber"] { --chip-ink: var(--c-amber); --chip-wash: var(--c-amber-soft); }
+[data-color="clay"] { --chip-ink: var(--c-clay); --chip-wash: var(--c-clay-soft); }
+[data-color="teal"] { --chip-ink: var(--c-teal); --chip-wash: var(--c-teal-soft); }
+[data-color="slate"] { --chip-ink: var(--c-slate); --chip-wash: var(--c-slate-soft); }
 
 .chip-muted {
   background: var(--sunken);

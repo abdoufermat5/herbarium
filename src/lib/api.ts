@@ -11,6 +11,11 @@ import type {
   SavedSearch,
   PageLinks,
   AiExportListing,
+  TodaySummary,
+  Appearance,
+  PageGraph,
+  PreviewDigest,
+  LabelColor,
   ReadingPath,
   ProposalSummary,
   ImportFile,
@@ -222,6 +227,46 @@ export const api = {
 
   deletePath(id: string): Promise<{ deleted: string }> {
     return op("paths.delete", { id });
+  },
+
+  /** Linked pages and their links; `all` includes pages without links. */
+  pageGraph(all = false): Promise<PageGraph> {
+    return op("pages.graph", { all });
+  },
+
+  /** Current previews by page id, and the pages that need one. */
+  listPreviews(): Promise<{ previews: Record<string, PreviewDigest>; missing: string[] }> {
+    return op("previews.list");
+  },
+
+  savePreview(id: string, digest: PreviewDigest): Promise<unknown> {
+    return op("previews.save", { id, digest });
+  },
+
+  appearance(): Promise<Appearance> {
+    return op("appearance.get");
+  },
+
+  setFolderLook(path: string, icon: string | null, color: LabelColor | null): Promise<Appearance> {
+    return op("appearance.set_folder", { path, icon, color });
+  },
+
+  setTagColor(tag: string, color: LabelColor | null): Promise<Appearance> {
+    return op("appearance.set_tag", { tag, color });
+  },
+
+  /** Set a page's icon (an emoji); null removes it. */
+  setPageIcon(id: string, icon: string | null): Promise<PageMeta> {
+    return op("pages.update", { id, icon });
+  },
+
+  today(): Promise<TodaySummary> {
+    return op("today.summary");
+  },
+
+  /** Record that the user opened a page (for Today's suggestions). */
+  markRead(id: string): Promise<unknown> {
+    return op("reads.mark", { id });
   },
 
   savedSearches(): Promise<SavedSearch[]> {

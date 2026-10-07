@@ -634,6 +634,7 @@ impl Extension for Pages {
                     "folder": { "type": ["string", "null"] },
                     "note": { "type": "string" },
                     "source": { "anyOf": [source_schema(), { "type": "null" }], "description": "Replaces the page's source; `null` removes it." },
+                    "icon": { "type": ["string", "null"], "description": "An emoji shown with the page; `null` or \"\" removes it." },
                     "baseUpdatedAt": { "type": "integer", "description": "The page's `updatedAt` when you read it; the edit is rejected if it changed since." }
                 }),
                 &["id"],
@@ -651,6 +652,13 @@ impl Extension for Pages {
                 }
                 if let Some(note) = p.note {
                     meta.note = note;
+                }
+                if let Some(icon) = p.icon {
+                    let icon = match icon {
+                        Some(i) => crate::models::clean_icon(&i)?,
+                        None => None,
+                    };
+                    crate::models::set_icon(&mut meta, icon);
                 }
                 if let Some(source) = p.source {
                     PageSource::set(&mut meta, source.map(PageSource::clean).transpose()?.flatten());

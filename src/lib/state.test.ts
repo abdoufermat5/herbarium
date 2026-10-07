@@ -11,7 +11,7 @@ const mocks = vi.hoisted(() => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
   return {
     tags: vi.fn(), folders: vi.fn(), reviewToday: vi.fn(), listPages: vi.fn(),
-    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(), savedSearches: vi.fn(), listPaths: vi.fn(), updatePath: vi.fn(),
+    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(), savedSearches: vi.fn(), listPaths: vi.fn(), updatePath: vi.fn(), appearance: vi.fn(),
   };
 });
 vi.mock("./api", () => ({ api: mocks }));
@@ -49,6 +49,7 @@ beforeEach(() => {
   mocks.listProposals.mockResolvedValue([]);
   mocks.savedSearches.mockResolvedValue([]);
   mocks.listPaths.mockResolvedValue([]);
+  mocks.appearance.mockResolvedValue({ folders: {}, tags: {} });
 });
 afterEach(() => { resetWorkspace(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(() => vi.unstubAllGlobals());

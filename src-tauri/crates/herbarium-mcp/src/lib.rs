@@ -155,6 +155,13 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
         Effect::ReadOnly,
     ),
     ("today.summary", "Today overview", Effect::ReadOnly),
+    ("appearance.get", "Folder and tag looks", Effect::ReadOnly),
+    (
+        "appearance.set_folder",
+        "Set folder look",
+        Effect::Idempotent,
+    ),
+    ("appearance.set_tag", "Set tag colour", Effect::Idempotent),
     ("paths.list", "List reading paths", Effect::ReadOnly),
     ("paths.get", "Read reading path", Effect::ReadOnly),
     ("paths.create", "Create reading path", Effect::Additive),

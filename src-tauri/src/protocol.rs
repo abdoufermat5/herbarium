@@ -547,10 +547,10 @@ mod tests {
         );
         let state = r#"{"local":{},"personal":{},"shared":{}}"#;
         let plain = inject_storage_shim(&html, state, false);
-        assert!(!plain.contains("herbarium-recall-cover"));
+        assert!(!plain.contains(RECALL_JS), "no recall script unless asked");
         let recall = inject_storage_shim(&html, state, true);
         let shim_at = recall.find("__herbariumPersist").unwrap();
-        let recall_at = recall.find("herbarium-recall-cover").unwrap();
+        let recall_at = recall.find(RECALL_JS).unwrap();
         let title_at = recall.find("<title>").unwrap();
         assert!(shim_at < recall_at && recall_at < title_at, "{recall}");
         assert!(

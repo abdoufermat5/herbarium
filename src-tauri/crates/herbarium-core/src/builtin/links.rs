@@ -17,6 +17,23 @@ struct IdArgs {
     id: String,
 }
 
+#[derive(Deserialize, Default)]
+struct GraphArgs {
+    /// Include pages without any link.
+    #[serde(default)]
+    all: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphNode {
+    id: String,
+    title: String,
+    folder: Option<String>,
+    /// Links in and out.
+    degree: usize,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PageLinks {
@@ -34,6 +51,39 @@ impl Extension for Links {
     }
 
     fn register(&self, r: &mut Registry) -> OpResult<()> {
+        r.add(Operation::new(
+            "pages.graph",
+            "The vault as a graph of linked pages: `nodes` (`id`, `title`, `folder`, `degree`) and `edges` (`[from, to]` page ids). Pages without links are left out unless `all` is true.",
+            object(json!({ "all": { "type": "boolean" } }), &[]),
+            |ctx: &mut Ctx, a: GraphArgs| {
+                let store = ctx.store;
+                store
+                    .refresh_links(|meta| vault::read_html(&store.vault, &meta.id, meta.folder.as_deref()).ok())
+                    .map_err(|e| e.to_string())?;
+                let edges = store.all_links().map_err(|e| e.to_string())?;
+                let mut degree: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+                for (a, b) in &edges {
+                    *degree.entry(a).or_default() += 1;
+                    *degree.entry(b).or_default() += 1;
+                }
+                let nodes: Vec<GraphNode> = store
+                    .all()
+                    .map_err(|e| e.to_string())?
+                    .into_iter()
+                    .filter_map(|m| {
+                        let d = degree.get(m.id.as_str()).copied().unwrap_or(0);
+                        (a.all || d > 0).then_some(GraphNode {
+                            id: m.id,
+                            title: m.title,
+                            folder: m.folder,
+                            degree: d,
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "nodes": nodes, "edges": edges }))
+            },
+        ))?;
+
         r.add(Operation::new(
             "pages.links",
             "A page's links: `links` (pages it links to), `broken` (linked ids with no page) and `backlinks` (pages linking to it). Pages link to each other with `<a href=\"herbarium-app://open/<id>\">`; clicking such a link in Herbarium opens that page.",

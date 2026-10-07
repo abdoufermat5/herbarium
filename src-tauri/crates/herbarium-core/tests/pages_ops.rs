@@ -982,6 +982,17 @@ fn links_and_backlinks_follow_the_files() {
         .call(Caller::Agent, "pages.links", json!({ "id": tid }))
         .unwrap();
     assert_eq!(back["backlinks"][0]["id"], lid.as_str());
+    let graph = host.call(Caller::Agent, "pages.graph", json!({})).unwrap();
+    assert_eq!(
+        graph["edges"],
+        json!([[lid.clone(), tid.clone()]]),
+        "only links to existing pages"
+    );
+    assert_eq!(graph["nodes"].as_array().unwrap().len(), 2);
+    let everything = host
+        .call(Caller::Ui, "pages.graph", json!({ "all": true }))
+        .unwrap();
+    assert!(everything["nodes"].as_array().unwrap().len() >= 2);
 
     // Rewriting the page drops the link; the index notices the change.
     std::thread::sleep(std::time::Duration::from_millis(10));
