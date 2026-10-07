@@ -2,6 +2,7 @@ pub mod cli;
 mod commands;
 mod config;
 mod editors;
+mod export;
 mod navigation;
 mod protocol;
 mod updater;
@@ -170,6 +171,8 @@ pub fn run() {
             commands::reveal_vault,
             commands::export_vault,
             commands::export_page,
+            commands::export_page_html,
+            commands::export_site,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,

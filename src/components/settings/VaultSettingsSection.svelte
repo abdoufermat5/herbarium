@@ -10,6 +10,7 @@
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import Switch from "./Switch.svelte";
+  import { publishSite } from "../../lib/exports";
 
   let scanning = $state(false);
   let busy = $state<"open" | "create" | null>(null);
@@ -210,6 +211,12 @@
     <button class="btn" disabled={exporting} onclick={exportVaultCopy}>
       <Icon name="upload" size={13} />
       {exporting ? t("settings.exporting") : t("settings.exportAction")}
+    </button>
+  </SettingRow>
+  <SettingRow title={t("export.site")} hint={t("export.siteHint")}>
+    <button class="btn" onclick={() => void publishSite(null)}>
+      <Icon name="upload" size={13} />
+      {t("export.siteAction")}
     </button>
   </SettingRow>
   <SettingRow title={t("settings.refreshOnFocus")} hint={t("settings.refreshOnFocusHint")}>

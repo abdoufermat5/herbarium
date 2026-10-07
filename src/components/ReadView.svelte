@@ -26,6 +26,7 @@
   import PresetButtons from "./PresetButtons.svelte";
   import HtmlEditor from "./HtmlEditor.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
+  import { exportPageFile } from "../lib/exports";
   import ProposalPanel from "./ProposalPanel.svelte";
   import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
@@ -1559,6 +1560,9 @@
               </button>
               <button class="btn btn-sm" onclick={duplicate} disabled={saving} title={t("read.duplicateHint")}>
                 <Icon name="files" size={13} />{t("read.duplicate")}
+              </button>
+              <button class="btn btn-sm" onclick={() => page && void exportPageFile(page.meta)} disabled={pageGone} title={t("export.pageHint")}>
+                <Icon name="upload" size={13} />{t("export.page")}
               </button>
               <button class="btn btn-sm" onclick={reveal} disabled={pageGone} title={t("read.revealHint")}>
                 <Icon name="external-link" size={13} />{t("read.reveal")}

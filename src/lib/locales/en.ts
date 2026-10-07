@@ -826,6 +826,17 @@ export const en = {
   "paths.position": "{n} of {total}",
   "paths.previous": "Previous",
   "paths.next": "Next",
+  "export.page": "Export",
+  "export.pageHint": "Save this page as one HTML file that works anywhere, with its images and scripts included",
+  "export.pageDialog": "Export page as HTML",
+  "export.pageDone": "Page exported to {path}",
+  "export.site": "Publish as a website",
+  "export.siteHint": "Write every page as a static website (an index plus one HTML file per page) into a new or empty folder. Links between pages keep working.",
+  "export.siteAction": "Publish…",
+  "export.siteFolder": "Publish as website",
+  "export.siteDialog": "Choose an empty folder for the website",
+  "export.siteDone": "Published {count} pages. Open {path} to browse them.",
+  "export.failed": "Export failed",
 } as const;
 
 export type MessageKey = keyof typeof en;

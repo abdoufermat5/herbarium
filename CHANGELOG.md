@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - MCP resources and prompts: every page is a resource (`herbarium://page/<id>` for its HTML, `herbarium://page/<id>/text` for its text), and the `save_page`, `ask_vault` and `review_session` prompts package common requests.
 - Review agent edits: with Settings → Agents → "Review agent edits" on, an agent's `pages.set_html` or `history.restore` leaves a proposal instead of changing the page. The reader shows a banner and a side-by-side diff to accept or reject it, new proposals are announced, and accepting one for a page that changed since asks first. Agents get `agents.settings`, `proposals.list` and `proposals.get`; only the user can accept, reject or change the setting.
 - Quiz mode: answers a page marks with `data-herbarium-recall` (optionally holding the question) are hidden behind a "show answer" button during review sessions, or on any page with "Quiz me" in the reader.
+- Search filters: `tag:`, `folder:`, `tool:`, `is:due`/`scheduled`/`unscheduled`/`network`, `has:note`/`source` and `due:`/`updated:`/`created:` windows such as `7d`, each negatable with `-`, mixed into any search. Searches can be saved, are listed in the sidebar and are available to agents (`searches.*`).
+- Links between pages: a link to `herbarium-app://open/<id>` inside a page opens that page in the app. The details panel lists a page's links, broken links and backlinks and copies its link; agents get `pages.links`.
+- Review activity: a heatmap of the last year's reviews with the current and longest streak, and Settings → Review can skip folders or tags, whose pages keep their schedule but stay out of the queue, due counts and reminders.
+- Reader View menu: the page's contents (including headings built by script), zoom from 50 to 200 % (`Ctrl/⌘ +`, `-`, `0`) and a focus mode (`F`) that hides the sidebar, details and review bar.
+- Reading paths: ordered lists of pages read like a course, with previous/next in the reader, managed from the sidebar and the details panel, and open to agents (`paths.*`). A trashed page keeps its place in a path.
+- Exports: save a page as one self-contained HTML file with its local images, scripts and styles inlined, or publish the vault or a folder as a static website (an index plus one file per page, links between them kept) into a new or empty folder.
 
 ## [0.2.1] - 2026-10-04
 

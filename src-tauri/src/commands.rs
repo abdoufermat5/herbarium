@@ -290,6 +290,83 @@ pub async fn export_page(
     let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
     export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
 }
+/// Read pages for an export while holding the vault lock only as long as
+/// needed. `folder` limits it to a folder and its subfolders.
+fn pages_for_export(
+    state: &State<'_, AppState>,
+    folder: Option<&str>,
+    only: Option<&str>,
+) -> CmdResult<(PathBuf, Vec<crate::export::ExportPage>)> {
+    let host = state.host.lock().map_err(|e| e.to_string())?;
+    let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+    let ids: Vec<String> = match only {
+        Some(id) => vec![id.to_string()],
+        None => {
+            let list = host.call(Caller::Ui, "pages.list", json!({ "folder": folder }))?;
+            list.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|m| m["id"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    };
+    let mut pages = Vec::with_capacity(ids.len());
+    for id in ids {
+        let page = host.call(
+            Caller::Ui,
+            "pages.get",
+            json!({ "id": id, "format": "html" }),
+        )?;
+        let meta = &page["meta"];
+        pages.push(crate::export::ExportPage {
+            title: meta["title"].as_str().unwrap_or(&id).to_string(),
+            folder: meta["folder"].as_str().map(str::to_string),
+            tags: meta["tags"]
+                .as_array()
+                .map(|t| {
+                    t.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            html: page["html"].as_str().unwrap_or_default().to_string(),
+            id,
+        });
+    }
+    Ok((vault, pages))
+}
+
+/// Save one page as a self-contained HTML file (local assets inlined).
+#[tauri::command]
+pub async fn export_page_html(
+    state: State<'_, AppState>,
+    page_id: String,
+    dest: String,
+) -> CmdResult<()> {
+    let (vault, pages) = pages_for_export(&state, None, Some(&page_id))?;
+    let page = pages.first().ok_or("page not found")?;
+    let html = crate::export::standalone(&vault, page);
+    herbarium_core::vault::write_atomic(&PathBuf::from(dest), html.as_bytes())
+}
+
+/// Publish the vault, or one folder of it, as a static website in `dest_dir`
+/// (a new or empty folder).
+#[tauri::command]
+pub async fn export_site(
+    state: State<'_, AppState>,
+    folder: Option<String>,
+    title: String,
+    dest_dir: String,
+) -> CmdResult<crate::export::SiteReport> {
+    let (vault, pages) = pages_for_export(&state, folder.as_deref(), None)?;
+    if pages.is_empty() {
+        return Err("there are no pages to publish".into());
+    }
+    crate::export::write_site(&vault, &title, &pages, &PathBuf::from(dest_dir))
+}
+
 #[tauri::command]
 pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
     let host = state.host.lock().map_err(|e| e.to_string())?;

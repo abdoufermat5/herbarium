@@ -29,13 +29,16 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 ## Features
 
 - **Import** by drag and drop, file picker, paste, or `herbarium add <file|-|url>` from a terminal.
-- **Search** titles, tags, notes and page text.
+- **Search** titles, tags, notes and page text, with filters.
 - **Organize** with folders, tags and notes; move or edit many pages at once.
 - **Read** each page in a sandboxed viewer, scripts included. Pages that save progress with `localStorage` or `window.storage` keep it between visits.
 - **Edit** the HTML in the app or in your own editor. Every in-app or agent edit keeps the previous version, which you can compare and restore.
 - **Review** pages with adaptive scheduling (FSRS): grade each review Again, Hard, Good or Easy and pick the retention you want, with reminders and a keyboard-driven review session.
 - **Quiz** yourself: answers a page marks with `data-herbarium-recall` stay hidden until you reveal them.
 - **Remember the source**: the page, tool and prompt each page came from.
+- **Link** pages to each other and see backlinks; group them into **reading paths** you step through like a course.
+- **Save searches** with filters such as `tag:rust is:due updated:7d`.
+- **Export** a page as one self-contained HTML file, or publish a folder as a static website.
 - **Trash** with restore and undo.
 - **Command palette** (`Ctrl/⌘ K`); press `?` for all shortcuts.
 - Light and dark themes, English and French.

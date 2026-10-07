@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { publishSite } from "../lib/exports";
   import { tick } from "svelte";
   import { flip } from "svelte/animate";
   import {
@@ -502,6 +503,7 @@
         onclick: () => toggleFolder(path),
       },
       { divider: true },
+      { id: "publish", label: t("export.siteFolder"), icon: "upload", onclick: () => void publishSite(path) },
       { id: "move", label: t("folderPicker.move"), icon: "folder", onclick: () => void moveFolder(row) },
       { id: "rename", label: t("sidebar.rename"), icon: "folder", shortcut: shortcutHint("renameItem"), onclick: () => startRename(row) },
       { id: "delete", label: t("sidebar.deleteFolder"), icon: "trash-2", danger: true, shortcut: shortcutHint("deleteItem"), onclick: () => void confirmDeleteFolder(path, row.name) },

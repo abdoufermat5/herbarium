@@ -8,6 +8,7 @@ pub mod extension;
 mod host;
 pub mod models;
 pub mod query;
+pub mod rewrite;
 pub mod store;
 pub mod time;
 pub mod vault;

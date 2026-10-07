@@ -337,6 +337,16 @@ export const api = {
     return invoke("export_page", { pageId, destZip });
   },
 
+  /** Write one page as a self-contained HTML file (local assets inlined). */
+  exportPageHtml(pageId: string, dest: string): Promise<void> {
+    return invoke("export_page_html", { pageId, dest });
+  },
+
+  /** Publish the vault (or `folder`) as a static site in a new or empty folder. */
+  exportSite(folder: string | null, title: string, destDir: string): Promise<{ pages: number; index: string }> {
+    return invoke("export_site", { folder, title, destDir });
+  },
+
   /** A newer signed release, or null when this build is current. */
   checkUpdate(): Promise<UpdateInfo | null> {
     return invoke("check_update");
