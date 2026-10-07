@@ -11,6 +11,12 @@
     goAll,
     runSearch,
     deleteSavedSearch,
+    openInPath,
+    createPath,
+    renamePath,
+    deletePath,
+    movePageInPath,
+    setPageInPath,
     goView,
     inFolder,
     movePages,
@@ -502,6 +508,74 @@
     ]);
   }
 
+  /* ---------------------------------------------------------- reading paths */
+
+  let openPaths = $state<Set<string>>(new Set());
+  /** Inline name field: a new path, or renaming one. */
+  let pathDraft = $state<{ id: string | null; name: string } | null>(null);
+
+  function togglePathOpen(id: string) {
+    const next = new Set(openPaths);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    openPaths = next;
+  }
+
+  function pageTitle(id: string): string | null {
+    return app.library.find((p) => p.id === id)?.title ?? null;
+  }
+
+  async function commitPathDraft() {
+    const draft = pathDraft;
+    if (!draft) return;
+    const name = draft.name.trim();
+    pathDraft = null;
+    if (!name) return;
+    if (draft.id) {
+      await renamePath(draft.id, name);
+    } else {
+      const path = await createPath(name);
+      if (path) openPaths = new Set([...openPaths, path.id]);
+    }
+  }
+
+  function onPathDraftKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitPathDraft();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      pathDraft = null;
+    }
+  }
+
+  function pathMenu(e: MouseEvent, id: string, name: string) {
+    e.preventDefault();
+    menu = {
+      ...anchor(e),
+      items: [
+        { id: "rename", label: t("sidebar.rename"), icon: "file-text", onclick: () => (pathDraft = { id, name }) },
+        { id: "delete", label: t("paths.delete"), icon: "trash-2", danger: true, onclick: () => void deletePath(id) },
+      ],
+    };
+  }
+
+  function pathPageMenu(e: MouseEvent, pathId: string, pageId: string, index: number, count: number) {
+    e.preventDefault();
+    menu = {
+      ...anchor(e),
+      items: [
+        { id: "open", label: t("common.open"), icon: "file-text", onclick: () => void openInPath(pathId, pageId) },
+        { divider: true },
+        { id: "up", label: t("paths.moveUp"), disabled: index === 0, onclick: () => void movePageInPath(pathId, pageId, -1) },
+        { id: "down", label: t("paths.moveDown"), disabled: index === count - 1, onclick: () => void movePageInPath(pathId, pageId, 1) },
+        { divider: true },
+        { id: "remove", label: t("paths.remove"), icon: "x", onclick: () => void setPageInPath(pathId, pageId, false) },
+      ],
+    };
+  }
+
   function pageMenu(e: MouseEvent, row: TreeRow) {
     if (isInputTarget(e)) return;
     const page = row.page;
@@ -824,6 +898,86 @@
         {/if}
       </button>
     </nav>
+
+    <div class="group">
+      <div class="group-head">
+        <div class="group-title static">{t("sidebar.paths")}</div>
+        <div class="tools">
+          <button
+            class="tool"
+            title={t("paths.new")}
+            aria-label={t("paths.new")}
+            onclick={() => (pathDraft = { id: null, name: "" })}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+      </div>
+      <nav class="nav" aria-label={t("sidebar.paths")}>
+        {#if pathDraft && !pathDraft.id}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            class="path-input"
+            bind:value={pathDraft.name}
+            onkeydown={onPathDraftKey}
+            onblur={() => void commitPathDraft()}
+            placeholder={t("paths.namePlaceholder")}
+            aria-label={t("paths.nameLabel")}
+            maxlength="100"
+            autofocus
+          />
+        {/if}
+        {#each app.paths as path (path.id)}
+          {#if pathDraft?.id === path.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="path-input"
+              bind:value={pathDraft.name}
+              onkeydown={onPathDraftKey}
+              onblur={() => void commitPathDraft()}
+              aria-label={t("paths.nameLabel")}
+              maxlength="100"
+              autofocus
+            />
+          {:else}
+            <button
+              class="nav-item"
+              aria-expanded={openPaths.has(path.id)}
+              title={path.description || path.name}
+              onclick={() => togglePathOpen(path.id)}
+              oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
+            >
+              <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
+              <span class="nav-label ellipsis">{path.name}</span>
+              <span class="badge muted-badge">{path.pages.length}</span>
+            </button>
+          {/if}
+          {#if openPaths.has(path.id)}
+            {#each path.pages as pageId, i (pageId)}
+              {@const title = pageTitle(pageId)}
+              <button
+                class="nav-item path-page"
+                class:active={app.readId === pageId && app.pathId === path.id}
+                class:missing={title === null}
+                disabled={title === null}
+                title={title ?? t("paths.missing")}
+                onclick={() => void openInPath(path.id, pageId)}
+                oncontextmenu={(e) => pathPageMenu(e, path.id, pageId, i, path.pages.length)}
+              >
+                <span class="path-num">{i + 1}</span>
+                <span class="nav-label ellipsis">{title ?? pageId}</span>
+              </button>
+            {:else}
+              <p class="path-empty">{t("paths.empty")}</p>
+            {/each}
+          {/if}
+        {:else}
+          {#if !pathDraft}
+            <p class="path-empty">{t("paths.none")}</p>
+          {/if}
+        {/each}
+      </nav>
+    </div>
 
     {#if app.savedSearches.length > 0}
       <div class="group">
@@ -1246,5 +1400,34 @@
   .saved-row:hover .saved-remove,
   .saved-remove:focus-visible {
     opacity: 1;
+  }
+  .path-input {
+    width: 100%;
+    margin: 2px 0;
+    font-size: var(--fs-sm);
+  }
+  .path-page {
+    padding-left: 26px;
+  }
+  .path-page.missing {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .path-num {
+    flex: none;
+    width: 16px;
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    text-align: right;
+  }
+  .path-empty {
+    margin: 2px 0 4px 26px;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .muted-badge {
+    background: transparent;
+    color: var(--muted);
   }
 </style>

@@ -84,6 +84,15 @@ export interface PageLinks {
   backlinks: PageMeta[];
 }
 
+/** A reading path: pages read in order (`.herbarium/paths.json`). */
+export interface ReadingPath {
+  id: string;
+  name: string;
+  description?: string;
+  /** Page ids in reading order; a trashed page keeps its place. */
+  pages: string[];
+}
+
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */
 export interface SavedSearch {
   name: string;

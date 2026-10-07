@@ -12,6 +12,8 @@
     nextReviewPage,
     goView,
     openPage,
+    openInPath,
+    setPageInPath,
   } from "../lib/state.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
@@ -576,6 +578,21 @@
   const pageSource = $derived(page?.meta.ext?.source ?? null);
 
   let pageLinks = $state<PageLinks | null>(null);
+
+  /** The reading path this page was opened from, when the page is in it. */
+  const currentPath = $derived.by(() => {
+    const p = page;
+    if (!p || !app.pathId) return null;
+    const path = app.paths.find((x) => x.id === app.pathId);
+    if (!path) return null;
+    const index = path.pages.indexOf(p.meta.id);
+    if (index < 0) return null;
+    // Step over pages that are no longer in the vault (trashed).
+    const present = (id: string) => app.library.some((x) => x.id === id);
+    const prev = path.pages.slice(0, index).reverse().find(present) ?? null;
+    const next = path.pages.slice(index + 1).find(present) ?? null;
+    return { path, index, prev, next };
+  });
 
   // Links change when this page or any other is rewritten; refetch on both.
   $effect(() => {
@@ -1217,6 +1234,29 @@
       </div>
     {/if}
 
+    {#if currentPath && !app.reviewSession}
+      <div class="path-bar">
+        <span class="eyebrow">{t("paths.reading")}</span>
+        <strong class="ellipsis">{currentPath.path.name}</strong>
+        <span class="muted">{t("paths.position", { n: currentPath.index + 1, total: currentPath.path.pages.length })}</span>
+        <span class="grow"></span>
+        <button
+          class="btn btn-xs"
+          disabled={!currentPath.prev}
+          onclick={() => currentPath?.prev && void openInPath(currentPath.path.id, currentPath.prev)}
+        >
+          <Icon name="arrow-left" size={12} />{t("paths.previous")}
+        </button>
+        <button
+          class="btn btn-xs btn-primary"
+          disabled={!currentPath.next}
+          onclick={() => currentPath?.next && void openInPath(currentPath.path.id, currentPath.next)}
+        >
+          {t("paths.next")}<Icon name="chevron-right" size={12} />
+        </button>
+      </div>
+    {/if}
+
     {#if pendingProposal && !app.proposalOpen}
       <div class="banner proposal" role="status">
         <Icon name="file-text" size={14} />
@@ -1525,6 +1565,27 @@
               </button>
             </div>
           </section>
+
+          {#if app.paths.length > 0}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("paths.title")}</h2>
+              <ul class="links-list">
+                {#each app.paths as path (path.id)}
+                  <li>
+                    <label class="path-check">
+                      <input
+                        type="checkbox"
+                        checked={path.pages.includes(page.meta.id)}
+                        disabled={pageGone}
+                        onchange={(e) => void setPageInPath(path.id, page!.meta.id, e.currentTarget.checked)}
+                      />
+                      <span class="ellipsis">{path.name}</span>
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
 
           <section class="insp-section">
             <div class="links-head">
@@ -2059,6 +2120,35 @@
 
   .link-btn:hover {
     text-decoration: underline;
+  }
+
+  .path-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--raised);
+    font-size: var(--fs-sm);
+    flex: none;
+    min-width: 0;
+  }
+
+  .path-bar .grow {
+    flex: 1;
+  }
+
+  .path-bar .muted {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .path-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    cursor: pointer;
   }
 
   .links-head {

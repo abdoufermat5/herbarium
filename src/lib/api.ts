@@ -10,6 +10,7 @@ import type {
   AgentSettings,
   SavedSearch,
   PageLinks,
+  ReadingPath,
   ProposalSummary,
   ImportFile,
   ImportResult,
@@ -175,6 +176,31 @@ export const api = {
   /** Pages a page links to, broken links, and pages linking to it. */
   pageLinks(id: string): Promise<PageLinks> {
     return op("pages.links", { id });
+  },
+
+  listPaths(): Promise<ReadingPath[]> {
+    return op("paths.list");
+  },
+
+  createPath(name: string, pages: string[] = []): Promise<ReadingPath> {
+    return op("paths.create", { name, pages });
+  },
+
+  /** Rename and/or reorder: `pages` is the full list in its new order. */
+  updatePath(id: string, patch: { name?: string; pages?: string[] }): Promise<ReadingPath> {
+    return op("paths.update", { id, ...patch });
+  },
+
+  addToPath(id: string, page: string): Promise<ReadingPath> {
+    return op("paths.add_page", { id, page });
+  },
+
+  removeFromPath(id: string, page: string): Promise<ReadingPath> {
+    return op("paths.remove_page", { id, page });
+  },
+
+  deletePath(id: string): Promise<{ deleted: string }> {
+    return op("paths.delete", { id });
   },
 
   savedSearches(): Promise<SavedSearch[]> {

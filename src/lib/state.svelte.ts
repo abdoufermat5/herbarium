@@ -11,6 +11,7 @@ import type {
   Config,
   PageMeta,
   ProposalSummary,
+  ReadingPath,
   ReviewSettings,
   ReviewStats,
   SavedSearch,
@@ -89,6 +90,9 @@ interface AppState {
   /** The reader's proposal panel (review an agent's edit) is open. */
   proposalOpen: boolean;
   savedSearches: SavedSearch[];
+  paths: ReadingPath[];
+  /** The reading path the reader was opened from, for previous/next. */
+  pathId: string | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
   layout: Layout;
@@ -172,6 +176,8 @@ export const app: AppState = $state({
   proposals: [],
   proposalOpen: false,
   savedSearches: [],
+  paths: [],
+  pathId: null,
   focusMode: false,
   layout: storedLayout(),
   sort: storedSort(),
@@ -269,7 +275,7 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats, proposals, searches] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals, searches, paths] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
@@ -278,6 +284,7 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     api.reviewStats(),
     api.listProposals(),
     api.savedSearches(),
+    api.listPaths(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -309,6 +316,8 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   } else console.error(proposals.reason);
   if (searches.status === "fulfilled") app.savedSearches = searches.value;
   else console.error(searches.reason);
+  if (paths.status === "fulfilled") app.paths = paths.value;
+  else console.error(paths.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -460,6 +469,8 @@ export function resetWorkspace() {
   app.proposals = [];
   app.proposalOpen = false;
   app.savedSearches = [];
+  app.paths = [];
+  app.pathId = null;
   app.focusMode = false;
   knownProposals = null;
   app.createRequest = null;
@@ -601,6 +612,71 @@ export function goAll(): Promise<boolean> {
     app.search = "";
     if (hadSearch) await reloadPages(true);
   });
+}
+
+/** Open `pageId` as part of reading path `pathId` (the reader shows previous/next). */
+export async function openInPath(pathId: string, pageId: string): Promise<boolean> {
+  const opened = await openPage(pageId);
+  if (opened) app.pathId = pathId;
+  return opened;
+}
+
+/** Run a reading-path change and adopt the result; errors are toasted. */
+async function changePath(run: () => Promise<ReadingPath>): Promise<ReadingPath | null> {
+  try {
+    const path = await run();
+    const i = app.paths.findIndex((p) => p.id === path.id);
+    if (i >= 0) app.paths[i] = path;
+    else app.paths = [...app.paths, path];
+    return path;
+  } catch (e) {
+    toast(`${t("paths.failed")}: ${errorMessage(e)}`, "error");
+    return null;
+  }
+}
+
+export function createPath(name: string, pages: string[] = []) {
+  return changePath(() => api.createPath(name, pages));
+}
+
+export function renamePath(id: string, name: string) {
+  return changePath(() => api.updatePath(id, { name }));
+}
+
+/** Move a page one step earlier (-1) or later (+1) in a path. */
+export function movePageInPath(id: string, pageId: string, dir: -1 | 1) {
+  const path = app.paths.find((p) => p.id === id);
+  if (!path) return Promise.resolve(null);
+  const pages = [...path.pages];
+  const i = pages.indexOf(pageId);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= pages.length) return Promise.resolve(path);
+  [pages[i], pages[j]] = [pages[j], pages[i]];
+  return changePath(() => api.updatePath(id, { pages }));
+}
+
+export function setPageInPath(id: string, pageId: string, inPath: boolean) {
+  return changePath(() => (inPath ? api.addToPath(id, pageId) : api.removeFromPath(id, pageId)));
+}
+
+export async function deletePath(id: string): Promise<boolean> {
+  const path = app.paths.find((p) => p.id === id);
+  const ok = await confirmAction({
+    title: t("paths.deleteTitle"),
+    message: t("paths.deleteMessage", { name: path?.name ?? id }),
+    confirmLabel: t("paths.delete"),
+    danger: true,
+  });
+  if (!ok) return false;
+  try {
+    await api.deletePath(id);
+    app.paths = app.paths.filter((p) => p.id !== id);
+    if (app.pathId === id) app.pathId = null;
+    return true;
+  } catch (e) {
+    toast(`${t("paths.failed")}: ${errorMessage(e)}`, "error");
+    return false;
+  }
 }
 
 /** Show the library searched for `query` (a saved search, filters included). */

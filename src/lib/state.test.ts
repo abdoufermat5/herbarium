@@ -11,12 +11,12 @@ const mocks = vi.hoisted(() => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
   return {
     tags: vi.fn(), folders: vi.fn(), reviewToday: vi.fn(), listPages: vi.fn(),
-    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(), savedSearches: vi.fn(),
+    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(), savedSearches: vi.fn(), listPaths: vi.fn(), updatePath: vi.fn(),
   };
 });
 vi.mock("./api", () => ({ api: mocks }));
 vi.mock("./notifier", () => ({ notifyDue: vi.fn().mockResolvedValue(undefined) }));
-import { app, inFolder, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
+import { app, inFolder, movePageInPath, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
 
 function page(id: string, patch: Partial<PageMeta> = {}): PageMeta {
   return { schemaVersion: 1, id, title: id, tags: [], folder: null, note: "", createdAt: 1,
@@ -48,6 +48,7 @@ beforeEach(() => {
   mocks.reviewStats.mockResolvedValue(stats);
   mocks.listProposals.mockResolvedValue([]);
   mocks.savedSearches.mockResolvedValue([]);
+  mocks.listPaths.mockResolvedValue([]);
 });
 afterEach(() => { resetWorkspace(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(() => vi.unstubAllGlobals());
@@ -153,5 +154,23 @@ describe("agent proposals", () => {
     resetWorkspace();
     expect(app.proposals).toEqual([]);
     expect(app.proposalOpen).toBe(false);
+  });
+});
+
+describe("reading paths", () => {
+  it("moves a page one step and adopts the saved order", async () => {
+    mocks.listPaths.mockResolvedValue([{ id: "p", name: "P", pages: ["a", "b", "c"] }]);
+    await refreshAll();
+    mocks.updatePath.mockImplementation((id: string, patch: { pages: string[] }) =>
+      Promise.resolve({ id, name: "P", pages: patch.pages }),
+    );
+    await movePageInPath("p", "c", -1);
+    expect(mocks.updatePath).toHaveBeenCalledWith("p", { pages: ["a", "c", "b"] });
+    expect(app.paths[0].pages).toEqual(["a", "c", "b"]);
+
+    // At an end it is a no-op, with no backend call.
+    mocks.updatePath.mockClear();
+    await movePageInPath("p", "a", -1);
+    expect(mocks.updatePath).not.toHaveBeenCalled();
   });
 });

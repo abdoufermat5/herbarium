@@ -6,6 +6,7 @@ mod library;
 mod links;
 mod network;
 mod pages;
+mod paths;
 mod proposals;
 mod review;
 mod searches;
@@ -26,6 +27,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(proposals::Proposals),
         Box::new(searches::Searches),
         Box::new(links::Links),
+        Box::new(paths::Paths),
     ]
 }
 

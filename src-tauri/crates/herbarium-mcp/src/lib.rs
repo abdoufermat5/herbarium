@@ -52,6 +52,8 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   are hidden until the user reveals them; mark answers, not whole sections.
 - Link related pages with `<a href=\"herbarium-app://open/<id>\">`: clicking \
   it in Herbarium opens that page, and pages_links lists links and backlinks.
+- To teach a topic over several pages, save them and group them in reading \
+  order with paths_create; the user reads them with previous/next.
 - Pass `source` to pages_create: `tool` (what you are, e.g. \"Claude Code\"), \
   `prompt` (the user's request, briefly) and `url` when the page came from the \
   web. The user sees it with the page and can search it.
@@ -147,6 +149,17 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("agents.settings", "Agent settings", Effect::ReadOnly),
     ("searches.list", "List saved searches", Effect::ReadOnly),
     ("pages.links", "Page links and backlinks", Effect::ReadOnly),
+    ("paths.list", "List reading paths", Effect::ReadOnly),
+    ("paths.get", "Read reading path", Effect::ReadOnly),
+    ("paths.create", "Create reading path", Effect::Additive),
+    ("paths.update", "Update reading path", Effect::Idempotent),
+    ("paths.add_page", "Add page to path", Effect::Idempotent),
+    (
+        "paths.remove_page",
+        "Remove page from path",
+        Effect::DestructiveIdempotent,
+    ),
+    ("paths.delete", "Delete reading path", Effect::Destructive),
     ("searches.save", "Save search", Effect::Idempotent),
     (
         "searches.delete",
