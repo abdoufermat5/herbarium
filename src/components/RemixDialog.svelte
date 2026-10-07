@@ -166,7 +166,7 @@
           <span class="spinner"></span>
           {chars > 0 ? t("remix.writing", { chars: chars.toLocaleString(), seconds: elapsed }) : t("remix.thinking", { seconds: elapsed })}
         {:else if settings}
-          {t("remix.via", { provider: provider?.label ?? settings.provider, model: settings.model })}
+          {t("remix.via", { provider: provider?.label ?? settings.provider, model: settings.model || t("ai.autoShort") })}
         {/if}
       </span>
       <div class="buttons">

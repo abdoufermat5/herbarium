@@ -22,6 +22,7 @@ import type {
   ReadingPath,
   ProposalSummary,
   AiSettings,
+  AiModelList,
   GithubSettings,
   PublishRecord,
   PublishTarget,
@@ -490,6 +491,12 @@ export const api = {
   /** `key`: a new key for `provider`, "" to remove it, or undefined to keep it. */
   setAiSettings(provider: AiProvider, model: string, baseUrl: string | null, key?: string): Promise<AiSettings> {
     return invoke("set_ai_settings", { provider, model, baseUrl, key });
+  },
+
+  /** The models a service offers with its saved key, and the recommended one.
+   *  Fails with the service's reason when the key does not work. */
+  aiModels(provider: AiProvider, refresh = false): Promise<AiModelList> {
+    return invoke("ai_models", { provider, refresh });
   },
 
   /** Remix a page with the configured model; the result waits as a proposal. */

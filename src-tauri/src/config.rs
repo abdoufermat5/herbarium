@@ -62,10 +62,10 @@ fn default_ai_provider() -> String {
     "anthropic".into()
 }
 
-pub const DEFAULT_AI_MODEL: &str = "claude-opus-5-5";
-
+/// Empty: the service's recommended model, looked up when needed, so the
+/// newest model is used without anyone typing a name.
 fn default_ai_model() -> String {
-    DEFAULT_AI_MODEL.into()
+    String::new()
 }
 
 impl Default for Config {

@@ -428,3 +428,15 @@ export interface PublishRecord {
   repo?: string;
   path?: string;
 }
+
+/** A model an AI service offers. */
+export interface AiModel {
+  id: string;
+  name: string;
+}
+
+export interface AiModelList {
+  models: AiModel[];
+  /** The model "Automatic" uses now. */
+  recommended: string | null;
+}

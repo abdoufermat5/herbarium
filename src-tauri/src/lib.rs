@@ -221,6 +221,7 @@ pub fn run() {
             commands::set_ai_settings,
             commands::remix_page,
             commands::cancel_remix,
+            commands::ai_models,
             commands::github_settings,
             commands::set_github,
             commands::publish_page,

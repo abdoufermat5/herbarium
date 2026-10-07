@@ -37,6 +37,20 @@ async function fakeApi() {
   const server = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
+    if (req.method === "GET" && req.url.startsWith("/v1/models")) {
+      // The model list, newest first, as Anthropic sends it.
+      state.listed = (state.listed ?? 0) + 1;
+      res.writeHead(req.headers["x-api-key"] === "sk-good" ? 200 : 401, { "content-type": "application/json" });
+      return res.end(
+        JSON.stringify({
+          data: [
+            { type: "model", id: "claude-opus-5-5", display_name: "Claude Opus 5.5" },
+            { type: "model", id: "claude-sonnet-5-5", display_name: "Claude Sonnet 5.5" },
+          ],
+          has_more: false,
+        }),
+      );
+    }
     state.requests.push({ headers: req.headers, body: JSON.parse(raw) });
     if (req.headers["x-api-key"] !== "sk-good") {
       res.writeHead(401, { "content-type": "application/json" });
@@ -92,7 +106,8 @@ test("herbarium remix leaves the model's page as a proposal", async () => {
     const { headers, body } = api.state.requests.at(-1);
     assert.equal(headers["anthropic-version"], "2023-06-01");
     assert.equal(headers["anthropic-beta"], "server-side-fallback-2026-07-01");
-    assert.equal(body.model, "claude-opus-5-5");
+    assert.equal(body.model, "claude-opus-5-5", "no model set: the newest Opus from the service's list");
+    assert.equal(api.state.listed, 1);
     assert.equal(body.stream, true);
     assert.deepEqual(body.thinking, { type: "adaptive" });
     assert.equal(body.fallbacks, "default");
@@ -136,7 +151,7 @@ test("herbarium remix leaves the model's page as a proposal", async () => {
         HERBARIUM_CLAUDE_BIN: fake,
       });
       assert.equal(r.code, 0, r.stderr);
-      assert.equal(readFileSync(join(work, "claude.args"), "utf8").trim(), "-p --output-format text --model claude-opus-5-5");
+      assert.equal(readFileSync(join(work, "claude.args"), "utf8").trim(), "-p --output-format text --model opus");
       assert.match(readFileSync(join(work, "claude.stdin"), "utf8"), /Translate this page[\s\S]*French[\s\S]*Original text/);
       assert.equal(readFileSync(proposal, "utf8"), remixed("Lesson in French"), "a newer remix replaces the proposal");
     }
@@ -152,6 +167,11 @@ async function fakeChatApi() {
   const server = createServer(async (req, res) => {
     let raw = "";
     for await (const chunk of req) raw += chunk;
+    if (req.method === "GET" && req.url === "/v1/models") {
+      state.listed = (state.listed ?? 0) + 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ object: "list", data: [{ id: "deepseek-reasoner" }, { id: "deepseek-chat" }] }));
+    }
     state.requests.push({ url: req.url, headers: req.headers, body: JSON.parse(raw) });
     if (req.headers.authorization && req.headers.authorization !== "Bearer ds-good") {
       res.writeHead(401, { "content-type": "application/json" });
@@ -188,10 +208,11 @@ test("herbarium remix works with OpenAI-compatible services (DeepSeek, custom)",
     const id = r.stdout.split("\t")[0];
     const proposal = join(vault, ".herbarium", "proposals", `${id}.html`);
 
-    // DeepSeek: its key from DEEPSEEK_API_KEY, its usual model.
+    // DeepSeek: its key from DEEPSEEK_API_KEY, its recommended model from its list.
     r = await run(["remix", "--vault", vault, "--provider", "deepseek", "--base-url", api.base, "--preset", "simplify", id], env);
     assert.equal(r.code, 0, r.stderr);
     assert.equal(readFileSync(proposal, "utf8"), remixed("Remixed by deepseek-chat"));
+    assert.equal(api.state.listed, 1, "the model list was read");
     let req = api.state.requests.at(-1);
     assert.equal(req.url, "/v1/chat/completions");
     assert.equal(req.headers.authorization, "Bearer ds-good");

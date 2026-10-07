@@ -17,10 +17,7 @@ use crate::publish::Vault;
 
 /// The API's address; `HERBARIUM_ANTHROPIC_API` points tests at a fake one.
 fn api_base() -> String {
-    std::env::var("HERBARIUM_ANTHROPIC_API")
-        .unwrap_or_else(|_| "https://api.anthropic.com".into())
-        .trim_end_matches('/')
-        .to_string()
+    crate::ai::anthropic_base()
 }
 
 /// The Claude Code command; `HERBARIUM_CLAUDE_BIN` overrides it.

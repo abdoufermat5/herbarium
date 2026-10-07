@@ -16,6 +16,7 @@ const unavailable = desktopUnavailable();
 const dirs = [];
 let app;
 let github;
+let models;
 let work;
 let vault;
 
@@ -73,6 +74,14 @@ before(async () => {
     { mode: 0o755 },
   );
   github = await fakeGitHub();
+  // An OpenAI-compatible service that lists its models.
+  models = await new Promise((resolve) => {
+    const server = createServer((req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ data: [{ id: "gpt-4o" }, { id: "gpt-5" }, { id: "text-embedding-3-small" }] }));
+    });
+    server.listen(0, "127.0.0.1", () => resolve({ server, base: `http://127.0.0.1:${server.address().port}/v1` }));
+  });
   app = await launchApp({
     HOME: work,
     XDG_CONFIG_HOME: join(work, "config"),
@@ -85,6 +94,7 @@ before(async () => {
 after(async () => {
   await app?.close();
   github?.server.close();
+  models?.server.close();
   cleanup(...dirs);
 });
 
@@ -209,15 +219,24 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
   await step("settings", async () => {
     await app.click("Settings", "aside button, nav button, button");
     await app.click("AI & sharing", "[role=tab]");
-    await app.waitText("Remix with");
-    // Another AI service: its key field and usual model.
-    await app.click("Remix with", "button[aria-haspopup]");
+    await app.waitText("AI service");
+    // Another AI service: asks for its key, then picks the model itself.
+    await app.click("AI service", "button[aria-haspopup]");
     await app.click("DeepSeek", "[role=option]");
     await app.waitText("DeepSeek API key");
+    await app.waitText("Paste your DeepSeek key above");
     await app.waitFor(() => {
       const cfg = JSON.parse(readFileSync(join(work, "config", "io.herbarium.desktop", "config.json"), "utf8"));
-      return cfg.aiProvider === "deepseek" && cfg.aiModel === "deepseek-chat";
-    }, "the provider saved");
+      return cfg.aiProvider === "deepseek" && cfg.aiModel === "";
+    }, "the provider saved, on Automatic");
+    // A service at an address of your own: connected, models listed.
+    await app.click("AI service", "button[aria-haspopup]");
+    await app.click("Other (OpenAI-compatible)", "[role=option]");
+    await app.waitText("Enter the service's address");
+    await app.type("input[type=url]", `${models.base}\n`);
+    await app.exec(() => document.querySelector("input[type=url]").dispatchEvent(new Event("change", { bubbles: true })));
+    await app.waitText("2 models available", 20000);
+    await app.waitText("Automatic — GPT 5");
     await app.waitText("Connected as octo.");
     await app.waitText("https://octo.github.io/herbarium-pages/");
   });

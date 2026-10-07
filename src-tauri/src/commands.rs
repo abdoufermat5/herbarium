@@ -15,6 +15,8 @@ use crate::editors::{self, Choice, EditorInfo};
 
 pub struct AppState {
     pub host: Mutex<Host>,
+    /// Model lists read from the AI services, by `provider|address`.
+    pub models: Mutex<std::collections::HashMap<String, Vec<crate::ai::Model>>>,
     /// The last AI export scanned, waiting for the user to pick what to import.
     pub ai_scan: Mutex<Option<herbarium_core::importer::Scan>>,
 }
@@ -23,6 +25,7 @@ impl AppState {
     pub fn new() -> Self {
         AppState {
             host: Mutex::new(Host::new()),
+            models: Mutex::new(std::collections::HashMap::new()),
             ai_scan: Mutex::new(None),
         }
     }
@@ -755,10 +758,67 @@ pub async fn set_ai_settings(
     }
     let mut cfg = config::load().unwrap_or_default();
     cfg.ai_provider = provider;
+    // Empty means automatic: the service's recommended model at each remix.
     cfg.ai_model = model.to_string();
     cfg.ai_base_url = base_url;
     config::save(&cfg)?;
     Ok(ai_settings_of(&cfg))
+}
+
+#[derive(serde::Serialize)]
+pub struct ModelList {
+    models: Vec<crate::ai::Model>,
+    recommended: Option<String>,
+}
+
+/// The models `provider` offers with its stored key (and, for the current
+/// provider, the configured address), and the one to recommend. Kept for the
+/// session unless `refresh`. Reading the list also proves the key works.
+#[tauri::command]
+pub async fn ai_models(
+    state: State<'_, AppState>,
+    provider: String,
+    refresh: bool,
+) -> CmdResult<ModelList> {
+    let info = crate::ai::provider(&provider)
+        .ok_or_else(|| format!("unknown AI provider `{provider}`"))?;
+    let cfg = config::load().unwrap_or_default();
+    let base = (cfg.ai_provider == provider)
+        .then_some(cfg.ai_base_url)
+        .flatten();
+    let cache_key = format!("{provider}|{}", base.as_deref().unwrap_or_default());
+    let cached = if refresh {
+        None
+    } else {
+        state
+            .models
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(&cache_key)
+            .cloned()
+    };
+    let models = match cached {
+        Some(models) => models,
+        None => {
+            let key = crate::secrets::load().ai_key(&provider);
+            let models = tauri::async_runtime::spawn_blocking(move || {
+                crate::ai::list_models(info, key.as_deref(), base.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            state
+                .models
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(cache_key, models.clone());
+            models
+        }
+    };
+    let recommended = crate::ai::recommend(info, &models);
+    Ok(ModelList {
+        models,
+        recommended,
+    })
 }
 
 /// Remix a page with the configured model and keep the result as a proposal.
@@ -783,9 +843,17 @@ pub async fn remix_page(
     let page_id = id.clone();
     let emitter = app.clone();
     let remixed = tauri::async_runtime::spawn_blocking(move || {
+        // No model saved: the service's recommended one.
+        let model = if cfg.ai_model.trim().is_empty() {
+            crate::ai::provider(&cfg.ai_provider)
+                .map(|p| crate::ai::resolve_model(p, key.as_deref(), cfg.ai_base_url.as_deref()))
+                .unwrap_or_default()
+        } else {
+            cfg.ai_model.clone()
+        };
         let job = crate::remix::Job {
             provider: &cfg.ai_provider,
-            model: &cfg.ai_model,
+            model: &model,
             key: key.as_deref(),
             base_url: cfg.ai_base_url.as_deref(),
             prompt,

@@ -40,7 +40,7 @@ pub const PROVIDERS: &[Provider] = &[
     Provider {
         id: "claude-code",
         label: "Claude Code",
-        default_model: "claude-opus-5-5",
+        default_model: "opus",
         base_url: None,
         needs_key: false,
         key_url: None,
@@ -110,6 +110,292 @@ pub const PROVIDERS: &[Provider] = &[
         key_env: Some("HERBARIUM_AI_KEY"),
     },
 ];
+
+/// A model a service offers, with a readable name when it gives one.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Model {
+    pub id: String,
+    pub name: String,
+}
+
+/// Anthropic's API address; `HERBARIUM_ANTHROPIC_API` points tests elsewhere.
+pub fn anthropic_base() -> String {
+    std::env::var("HERBARIUM_ANTHROPIC_API")
+        .unwrap_or_else(|_| "https://api.anthropic.com".into())
+        .trim_end_matches('/')
+        .to_string()
+}
+
+/// Words in a model id that mean it does not write text (embeddings,
+/// speech, images, moderation…): never offered.
+const NOT_CHAT: &[&str] = &[
+    "embed",
+    "whisper",
+    "tts",
+    "dall-e",
+    "davinci",
+    "babbage",
+    "moderation",
+    "audio",
+    "realtime",
+    "transcribe",
+    "image",
+    "imagen",
+    "search",
+    "computer-use",
+    "ocr",
+    "aqa",
+    "veo",
+    "guard",
+    "rerank",
+    "vision-preview",
+];
+/// Words that mark a smaller, older or experimental variant: offered, but
+/// not recommended.
+const LESSER: &[&str] = &[
+    "mini",
+    "nano",
+    "lite",
+    "tiny",
+    "small",
+    "preview",
+    "exp",
+    "experimental",
+    "instruct",
+    "codex",
+    "deep-research",
+    "0301",
+    "0314",
+    "0613",
+    "16k",
+];
+
+/// Whether a word of `id` starts with one of `words` (`gpt-4o-mini` has
+/// "mini", `gemini` does not); words with a dash match anywhere.
+fn has_any(id: &str, words: &[&str]) -> bool {
+    let id = id.to_ascii_lowercase();
+    let tokens: Vec<&str> = id
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .collect();
+    words.iter().any(|w| {
+        if w.contains('-') {
+            id.contains(w)
+        } else {
+            tokens.iter().any(|t| t.starts_with(w))
+        }
+    })
+}
+
+/// Version numbers in an id, up to the first date-like number:
+/// `gpt-4.1` → [4, 1], `claude-sonnet-4-5-20250929` → [4, 5], `gpt-5-2025-08-07` → [5].
+fn version(id: &str) -> Vec<u32> {
+    let mut out = Vec::new();
+    for part in id
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|p| !p.is_empty())
+    {
+        match part.parse::<u32>() {
+            Ok(n) if n < 1000 && part.len() <= 3 => out.push(n),
+            _ => break,
+        }
+    }
+    out
+}
+
+/// The model to use when the user has not picked one: the best current
+/// model of the service's main family.
+pub fn recommend(provider: &Provider, models: &[Model]) -> Option<String> {
+    if models.is_empty() {
+        return None;
+    }
+    let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+    // Services whose usual model is a moving alias (deepseek-chat,
+    // mistral-large-latest…): keep it when offered.
+    let alias_default = matches!(provider.id, "deepseek" | "mistral" | "openrouter");
+    if alias_default && ids.contains(&provider.default_model) {
+        return Some(provider.default_model.to_string());
+    }
+    let families: &[&str] = match provider.id {
+        "anthropic" | "claude-code" => &["opus", "sonnet"],
+        "openai" => &["gpt", "o"],
+        "gemini" => &["pro", "flash"],
+        "deepseek" => &["chat", "reasoner"],
+        "mistral" => &["large", "medium"],
+        _ => &[],
+    };
+    let main: Vec<&str> = ids
+        .iter()
+        .copied()
+        .filter(|id| !has_any(id, LESSER))
+        .collect();
+    let pool = if main.is_empty() { ids.clone() } else { main };
+    for family in families {
+        let matches: Vec<&str> = pool
+            .iter()
+            .copied()
+            .filter(|id| {
+                let lower = id.to_ascii_lowercase();
+                if *family == "o" {
+                    lower.starts_with('o') && lower[1..].starts_with(|c: char| c.is_ascii_digit())
+                } else {
+                    lower.contains(family)
+                }
+            })
+            .collect();
+        if matches.is_empty() {
+            continue;
+        }
+        // Anthropic lists newest first; elsewhere the highest version wins,
+        // and among equals the plainest id (`gpt-5` over `gpt-5-2025-08-07`).
+        if provider.id == "anthropic" {
+            return Some(matches[0].to_string());
+        }
+        let best = matches
+            .iter()
+            .max_by(|a, b| version(a).cmp(&version(b)).then(b.len().cmp(&a.len())))
+            .copied();
+        return best.map(str::to_string);
+    }
+    if ids.contains(&provider.default_model) {
+        return Some(provider.default_model.to_string());
+    }
+    Some(pool[0].to_string())
+}
+
+/// Make a readable name from an id: `gpt-4.1` → `GPT 4.1`, `llama3.1:8b` → `Llama3.1 8b`.
+fn pretty(id: &str) -> String {
+    let id = id.rsplit('/').next().unwrap_or(id);
+    id.split(['-', '_', ':'])
+        .filter(|w| !w.is_empty())
+        .map(|w| match w {
+            "gpt" => "GPT".to_string(),
+            w if w.chars().all(|c| c.is_ascii_digit() || c == '.') => w.to_string(),
+            w => {
+                let mut c = w.chars();
+                c.next()
+                    .map(|f| f.to_uppercase().chain(c).collect())
+                    .unwrap_or_default()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn http() -> Result<reqwest::blocking::Client, String> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| format!("could not create HTTP client: {e}"))
+}
+
+/// The text models `provider` offers to this key, best first by the service's
+/// own order. Claude Code has no list: its aliases always mean the newest.
+pub fn list_models(
+    provider: &Provider,
+    key: Option<&str>,
+    custom_base: Option<&str>,
+) -> Result<Vec<Model>, String> {
+    if provider.id == "claude-code" {
+        return Ok([
+            ("opus", "Claude Opus (newest)"),
+            ("sonnet", "Claude Sonnet (newest)"),
+            ("haiku", "Claude Haiku (newest)"),
+        ]
+        .iter()
+        .map(|(id, name)| Model {
+            id: id.to_string(),
+            name: name.to_string(),
+        })
+        .collect());
+    }
+    if provider.needs_key && key.is_none() {
+        return Err(format!("add your {} API key first", provider.label));
+    }
+    let client = http()?;
+    let (url, req) = if provider.id == "anthropic" {
+        let url = format!("{}/v1/models?limit=1000", anthropic_base());
+        let req = client
+            .get(&url)
+            .header("x-api-key", key.unwrap_or_default())
+            .header("anthropic-version", "2023-06-01");
+        (url, req)
+    } else {
+        let url = format!("{}/models", base_url(provider, custom_base)?);
+        let mut req = client.get(&url);
+        if let Some(key) = key {
+            req = req.bearer_auth(key);
+        }
+        (url, req)
+    };
+    let resp = req.send().map_err(|e| {
+        if e.is_connect() {
+            format!("could not reach {url} — is the service running?")
+        } else {
+            format!("could not reach the AI service: {e}")
+        }
+    })?;
+    let status = resp.status();
+    let raw = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(error_message(status.as_u16(), &raw));
+    }
+    let body: Value = serde_json::from_str(&raw)
+        .map_err(|_| "the service sent an unreadable model list".to_string())?;
+    // OpenAI style `{data:[…]}`; Ollama's native `{models:[…]}` too.
+    let list = body["data"]
+        .as_array()
+        .or_else(|| body["models"].as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut models = Vec::new();
+    for m in list {
+        let Some(raw_id) = m["id"]
+            .as_str()
+            .or_else(|| m["name"].as_str())
+            .or_else(|| m["model"].as_str())
+        else {
+            continue;
+        };
+        // Gemini names models `models/gemini-…`; the chat API takes the bare id.
+        let id = raw_id.strip_prefix("models/").unwrap_or(raw_id).to_string();
+        if has_any(&id, NOT_CHAT) {
+            continue;
+        }
+        let name = m["display_name"]
+            .as_str()
+            .or_else(|| m["name"].as_str().filter(|n| *n != raw_id))
+            .map(str::to_string)
+            .unwrap_or_else(|| pretty(&id));
+        if !models.iter().any(|x: &Model| x.id == id) {
+            models.push(Model { id, name });
+        }
+    }
+    if provider.id != "anthropic" && provider.id != "openrouter" {
+        // Newest versions first, main models before small ones.
+        models.sort_by(|a, b| {
+            has_any(&a.id, LESSER)
+                .cmp(&has_any(&b.id, LESSER))
+                .then(version(&b.id).cmp(&version(&a.id)))
+                .then(a.id.cmp(&b.id))
+        });
+    }
+    if models.is_empty() {
+        return Err("the service offers no text models to this key".into());
+    }
+    Ok(models)
+}
+
+/// The model to use for `provider` when none was picked: the recommended
+/// one from its list, or its usual model when the list cannot be read.
+pub fn resolve_model(provider: &Provider, key: Option<&str>, custom_base: Option<&str>) -> String {
+    list_models(provider, key, custom_base)
+        .ok()
+        .and_then(|models| recommend(provider, &models))
+        .unwrap_or_else(|| provider.default_model.to_string())
+}
 
 pub fn provider(id: &str) -> Option<&'static Provider> {
     PROVIDERS.iter().find(|p| p.id == id)
@@ -427,5 +713,177 @@ mod tests {
         assert_eq!(body["stream"], true);
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][1]["content"], "remix me");
+    }
+
+    fn ids(list: &[&str]) -> Vec<Model> {
+        list.iter()
+            .map(|id| Model {
+                id: id.to_string(),
+                name: pretty(id),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_best_current_model_is_recommended() {
+        let openai = ids(&[
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-5",
+            "gpt-5-2025-08-07",
+            "gpt-5-mini",
+            "o3",
+            "o4-mini",
+        ]);
+        assert_eq!(
+            recommend(provider("openai").unwrap(), &openai).as_deref(),
+            Some("gpt-5")
+        );
+        let gemini = ids(&[
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-1.5-pro",
+            "gemini-2.5-pro",
+            "gemini-2.5-pro-preview-06-05",
+        ]);
+        assert_eq!(
+            recommend(provider("gemini").unwrap(), &gemini).as_deref(),
+            Some("gemini-2.5-pro")
+        );
+        // Anthropic lists newest first.
+        let claude = ids(&[
+            "claude-opus-5-5",
+            "claude-sonnet-5-5",
+            "claude-haiku-5-5",
+            "claude-opus-4-8",
+        ]);
+        assert_eq!(
+            recommend(provider("anthropic").unwrap(), &claude).as_deref(),
+            Some("claude-opus-5-5")
+        );
+        let deepseek = ids(&["deepseek-reasoner", "deepseek-chat"]);
+        assert_eq!(
+            recommend(provider("deepseek").unwrap(), &deepseek).as_deref(),
+            Some("deepseek-chat")
+        );
+        let mistral = ids(&[
+            "mistral-small-latest",
+            "codestral-latest",
+            "mistral-large-latest",
+            "mistral-large-2411",
+        ]);
+        assert_eq!(
+            recommend(provider("mistral").unwrap(), &mistral).as_deref(),
+            Some("mistral-large-latest")
+        );
+        let ollama = ids(&["qwen2.5:14b", "llama3.1:8b"]);
+        assert_eq!(
+            recommend(provider("ollama").unwrap(), &ollama).as_deref(),
+            Some("qwen2.5:14b")
+        );
+        assert_eq!(recommend(provider("openai").unwrap(), &[]), None);
+        assert_eq!(version("claude-sonnet-4-5-20250929"), vec![4, 5]);
+        assert_eq!(version("gpt-5-2025-08-07"), vec![5]);
+        assert_eq!(pretty("gpt-4.1-mini"), "GPT 4.1 Mini");
+        assert_eq!(pretty("llama3.1:8b"), "Llama3.1 8b");
+    }
+
+    /// A one-request HTTP server answering `body` (JSON) with `status`.
+    fn serve(status: &'static str, body: Value) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::Write;
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}/v1", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(sock.try_clone().unwrap());
+            let mut head = String::new();
+            loop {
+                let mut line = String::new();
+                reader.read_line(&mut line).unwrap();
+                head.push_str(&line);
+                if line == "\r\n" {
+                    break;
+                }
+            }
+            let body = body.to_string();
+            write!(sock, "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\n\r\n{body}", body.len()).unwrap();
+            head
+        });
+        (base, handle)
+    }
+
+    #[test]
+    fn model_lists_are_read_and_filtered() {
+        let (base, server) = serve(
+            "200 OK",
+            json!({ "object": "list", "data": [
+                { "id": "gpt-4o", "object": "model" },
+                { "id": "text-embedding-3-large" },
+                { "id": "whisper-1" },
+                { "id": "gpt-5-mini" },
+                { "id": "dall-e-3" },
+                { "id": "gpt-5" },
+                { "id": "gpt-4o-realtime-preview" },
+                { "id": "omni-moderation-latest" }
+            ] }),
+        );
+        let models = list_models(provider("custom").unwrap(), Some("k"), Some(&base)).unwrap();
+        let got: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(
+            got,
+            ["gpt-5", "gpt-4o", "gpt-5-mini"],
+            "text models, newest and main first"
+        );
+        assert_eq!(models[0].name, "GPT 5");
+        let head = server.join().unwrap().to_ascii_lowercase();
+        assert!(head.starts_with("get /v1/models "));
+        assert!(head.contains("authorization: bearer k"));
+
+        // Gemini names models `models/…`; the list keeps the bare id.
+        let (base, server) = serve(
+            "200 OK",
+            json!({ "data": [{ "id": "models/gemini-2.5-pro" }, { "id": "models/text-embedding-004" }] }),
+        );
+        let models = list_models(provider("gemini").unwrap(), Some("k"), Some(&base)).unwrap();
+        assert_eq!(
+            models,
+            vec![Model {
+                id: "gemini-2.5-pro".into(),
+                name: "Gemini 2.5 Pro".into()
+            }]
+        );
+        server.join().unwrap();
+
+        let (base, server) = serve(
+            "401 Unauthorized",
+            json!({ "error": { "message": "Incorrect API key provided" } }),
+        );
+        let err = list_models(provider("openai").unwrap(), Some("bad"), Some(&base)).unwrap_err();
+        assert!(err.contains("refused"), "{err}");
+        server.join().unwrap();
+
+        assert!(
+            list_models(provider("deepseek").unwrap(), None, None)
+                .unwrap_err()
+                .contains("API key")
+        );
+        let cli = list_models(provider("claude-code").unwrap(), None, None).unwrap();
+        assert_eq!(cli[0].id, "opus");
+        // Nothing reachable: the usual model.
+        assert_eq!(
+            resolve_model(
+                provider("custom").unwrap(),
+                None,
+                Some("http://127.0.0.1:9/v1")
+            ),
+            ""
+        );
+        assert_eq!(
+            resolve_model(provider("claude-code").unwrap(), None, None),
+            "opus"
+        );
     }
 }

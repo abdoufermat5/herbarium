@@ -304,7 +304,7 @@ options:
   --provider <id>         anthropic, claude-code, openai, gemini, deepseek, mistral,
                           openrouter, ollama or custom (default: the app setting)
   --claude-code           same as --provider claude-code
-  --model <model>         default: the app setting, or the provider's usual model
+  --model <model>         default: the app setting, or the service's recommended model
   --base-url <url>        the API address (custom, or Ollama elsewhere)
   -h, --help              show this help
 
@@ -375,19 +375,20 @@ pub fn run_remix(args: &[String]) -> i32 {
             .map(|k| k.trim().to_string())
             .filter(|k| !k.is_empty())
             .or_else(|| crate::secrets::load().ai_key(&provider_id));
-        // A provider picked here uses its usual model unless one is given.
-        let model = model.clone().unwrap_or_else(|| {
-            if provider.is_some() && provider_id != cfg.ai_provider {
-                info.default_model.to_string()
-            } else {
-                cfg.ai_model.clone()
-            }
-        });
         let base_url = base_url.clone().or_else(|| {
             (provider_id == cfg.ai_provider)
                 .then(|| cfg.ai_base_url.clone())
                 .flatten()
         });
+        // No model named: the app's choice for its own service, else the
+        // service's recommended model.
+        let model = match model.clone() {
+            Some(m) => m,
+            None if provider_id == cfg.ai_provider && !cfg.ai_model.trim().is_empty() => {
+                cfg.ai_model.clone()
+            }
+            None => crate::ai::resolve_model(info, key.as_deref(), base_url.as_deref()),
+        };
         let mut host = Host::new();
         host.open_vault(&resolve_vault(vault.clone())?)?;
         let (prompt, base) = crate::remix::prompt_for(&host, id, &preset, &instructions)?;
