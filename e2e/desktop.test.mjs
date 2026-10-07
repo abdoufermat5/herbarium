@@ -151,7 +151,7 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     await app.click("Remix", "[role=dialog] .btn-primary");
     // The comparison panel opens on the proposal; the page waits for approval.
     await app.waitFor(() => app.exec(() => !!document.querySelector(".panel[role=dialog]")), "the proposal panel", 30000);
-    await app.find("Remixed by Claude", ".panel .eyebrow");
+    await app.find("Remixed with AI", ".panel .eyebrow");
     await shot("remix-proposal");
     assert.match(welcome().html, /Welcome to your herbarium/);
     const prompt = readFileSync(join(work, "claude.stdin"), "utf8");
@@ -210,6 +210,14 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     await app.click("Settings", "aside button, nav button, button");
     await app.click("AI & sharing", "[role=tab]");
     await app.waitText("Remix with");
+    // Another AI service: its key field and usual model.
+    await app.click("Remix with", "button[aria-haspopup]");
+    await app.click("DeepSeek", "[role=option]");
+    await app.waitText("DeepSeek API key");
+    await app.waitFor(() => {
+      const cfg = JSON.parse(readFileSync(join(work, "config", "io.herbarium.desktop", "config.json"), "utf8"));
+      return cfg.aiProvider === "deepseek" && cfg.aiModel === "deepseek-chat";
+    }, "the provider saved");
     await app.waitText("Connected as octo.");
     await app.waitText("https://octo.github.io/herbarium-pages/");
   });

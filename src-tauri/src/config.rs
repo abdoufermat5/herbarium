@@ -42,6 +42,10 @@ pub struct Config {
     pub ai_provider: String,
     #[serde(default = "default_ai_model")]
     pub ai_model: String,
+    /// The API address for a custom OpenAI-compatible service (or to reach
+    /// Ollama on another machine).
+    #[serde(default)]
+    pub ai_base_url: Option<String>,
     /// The GitHub account the stored token belongs to.
     #[serde(default)]
     pub github_login: Option<String>,
@@ -75,6 +79,7 @@ impl Default for Config {
             watch_clipboard: false,
             ai_provider: default_ai_provider(),
             ai_model: default_ai_model(),
+            ai_base_url: None,
             github_login: None,
             publish_repo: default_publish_repo(),
         }

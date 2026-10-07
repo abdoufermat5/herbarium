@@ -371,6 +371,8 @@ pub struct Job<'a> {
     pub provider: &'a str,
     pub model: &'a str,
     pub key: Option<&'a str>,
+    /// For OpenAI-compatible services: a custom API address.
+    pub base_url: Option<&'a str>,
     pub prompt: String,
 }
 
@@ -380,11 +382,22 @@ pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, Stri
         "anthropic" => {
             let key = job
                 .key
-                .ok_or("add your Anthropic API key in Settings → AI first")?;
+                .ok_or("add your Anthropic API key in Settings → AI & sharing first")?;
             ask_api(key, job.model, &job.prompt, progress)?
         }
         "claude-code" => ask_claude_code(job.model, &job.prompt, progress)?,
-        other => return Err(format!("unknown AI provider `{other}`")),
+        other => {
+            let provider = crate::ai::provider(other)
+                .ok_or_else(|| format!("unknown AI provider `{other}`"))?;
+            if provider.needs_key && job.key.is_none() {
+                return Err(format!(
+                    "add your {} API key in Settings → AI & sharing first",
+                    provider.label
+                ));
+            }
+            let base = crate::ai::base_url(provider, job.base_url)?;
+            crate::ai::ask_chat(&base, job.key, job.model, SYSTEM, &job.prompt, progress)?
+        }
     };
     let html = extract_html(&answer).ok_or("the answer held no HTML page")?;
     if !herbarium_core::content::looks_like_html(&html) {

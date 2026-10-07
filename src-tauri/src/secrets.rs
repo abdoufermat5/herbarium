@@ -15,6 +15,35 @@ pub struct Secrets {
     pub anthropic_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub github_token: Option<String>,
+    /// Keys for the other AI services, by provider id (see ai.rs).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub ai_keys: std::collections::BTreeMap<String, String>,
+}
+
+impl Secrets {
+    /// The stored key for an AI provider.
+    pub fn ai_key(&self, provider: &str) -> Option<String> {
+        if provider == "anthropic" {
+            self.anthropic_key.clone()
+        } else {
+            self.ai_keys.get(provider).cloned()
+        }
+    }
+
+    fn set_ai_key(&mut self, provider: &str, key: Option<String>) {
+        if provider == "anthropic" {
+            self.anthropic_key = key;
+        } else if let Some(key) = key {
+            self.ai_keys.insert(provider.to_string(), key);
+        } else {
+            self.ai_keys.remove(provider);
+        }
+    }
+}
+
+/// Store or clear (blank) the key for an AI provider.
+pub fn set_ai_key(provider: &str, key: Option<String>) -> Result<(), String> {
+    set(|s, v| s.set_ai_key(provider, v), key)
 }
 
 fn path() -> Result<PathBuf, String> {

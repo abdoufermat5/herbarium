@@ -487,9 +487,9 @@ export const api = {
     return invoke("ai_settings");
   },
 
-  /** `key`: a new Anthropic API key, "" to remove it, or undefined to keep it. */
-  setAiSettings(provider: AiProvider, model: string, key?: string): Promise<AiSettings> {
-    return invoke("set_ai_settings", { provider, model, key });
+  /** `key`: a new key for `provider`, "" to remove it, or undefined to keep it. */
+  setAiSettings(provider: AiProvider, model: string, baseUrl: string | null, key?: string): Promise<AiSettings> {
+    return invoke("set_ai_settings", { provider, model, baseUrl, key });
   },
 
   /** Remix a page with the configured model; the result waits as a proposal. */

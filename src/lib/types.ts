@@ -382,13 +382,27 @@ export interface EditorInfo {
   name: string;
 }
 
-export type AiProvider = "anthropic" | "claude-code";
+export type AiProvider = string;
+
+/** An AI service a remix can use. */
+export interface AiProviderInfo {
+  id: AiProvider;
+  label: string;
+  defaultModel: string;
+  /** The OpenAI-compatible API address; null for Anthropic, Claude Code and custom. */
+  baseUrl: string | null;
+  needsKey: boolean;
+  keyUrl: string | null;
+}
 
 export interface AiSettings {
   provider: AiProvider;
   model: string;
-  /** Whether an Anthropic API key is stored. */
-  hasKey: boolean;
+  /** A custom API address (custom services, or Ollama elsewhere). */
+  baseUrl: string | null;
+  /** Providers with a stored key (the keys stay in the backend). */
+  keys: AiProvider[];
+  providers: AiProviderInfo[];
 }
 
 export type RemixPreset = "simplify" | "deeper" | "quiz" | "translate" | "cheatsheet" | "modernize" | "custom";

@@ -702,15 +702,24 @@ mod tests {
 pub struct AiSettings {
     provider: String,
     model: String,
-    /// Whether an Anthropic API key is stored (the key never leaves the backend).
-    has_key: bool,
+    base_url: Option<String>,
+    /// Providers with a stored key (the keys never leave the backend).
+    keys: Vec<&'static str>,
+    providers: &'static [crate::ai::Provider],
 }
 
 fn ai_settings_of(cfg: &Config) -> AiSettings {
+    let secrets = crate::secrets::load();
     AiSettings {
         provider: cfg.ai_provider.clone(),
         model: cfg.ai_model.clone(),
-        has_key: crate::secrets::load().anthropic_key.is_some(),
+        base_url: cfg.ai_base_url.clone(),
+        keys: crate::ai::PROVIDERS
+            .iter()
+            .filter(|p| secrets.ai_key(p.id).is_some())
+            .map(|p| p.id)
+            .collect(),
+        providers: crate::ai::PROVIDERS,
     }
 }
 
@@ -719,27 +728,35 @@ pub async fn ai_settings() -> AiSettings {
     ai_settings_of(&config::load().unwrap_or_default())
 }
 
-/// Change the AI provider and model; `key` stores (or, blank, removes) the
-/// Anthropic API key, and is left alone when absent.
+/// Change the AI provider, model and API address; `key` stores (or, blank,
+/// removes) that provider's key, and is left alone when absent.
 #[tauri::command]
 pub async fn set_ai_settings(
     provider: String,
     model: String,
+    base_url: Option<String>,
     key: Option<String>,
 ) -> CmdResult<AiSettings> {
-    if !matches!(provider.as_str(), "anthropic" | "claude-code") {
+    if crate::ai::provider(&provider).is_none() {
         return Err(format!("unknown AI provider `{provider}`"));
     }
     let model = model.trim();
-    if model.is_empty() || model.len() > 100 || model.chars().any(char::is_whitespace) {
+    if model.len() > 200 || model.chars().any(char::is_whitespace) {
         return Err("enter a model name such as claude-opus-5-5".into());
     }
+    let base_url = base_url
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    if let Some(url) = &base_url {
+        crate::ai::check_url(url)?;
+    }
     if key.is_some() {
-        crate::secrets::set(|s, v| s.anthropic_key = v, key)?;
+        crate::secrets::set_ai_key(&provider, key)?;
     }
     let mut cfg = config::load().unwrap_or_default();
     cfg.ai_provider = provider;
     cfg.ai_model = model.to_string();
+    cfg.ai_base_url = base_url;
     config::save(&cfg)?;
     Ok(ai_settings_of(&cfg))
 }
@@ -761,7 +778,7 @@ pub async fn remix_page(
         crate::remix::prompt_for(&state.host, &id, &preset, &instructions)?;
 
     let cfg = config::load().unwrap_or_default();
-    let key = crate::secrets::load().anthropic_key;
+    let key = crate::secrets::load().ai_key(&cfg.ai_provider);
     crate::remix::CANCEL.store(false, Ordering::Relaxed);
     let page_id = id.clone();
     let emitter = app.clone();
@@ -770,6 +787,7 @@ pub async fn remix_page(
             provider: &cfg.ai_provider,
             model: &cfg.ai_model,
             key: key.as_deref(),
+            base_url: cfg.ai_base_url.as_deref(),
             prompt,
         };
         crate::remix::run(job, |chars| {

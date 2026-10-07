@@ -1,3 +1,4 @@
+mod ai;
 mod ai_import;
 mod capture;
 pub mod cli;

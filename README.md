@@ -39,7 +39,7 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 - **Review** pages with adaptive scheduling (FSRS): grade each review Again, Hard, Good or Easy and pick the retention you want, with reminders and a keyboard-driven review session.
 - **Quiz** yourself: answers a page marks with `data-herbarium-recall` stay hidden until you reveal them.
 - **Highlight** passages in a page and write notes in the margin; they are searchable and come back during review.
-- **Remix with Claude**: simplify a page, explain it deeper, add quiz questions, translate it or turn it into a cheat sheet, then compare the result and accept it. Uses your Anthropic API key or Claude Code (`herbarium remix`).
+- **Remix with AI**: simplify a page, explain it deeper, add quiz questions, translate it or turn it into a cheat sheet, then compare the result and accept it. Works with Claude (API key or Claude Code), OpenAI, Gemini, DeepSeek, Mistral, OpenRouter, a local Ollama or any OpenAI-compatible service (`herbarium remix`).
 - **Share** a page as a secret gist or on your own GitHub Pages site, or copy a share card to paste anywhere (`herbarium publish`).
 - **See** your library as a graph of links, with page previews, icons and colours for pages, folders and tags, and a health check that explains why a page does not work.
 - **Remember the source**: the page, tool and prompt each page came from.
@@ -58,7 +58,7 @@ A vault is an ordinary folder. Each page is an `.html` file with a `.json` file 
 
 Generated HTML runs code, so every page is treated as untrusted. It runs in a sandbox that cannot reach your files, the app or other pages, and it cannot navigate away; links open in your browser only after you confirm.
 
-Pages saved from the browser start with network access off, with their images and styles inlined. API keys and the GitHub token stay in a file only you can read and are sent only to Anthropic and GitHub; nothing is published without your confirmation.
+Pages saved from the browser start with network access off, with their images and styles inlined. API keys and the GitHub token stay in a file only you can read and are sent only to the service they belong to; nothing is published without your confirmation.
 
 Network access is a per-page switch. When on, a page can load scripts and fonts from well-known CDNs and images from any website, which means it can tell its author when you open it. Keep it off for pages you don't trust.
 

@@ -145,3 +145,82 @@ test("herbarium remix leaves the model's page as a proposal", async () => {
     api.server.close();
   }
 });
+
+/** An OpenAI-compatible chat completions server (DeepSeek, Gemini, Ollama…). */
+async function fakeChatApi() {
+  const state = { requests: [] };
+  const server = createServer(async (req, res) => {
+    let raw = "";
+    for await (const chunk of req) raw += chunk;
+    state.requests.push({ url: req.url, headers: req.headers, body: JSON.parse(raw) });
+    if (req.headers.authorization && req.headers.authorization !== "Bearer ds-good") {
+      res.writeHead(401, { "content-type": "application/json" });
+      return res.end(JSON.stringify({ error: { message: "Authentication Fails", type: "authentication_error" } }));
+    }
+    const html = remixed(`Remixed by ${JSON.parse(raw).model}`);
+    const chunks = [html.slice(0, 40), html.slice(40)];
+    res.writeHead(200, { "content-type": "text/event-stream" });
+    res.end(
+      [
+        { choices: [{ delta: { role: "assistant", content: "" } }] },
+        { choices: [{ delta: { reasoning_content: "Planning the page." } }] },
+        { choices: [{ delta: { content: "```html\n" + chunks[0] } }] },
+        { choices: [{ delta: { content: chunks[1] + "\n```" }, finish_reason: "stop" }] },
+      ]
+        .map((e) => `data: ${JSON.stringify(e)}\n\n`)
+        .join("") + "data: [DONE]\n\n",
+    );
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  return { state, server, base: `http://127.0.0.1:${server.address().port}/v1` };
+}
+
+test("herbarium remix works with OpenAI-compatible services (DeepSeek, custom)", async () => {
+  const work = tempDir("remix-chat");
+  dirs.push(work);
+  const vault = join(work, "vault");
+  const api = await fakeChatApi();
+  const env = { HOME: work, XDG_CONFIG_HOME: join(work, "config"), DEEPSEEK_API_KEY: "ds-good", HERBARIUM_AI_KEY: "" };
+  try {
+    writeFileSync(join(work, "lesson.html"), "<!doctype html><title>Lesson</title><p>Original text</p>");
+    let r = await run(["add", "--vault", vault, join(work, "lesson.html")], env);
+    assert.equal(r.code, 0, r.stderr);
+    const id = r.stdout.split("\t")[0];
+    const proposal = join(vault, ".herbarium", "proposals", `${id}.html`);
+
+    // DeepSeek: its key from DEEPSEEK_API_KEY, its usual model.
+    r = await run(["remix", "--vault", vault, "--provider", "deepseek", "--base-url", api.base, "--preset", "simplify", id], env);
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(readFileSync(proposal, "utf8"), remixed("Remixed by deepseek-chat"));
+    let req = api.state.requests.at(-1);
+    assert.equal(req.url, "/v1/chat/completions");
+    assert.equal(req.headers.authorization, "Bearer ds-good");
+    assert.equal(req.body.stream, true);
+    assert.equal(req.body.messages[0].role, "system");
+    assert.match(req.body.messages[1].content, /plainer words[\s\S]*Original text/);
+
+    r = await run(["remix", "--vault", vault, "--provider", "deepseek", "--base-url", api.base, id], { ...env, DEEPSEEK_API_KEY: "nope" });
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /key was refused: Authentication Fails/);
+
+    // A custom service (a local server, no key), with the model named.
+    r = await run(["remix", "--vault", vault, "--provider", "custom", "--base-url", api.base, "--model", "qwen2.5-coder", id], env);
+    assert.equal(r.code, 0, r.stderr);
+    req = api.state.requests.at(-1);
+    assert.equal(req.headers.authorization, undefined);
+    assert.equal(readFileSync(proposal, "utf8"), remixed("Remixed by qwen2.5-coder"));
+
+    // Missing pieces are explained.
+    r = await run(["remix", "--vault", vault, "--provider", "custom", id], env);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /address of the API/);
+    r = await run(["remix", "--vault", vault, "--provider", "gemini", id], env);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /Google Gemini API key/);
+    r = await run(["remix", "--vault", vault, "--provider", "custom", "--base-url", "http://example.com/v1", "--model", "m", id], env);
+    assert.equal(r.code, 1);
+    assert.match(r.stderr, /use https/);
+  } finally {
+    api.server.close();
+  }
+});

@@ -33,7 +33,8 @@
   let unlisten: UnlistenFn | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
 
-  const needsKey = $derived(settings?.provider === "anthropic" && !settings.hasKey);
+  const provider = $derived(settings?.providers.find((p) => p.id === settings?.provider) ?? null);
+  const needsKey = $derived(!!settings && !!provider?.needsKey && !settings.keys.includes(settings.provider));
   const extra = $derived(preset === "translate" ? language.trim() : instructions.trim());
   const ready = $derived(
     !!settings && !needsKey && !busy && (preset === "translate" || preset === "custom" ? extra.length > 0 : true),
@@ -117,7 +118,7 @@
 
     {#if needsKey}
       <div class="notice">
-        <span>{t("remix.needsKey")}</span>
+        <span>{t("remix.needsKey", { provider: provider?.label ?? "" })}</span>
         <button class="btn btn-sm" onclick={toSettings}>{t("remix.openSettings")}</button>
       </div>
     {/if}
@@ -165,7 +166,7 @@
           <span class="spinner"></span>
           {chars > 0 ? t("remix.writing", { chars: chars.toLocaleString(), seconds: elapsed }) : t("remix.thinking", { seconds: elapsed })}
         {:else if settings}
-          {settings.provider === "claude-code" ? t("remix.viaCli", { model: settings.model }) : t("remix.viaApi", { model: settings.model })}
+          {t("remix.via", { provider: provider?.label ?? settings.provider, model: settings.model })}
         {/if}
       </span>
       <div class="buttons">

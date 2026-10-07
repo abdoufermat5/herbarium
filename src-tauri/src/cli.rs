@@ -301,18 +301,24 @@ options:
   --preset <name>         simplify, deeper, quiz, translate, cheatsheet, modernize or custom
                           (default: custom when --instructions is given, else simplify)
   --instructions <text>   what to change (for translate: the language)
-  --claude-code           use the claude command line instead of the API
-  --model <model>         default: the app setting, claude-opus-5-5
+  --provider <id>         anthropic, claude-code, openai, gemini, deepseek, mistral,
+                          openrouter, ollama or custom (default: the app setting)
+  --claude-code           same as --provider claude-code
+  --model <model>         default: the app setting, or the provider's usual model
+  --base-url <url>        the API address (custom, or Ollama elsewhere)
   -h, --help              show this help
 
-The API key is ANTHROPIC_API_KEY, or the one saved in the app.";
+The key comes from the provider's variable (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+GEMINI_API_KEY, DEEPSEEK_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY,
+HERBARIUM_AI_KEY for custom), or the one saved in the app.";
 
 pub fn run_remix(args: &[String]) -> i32 {
     let mut vault = None;
     let mut preset = None;
     let mut instructions = String::new();
     let mut model = None;
-    let mut claude_code = false;
+    let mut provider = None;
+    let mut base_url = None;
     let mut ids = Vec::new();
     let mut i = 0;
     while i < args.len() {
@@ -327,8 +333,10 @@ pub fn run_remix(args: &[String]) -> i32 {
                 take_value(args, &mut i, "--instructions").map(|v| instructions = v)
             }
             "--model" => take_value(args, &mut i, "--model").map(|v| model = Some(v)),
+            "--provider" => take_value(args, &mut i, "--provider").map(|v| provider = Some(v)),
+            "--base-url" => take_value(args, &mut i, "--base-url").map(|v| base_url = Some(v)),
             "--claude-code" => {
-                claude_code = true;
+                provider = Some("claude-code".to_string());
                 i += 1;
                 Ok(())
             }
@@ -358,21 +366,36 @@ pub fn run_remix(args: &[String]) -> i32 {
     });
     let run = || -> Result<Value, String> {
         let cfg = crate::config::load()?;
-        let key = std::env::var("ANTHROPIC_API_KEY")
-            .ok()
-            .filter(|k| !k.trim().is_empty())
-            .or(crate::secrets::load().anthropic_key);
+        let provider_id = provider.clone().unwrap_or_else(|| cfg.ai_provider.clone());
+        let info = crate::ai::provider(&provider_id)
+            .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+        let key = info
+            .key_env
+            .and_then(|var| std::env::var(var).ok())
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .or_else(|| crate::secrets::load().ai_key(&provider_id));
+        // A provider picked here uses its usual model unless one is given.
+        let model = model.clone().unwrap_or_else(|| {
+            if provider.is_some() && provider_id != cfg.ai_provider {
+                info.default_model.to_string()
+            } else {
+                cfg.ai_model.clone()
+            }
+        });
+        let base_url = base_url.clone().or_else(|| {
+            (provider_id == cfg.ai_provider)
+                .then(|| cfg.ai_base_url.clone())
+                .flatten()
+        });
         let mut host = Host::new();
         host.open_vault(&resolve_vault(vault.clone())?)?;
         let (prompt, base) = crate::remix::prompt_for(&host, id, &preset, &instructions)?;
         let job = crate::remix::Job {
-            provider: if claude_code {
-                "claude-code"
-            } else {
-                "anthropic"
-            },
-            model: model.as_deref().unwrap_or(&cfg.ai_model),
-            key: key.as_deref().map(str::trim),
+            provider: &provider_id,
+            model: &model,
+            key: key.as_deref(),
+            base_url: base_url.as_deref(),
             prompt,
         };
         let html = crate::remix::run(job, |_| true)?;
