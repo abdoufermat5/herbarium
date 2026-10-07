@@ -390,3 +390,25 @@ export interface AiSettings {
 }
 
 export type RemixPreset = "simplify" | "deeper" | "quiz" | "translate" | "cheatsheet" | "modernize" | "custom";
+
+export interface GithubSettings {
+  hasToken: boolean;
+  /** The account the token belongs to. */
+  login: string | null;
+  /** Repository of the GitHub Pages site. */
+  repo: string;
+}
+
+export type PublishTarget = "gist" | "site";
+
+/** Where a page was published. */
+export interface PublishRecord {
+  url: string;
+  title?: string;
+  at: number;
+  /** The gist's id (gist). */
+  id?: string;
+  /** `login/repo` and the file's path (site). */
+  repo?: string;
+  path?: string;
+}

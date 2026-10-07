@@ -15,6 +15,7 @@ pub use pages::import_key;
 mod paths;
 mod previews;
 mod proposals;
+mod published;
 mod review;
 mod samples;
 mod searches;
@@ -43,6 +44,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(previews::Previews),
         Box::new(highlights::Highlights),
         Box::new(health::Health),
+        Box::new(published::Published),
     ]
 }
 

@@ -54,7 +54,7 @@ fn escape(text: &str) -> String {
 }
 
 /// The site's front page: every page by folder, with its tags.
-fn index_html(title: &str, pages: &[ExportPage]) -> String {
+pub fn index_html(title: &str, pages: &[ExportPage]) -> String {
     let mut by_folder: BTreeMap<String, Vec<&ExportPage>> = BTreeMap::new();
     for page in pages {
         by_folder

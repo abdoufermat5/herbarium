@@ -30,6 +30,7 @@
   import { ICON_CHOICES, tagColor } from "../lib/appearance";
   import ProposalPanel from "./ProposalPanel.svelte";
   import RemixDialog from "./RemixDialog.svelte";
+  import ShareMenu from "./ShareMenu.svelte";
   import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
@@ -1393,6 +1394,7 @@
           <Icon name="sparkle" size={14} />
           {t("remix.action")}
         </button>
+        <ShareMenu id={page.meta.id} title={page.meta.title} html={source} disabled={pageGone} />
         <button
           class="btn btn-sm details-btn"
           class:active={app.historyOpen}
@@ -2079,6 +2081,14 @@
     align-items: center;
     gap: 6px;
     flex: none;
+  }
+
+  /* Narrow windows: icons only (every button keeps its tooltip). */
+  @media (max-width: 1240px) {
+    .actions :global(.btn.btn-sm) {
+      font-size: 0;
+      gap: 0;
+    }
   }
 
   .net.on {

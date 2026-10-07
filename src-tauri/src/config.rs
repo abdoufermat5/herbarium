@@ -42,6 +42,16 @@ pub struct Config {
     pub ai_provider: String,
     #[serde(default = "default_ai_model")]
     pub ai_model: String,
+    /// The GitHub account the stored token belongs to.
+    #[serde(default)]
+    pub github_login: Option<String>,
+    /// Repository of the GitHub Pages site pages are published to.
+    #[serde(default = "default_publish_repo")]
+    pub publish_repo: String,
+}
+
+fn default_publish_repo() -> String {
+    "herbarium-pages".into()
 }
 
 fn default_ai_provider() -> String {
@@ -65,6 +75,8 @@ impl Default for Config {
             watch_clipboard: false,
             ai_provider: default_ai_provider(),
             ai_model: default_ai_model(),
+            github_login: None,
+            publish_repo: default_publish_repo(),
         }
     }
 }

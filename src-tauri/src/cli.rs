@@ -57,6 +57,8 @@ usage:
   herbarium                              open the desktop app
   herbarium add [options] <file|-|url>…  save pages into the vault
   herbarium import [options] <export>    import artifacts from a Claude or ChatGPT data export
+  herbarium publish [options] <page-id>  share a page as a gist or on your GitHub Pages site
+  herbarium remix [options] <page-id>    rework a page with Claude; the result waits for approval
   herbarium mcp [--vault <path>]         serve the MCP protocol on stdin/stdout
   herbarium native-host install          connect the browser extension
   herbarium help                         show this help
@@ -205,6 +207,192 @@ options:
 Exit status: 0 on success, 1 when any artifact failed, 2 on a usage error.";
 
 /// `herbarium import …`: returns the exit status.
+pub const PUBLISH_USAGE: &str = "usage: herbarium publish [options] <page-id>
+
+Publish a page, as a self-contained file, with your GitHub account and print
+its address. Publishing again updates it.
+
+options:
+  --vault <path>   vault to read from (default: HERBARIUM_VAULT, then the app's last vault)
+  --gist           as a secret gist: anyone with the link can see it (default)
+  --site           on your GitHub Pages site, a public website (repository: --repo)
+  --repo <name>    the site's repository (default: the app setting, herbarium-pages)
+  --unpublish      take the page down instead
+  -h, --help       show this help
+
+The GitHub token is GITHUB_TOKEN, or the one saved in the app.";
+
+pub fn run_publish(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut target = "gist";
+    let mut repo = None;
+    let mut unpublish = false;
+    let mut ids = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{PUBLISH_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--repo" => take_value(args, &mut i, "--repo").map(|v| repo = Some(v)),
+            flag @ ("--gist" | "--site" | "--unpublish") => {
+                match flag {
+                    "--gist" => target = "gist",
+                    "--site" => target = "site",
+                    _ => unpublish = true,
+                }
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                ids.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium publish: {e}\n\n{PUBLISH_USAGE}");
+            return 2;
+        }
+    }
+    let [id] = ids.as_slice() else {
+        eprintln!("herbarium publish: pass exactly one page id\n\n{PUBLISH_USAGE}");
+        return 2;
+    };
+    let run = || -> Result<Value, String> {
+        let token = std::env::var("GITHUB_TOKEN")
+            .ok()
+            .filter(|t| !t.trim().is_empty())
+            .or(crate::secrets::load().github_token)
+            .ok_or("no GitHub token: set GITHUB_TOKEN or connect GitHub in the app")?;
+        let repo = match repo.clone() {
+            Some(r) => r,
+            None => crate::config::load()?.publish_repo,
+        };
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        crate::publish::run(&host, token.trim(), id, target, &repo, unpublish)
+    };
+    match run() {
+        Ok(info) => {
+            match info["url"].as_str() {
+                Some(url) => println!("{url}"),
+                None => println!("unpublished {id}"),
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("herbarium publish: {e}");
+            1
+        }
+    }
+}
+
+pub const REMIX_USAGE: &str = "usage: herbarium remix [options] <page-id>
+
+Rework a page with Claude. The new version is kept as a proposal: compare it
+with the page and accept or reject it in the app.
+
+options:
+  --vault <path>          vault to use (default: HERBARIUM_VAULT, then the app's last vault)
+  --preset <name>         simplify, deeper, quiz, translate, cheatsheet, modernize or custom
+                          (default: custom when --instructions is given, else simplify)
+  --instructions <text>   what to change (for translate: the language)
+  --claude-code           use the claude command line instead of the API
+  --model <model>         default: the app setting, claude-opus-5-5
+  -h, --help              show this help
+
+The API key is ANTHROPIC_API_KEY, or the one saved in the app.";
+
+pub fn run_remix(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut preset = None;
+    let mut instructions = String::new();
+    let mut model = None;
+    let mut claude_code = false;
+    let mut ids = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{REMIX_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--preset" => take_value(args, &mut i, "--preset").map(|v| preset = Some(v)),
+            "--instructions" => {
+                take_value(args, &mut i, "--instructions").map(|v| instructions = v)
+            }
+            "--model" => take_value(args, &mut i, "--model").map(|v| model = Some(v)),
+            "--claude-code" => {
+                claude_code = true;
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                ids.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium remix: {e}\n\n{REMIX_USAGE}");
+            return 2;
+        }
+    }
+    let [id] = ids.as_slice() else {
+        eprintln!("herbarium remix: pass exactly one page id\n\n{REMIX_USAGE}");
+        return 2;
+    };
+    let preset = preset.unwrap_or_else(|| {
+        if instructions.trim().is_empty() {
+            "simplify"
+        } else {
+            "custom"
+        }
+        .to_string()
+    });
+    let run = || -> Result<Value, String> {
+        let cfg = crate::config::load()?;
+        let key = std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty())
+            .or(crate::secrets::load().anthropic_key);
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        let (prompt, base) = crate::remix::prompt_for(&host, id, &preset, &instructions)?;
+        let job = crate::remix::Job {
+            provider: if claude_code {
+                "claude-code"
+            } else {
+                "anthropic"
+            },
+            model: model.as_deref().unwrap_or(&cfg.ai_model),
+            key: key.as_deref().map(str::trim),
+            prompt,
+        };
+        let html = crate::remix::run(job, |_| true)?;
+        crate::remix::propose(&host, id, &html, base)
+    };
+    match run() {
+        Ok(proposal) => {
+            println!(
+                "proposal ready for {id}: {}",
+                proposal["title"].as_str().unwrap_or_default()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("herbarium remix: {e}");
+            1
+        }
+    }
+}
+
 pub fn run_import(args: &[String]) -> i32 {
     let mut vault = None;
     let mut folder = None;

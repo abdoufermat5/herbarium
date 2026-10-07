@@ -757,37 +757,8 @@ pub async fn remix_page(
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
 
-    let (page, highlights) = {
-        let host = state.host.lock().map_err(|e| e.to_string())?;
-        let page = host.call(
-            Caller::Ui,
-            "pages.get",
-            json!({ "id": id, "format": "html" }),
-        )?;
-        let highlights = host.call(Caller::Ui, "highlights.list", json!({ "page": id }))?;
-        (page, highlights)
-    };
-    let html = page["html"].as_str().unwrap_or_default();
-    crate::remix::check_size(html)?;
-    let highlights: Vec<(String, String)> = highlights
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|h| {
-            (
-                h["quote"].as_str().unwrap_or_default().to_string(),
-                h["note"].as_str().unwrap_or_default().to_string(),
-            )
-        })
-        .collect();
-    let prompt = crate::remix::user_prompt(
-        &preset,
-        &instructions,
-        page["meta"]["title"].as_str().unwrap_or_default(),
-        &highlights,
-        html,
-    )?;
-    let base_updated_at = page["meta"]["updatedAt"].clone();
+    let (prompt, base_updated_at) =
+        crate::remix::prompt_for(&state.host, &id, &preset, &instructions)?;
 
     let cfg = config::load().unwrap_or_default();
     let key = crate::secrets::load().anthropic_key;
@@ -809,15 +780,92 @@ pub async fn remix_page(
     .await
     .map_err(|e| e.to_string())??;
 
-    let host = state.host.lock().map_err(|e| e.to_string())?;
-    host.call(
-        Caller::Ui,
-        "proposals.create",
-        json!({ "id": id, "html": remixed, "baseUpdatedAt": base_updated_at }),
-    )
+    crate::remix::propose(&state.host, &id, &remixed, base_updated_at)
 }
 
 #[tauri::command]
 pub async fn cancel_remix() {
     crate::remix::cancel();
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSettings {
+    has_token: bool,
+    login: Option<String>,
+    repo: String,
+}
+
+fn github_settings_of(cfg: &Config) -> GithubSettings {
+    GithubSettings {
+        has_token: crate::secrets::load().github_token.is_some(),
+        login: cfg.github_login.clone(),
+        repo: cfg.publish_repo.clone(),
+    }
+}
+
+#[tauri::command]
+pub async fn github_settings() -> GithubSettings {
+    github_settings_of(&config::load().unwrap_or_default())
+}
+
+/// Store (checking it with GitHub first) or remove (blank) the token, when
+/// `token` is given, and set the site's repository.
+#[tauri::command]
+pub async fn set_github(token: Option<String>, repo: String) -> CmdResult<GithubSettings> {
+    let repo = repo.trim().to_string();
+    crate::publish::check_repo_name(&repo)?;
+    let mut cfg = config::load().unwrap_or_default();
+    if let Some(token) = token.map(|t| t.trim().to_string()) {
+        if token.is_empty() {
+            crate::secrets::set(|s, v| s.github_token = v, None)?;
+            cfg.github_login = None;
+        } else {
+            let check = token.clone();
+            let login = tauri::async_runtime::spawn_blocking(move || {
+                crate::publish::GitHub::new(&check)?.login()
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            crate::secrets::set(|s, v| s.github_token = v, Some(token))?;
+            cfg.github_login = Some(login);
+        }
+    }
+    cfg.publish_repo = repo;
+    config::save(&cfg)?;
+    Ok(github_settings_of(&cfg))
+}
+
+/// Publish a page (`target`: `gist` or `site`) or, with `unpublish`, take it
+/// down. Returns the record (`url`…).
+#[tauri::command]
+pub async fn publish_page(
+    app: tauri::AppHandle,
+    id: String,
+    target: String,
+    unpublish: bool,
+) -> CmdResult<Value> {
+    use tauri::Manager;
+    let token = crate::secrets::load()
+        .github_token
+        .ok_or("connect your GitHub account in Settings → Publishing first")?;
+    let repo = config::load().unwrap_or_default().publish_repo;
+    // Network calls run off the async runtime, and the vault is locked only
+    // while a step reads or records.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::publish::run(&state.host, &token, &id, &target, &repo, unpublish)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Put rich content on the clipboard: `html`, with `text` for apps that take
+/// no HTML.
+#[tauri::command]
+pub async fn copy_rich(app: tauri::AppHandle, html: String, text: String) -> CmdResult<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard()
+        .write_html(html, Some(text))
+        .map_err(|e| format!("could not copy: {e}"))
 }

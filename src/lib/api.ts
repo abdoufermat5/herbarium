@@ -22,6 +22,9 @@ import type {
   ReadingPath,
   ProposalSummary,
   AiSettings,
+  GithubSettings,
+  PublishRecord,
+  PublishTarget,
   AiProvider,
   RemixPreset,
   ImportFile,
@@ -496,6 +499,31 @@ export const api = {
 
   cancelRemix(): Promise<void> {
     return invoke("cancel_remix");
+  },
+
+  /** The GitHub account used to publish and the site's repository. */
+  githubSettings(): Promise<GithubSettings> {
+    return invoke("github_settings");
+  },
+
+  /** `token`: a new token (checked with GitHub), "" to disconnect, or undefined to keep it. */
+  setGithub(repo: string, token?: string): Promise<GithubSettings> {
+    return invoke("set_github", { token, repo });
+  },
+
+  /** Publish a page as a secret gist or on the GitHub Pages site, or take it down. */
+  publishPage(id: string, target: PublishTarget, unpublish = false): Promise<PublishRecord | { unpublished: string }> {
+    return invoke("publish_page", { id, target, unpublish });
+  },
+
+  /** Where pages were published, by page id. */
+  publishedList(): Promise<Record<string, Partial<Record<PublishTarget, PublishRecord>>>> {
+    return op("published.list");
+  },
+
+  /** Put HTML (and its plain-text version) on the clipboard. */
+  copyRich(html: string, text: string): Promise<void> {
+    return invoke("copy_rich", { html, text });
   },
 
   /** A newer signed release, or null when this build is current. */

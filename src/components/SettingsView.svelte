@@ -20,6 +20,7 @@
   import BrowserSettingsSection from "./settings/BrowserSettingsSection.svelte";
   import CaptureSettingsSection from "./settings/CaptureSettingsSection.svelte";
   import AiSettingsSection from "./settings/AiSettingsSection.svelte";
+  import PublishSettingsSection from "./settings/PublishSettingsSection.svelte";
 
   function setDetailsOpen(open: boolean) {
     setPref("detailsOpen", open);
@@ -266,6 +267,8 @@
     <CaptureSettingsSection />
 
     <AiSettingsSection />
+
+    <PublishSettingsSection />
 
     <SettingsSection id="settings-desktop" title={t("settings.desktop")}>
       <SettingRow title={t("settings.closeToTray")} hint={t("settings.closeToTrayHint")}>

@@ -8,6 +8,7 @@ mod export;
 mod native_host;
 mod navigation;
 mod protocol;
+mod publish;
 mod remix;
 mod secrets;
 mod updater;
@@ -219,6 +220,10 @@ pub fn run() {
             commands::set_ai_settings,
             commands::remix_page,
             commands::cancel_remix,
+            commands::github_settings,
+            commands::set_github,
+            commands::publish_page,
+            commands::copy_rich,
             commands::invoke_op,
             commands::list_editors,
             commands::open_in_editor,

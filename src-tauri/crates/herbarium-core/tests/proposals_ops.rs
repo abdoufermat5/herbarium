@@ -327,3 +327,69 @@ fn the_ui_can_leave_a_proposal_for_a_remix() {
     assert_eq!(html_of(&host, &id), doc("Remixed"));
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn published_records_are_kept_per_page_and_target() {
+    let vault = temp_vault("published");
+    let host = open(&vault);
+    let (id, _) = page(&host, "Shared");
+    let gist = json!({ "id": "abc", "url": "https://gist.github.com/me/abc" });
+    assert!(
+        host.call(
+            Caller::Agent,
+            "published.record",
+            json!({ "id": id, "target": "gist", "info": gist }),
+        )
+        .is_err(),
+        "agents cannot record"
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "published.record",
+            json!({ "id": id, "target": "gist", "info": { "url": "javascript:alert(1)" } }),
+        )
+        .is_err()
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "published.record",
+            json!({ "id": id, "target": "tweet", "info": gist }),
+        )
+        .is_err()
+    );
+    host.call(
+        Caller::Ui,
+        "published.record",
+        json!({ "id": id, "target": "gist", "info": gist }),
+    )
+    .unwrap();
+    host.call(
+        Caller::Ui,
+        "published.record",
+        json!({ "id": id, "target": "site", "info": { "url": "https://me.github.io/herbarium/shared.html", "path": "shared.html" } }),
+    )
+    .unwrap();
+    let list = host
+        .call(Caller::Agent, "published.list", json!({}))
+        .unwrap();
+    assert_eq!(list[&id]["gist"]["id"], "abc");
+    assert_eq!(list[&id]["site"]["path"], "shared.html");
+
+    host.call(
+        Caller::Ui,
+        "published.forget",
+        json!({ "id": id, "target": "gist" }),
+    )
+    .unwrap();
+    host.call(
+        Caller::Ui,
+        "published.forget",
+        json!({ "id": id, "target": "site" }),
+    )
+    .unwrap();
+    let list = host.call(Caller::Ui, "published.list", json!({})).unwrap();
+    assert_eq!(list, json!({}));
+    let _ = std::fs::remove_dir_all(&vault);
+}

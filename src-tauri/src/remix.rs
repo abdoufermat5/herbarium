@@ -13,6 +13,8 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
+use crate::publish::Vault;
+
 /// The API's address; `HERBARIUM_ANTHROPIC_API` points tests at a fake one.
 fn api_base() -> String {
     std::env::var("HERBARIUM_ANTHROPIC_API")
@@ -318,6 +320,51 @@ fn ask_claude_code_with(
         });
     }
     Ok(out)
+}
+
+/// The prompt for remixing page `id`, and the page's `updatedAt` it was read at.
+pub fn prompt_for(
+    host: &dyn Vault,
+    id: &str,
+    preset_name: &str,
+    instructions: &str,
+) -> Result<(String, Value), String> {
+    let page = host.op("pages.get", json!({ "id": id, "format": "html" }))?;
+    let highlights = host.op("highlights.list", json!({ "page": id }))?;
+    let html = page["html"].as_str().unwrap_or_default();
+    check_size(html)?;
+    let highlights: Vec<(String, String)> = highlights
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|h| {
+            (
+                h["quote"].as_str().unwrap_or_default().to_string(),
+                h["note"].as_str().unwrap_or_default().to_string(),
+            )
+        })
+        .collect();
+    let prompt = user_prompt(
+        preset_name,
+        instructions,
+        page["meta"]["title"].as_str().unwrap_or_default(),
+        &highlights,
+        html,
+    )?;
+    Ok((prompt, page["meta"]["updatedAt"].clone()))
+}
+
+/// Keep the remixed HTML as the page's proposal.
+pub fn propose(
+    host: &dyn Vault,
+    id: &str,
+    html: &str,
+    base_updated_at: Value,
+) -> Result<Value, String> {
+    host.op(
+        "proposals.create",
+        json!({ "id": id, "html": html, "baseUpdatedAt": base_updated_at }),
+    )
 }
 
 pub struct Job<'a> {

@@ -185,6 +185,9 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
         Effect::ReadOnly,
     ),
     ("proposals.get", "Read proposed edit", Effect::ReadOnly),
+    ("highlights.list", "List highlights", Effect::ReadOnly),
+    ("health.check", "Check page health", Effect::ReadOnly),
+    ("published.list", "List published pages", Effect::ReadOnly),
 ];
 
 /// MCP tool annotations for an operation. Operations missing from
