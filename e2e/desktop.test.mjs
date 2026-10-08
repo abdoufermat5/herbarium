@@ -33,7 +33,7 @@ async function fakeGitHub() {
     if (req.headers.authorization !== "Bearer t0ken") return send(401, { message: "Bad credentials" });
     if (req.method === "GET" && req.url === "/user") return send(200, { login: "octo" });
     if (req.method === "POST" && req.url === "/gists") {
-      const id = `g${gists.size + 1}`;
+      const id = `a${gists.size + 1}`; // hexadecimal, like real gist ids
       gists.set(id, JSON.parse(raw));
       return send(201, { id, html_url: `https://gist.github.com/octo/${id}` });
     }
