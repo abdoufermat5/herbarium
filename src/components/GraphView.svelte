@@ -57,6 +57,17 @@
     return group || t("graph.root");
   }
 
+  /** Distance beyond which nodes no longer push each other apart. */
+  const CUTOFF = 240;
+  /** The cell itself and half its neighbours, so each pair of cells meets once. */
+  const NEIGHBOURS: Array<[number, number]> = [
+    [0, 0],
+    [1, 0],
+    [-1, 1],
+    [0, 1],
+    [1, 1],
+  ];
+
   /** A force layout run to rest up front: repulsion, springs on links, a pull to the centre. */
   function layout(data: PageGraph) {
     const count = data.nodes.length;
@@ -81,27 +92,47 @@
       .map(([a, b]) => [byId.get(a), byId.get(b)] as const)
       .filter((e): e is readonly [Node, Node] => !!e[0] && !!e[1])
       .map((e) => [e[0], e[1]] as [Node, Node]);
-    const iterations = Math.min(400, 80 + count * 2);
+    // Fewer passes for big graphs: each one costs more, and they settle sooner.
+    const iterations = Math.min(400, 80 + count * 2, 60 + Math.round(300_000 / Math.max(1, count)));
     for (let step = 0; step < iterations; step++) {
       const cool = 1 - step / iterations;
-      for (let i = 0; i < list.length; i++) {
-        const a = list[i];
-        for (let j = i + 1; j < list.length; j++) {
-          const b = list[j];
-          let dx = a.x - b.x;
-          let dy = a.y - b.y;
-          let d2 = dx * dx + dy * dy;
-          if (d2 < 0.01) {
-            dx = Math.random() - 0.5;
-            dy = Math.random() - 0.5;
-            d2 = 0.5;
+      // Repulsion between nearby nodes only: beyond CUTOFF the push is far
+      // weaker than the pull to the centre, and comparing every pair froze
+      // the window on large vaults. Nodes are bucketed in a grid of
+      // CUTOFF-sized cells and each one meets those in its own and the next cells.
+      const grid = new Map<string, Node[]>();
+      for (const n of list) {
+        const key = `${Math.floor(n.x / CUTOFF)},${Math.floor(n.y / CUTOFF)}`;
+        const cell = grid.get(key);
+        if (cell) cell.push(n);
+        else grid.set(key, [n]);
+      }
+      for (const [key, cell] of grid) {
+        const [cx, cy] = key.split(",").map(Number);
+        for (const [ox, oy] of NEIGHBOURS) {
+          const other = ox === 0 && oy === 0 ? cell : grid.get(`${cx + ox},${cy + oy}`);
+          if (!other) continue;
+          for (let i = 0; i < cell.length; i++) {
+            const a = cell[i];
+            for (let j = other === cell ? i + 1 : 0; j < other.length; j++) {
+              const b = other[j];
+              let dx = a.x - b.x;
+              let dy = a.y - b.y;
+              let d2 = dx * dx + dy * dy;
+              if (d2 > CUTOFF * CUTOFF) continue;
+              if (d2 < 0.01) {
+                dx = Math.random() - 0.5;
+                dy = Math.random() - 0.5;
+                d2 = 0.5;
+              }
+              const force = 2400 / d2;
+              const d = Math.sqrt(d2);
+              a.vx += (dx / d) * force;
+              a.vy += (dy / d) * force;
+              b.vx -= (dx / d) * force;
+              b.vy -= (dy / d) * force;
+            }
           }
-          const force = 2400 / d2;
-          const d = Math.sqrt(d2);
-          a.vx += (dx / d) * force;
-          a.vy += (dy / d) * force;
-          b.vx -= (dx / d) * force;
-          b.vy -= (dy / d) * force;
         }
       }
       for (const [a, b] of links) {
