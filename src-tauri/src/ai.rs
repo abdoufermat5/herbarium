@@ -492,6 +492,7 @@ pub fn read_chat_stream(
 ) -> Result<String, String> {
     let mut text = String::new();
     let mut finish: Option<String> = None;
+    let mut chars = 0;
     let mut reported = 0;
     let mut done = false;
     for line in BufReader::new(reader).lines() {
@@ -510,13 +511,14 @@ pub fn read_chat_stream(
         let choice = &event["choices"][0];
         if let Some(piece) = choice["delta"]["content"].as_str() {
             text.push_str(piece);
+            chars += piece.chars().count();
         }
         if let Some(reason) = choice["finish_reason"].as_str() {
             finish = Some(reason.to_string());
         }
         if text.len() - reported >= 512 || text.is_empty() {
             reported = text.len();
-            if !progress(text.chars().count()) {
+            if !progress(chars) {
                 return Err("cancelled".into());
             }
         }

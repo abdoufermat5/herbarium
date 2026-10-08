@@ -137,6 +137,7 @@ pub fn read_stream(
     let mut text = String::new();
     let mut stop_reason: Option<String> = None;
     let mut data = String::new();
+    let mut chars = 0;
     let mut reported = 0;
     for line in BufReader::new(reader).lines() {
         let line = line.map_err(|e| format!("the connection broke: {e}"))?;
@@ -151,10 +152,12 @@ pub fn read_stream(
         data.clear();
         match event["type"].as_str().unwrap_or_default() {
             "content_block_delta" if event["delta"]["type"] == "text_delta" => {
-                text.push_str(event["delta"]["text"].as_str().unwrap_or_default());
+                let piece = event["delta"]["text"].as_str().unwrap_or_default();
+                text.push_str(piece);
+                chars += piece.chars().count();
                 if text.len() - reported >= 512 {
                     reported = text.len();
-                    if !progress(text.chars().count()) {
+                    if !progress(chars) {
                         return Err("cancelled".into());
                     }
                 }
@@ -168,7 +171,7 @@ pub fn read_stream(
                 return Err(api_error(&event));
             }
             _ => {
-                if !progress(text.chars().count()) {
+                if !progress(chars) {
                     return Err("cancelled".into());
                 }
             }
