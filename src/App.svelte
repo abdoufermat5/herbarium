@@ -137,6 +137,8 @@
     }
 
     if (isTyping(e.target) || e.defaultPrevented || e.repeat) return;
+    // Single-key shortcuts never act behind an open dialog.
+    if (document.querySelector('[aria-modal="true"]')) return;
 
     if (e.key === "?" && !mod && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
       e.preventDefault();

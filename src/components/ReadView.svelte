@@ -577,6 +577,7 @@
   function onViewKey(e: KeyboardEvent) {
     if (!page || confirmState.pending || folderPickerState.pending || app.paletteOpen || app.importOpen) return;
     if (isTypingTarget(e.target) || e.altKey || e.repeat) return;
+    if (document.querySelector('[aria-modal="true"]')) return;
     const mod = e.ctrlKey || e.metaKey;
     if (mod && (e.key === "=" || e.key === "+")) {
       e.preventDefault();
