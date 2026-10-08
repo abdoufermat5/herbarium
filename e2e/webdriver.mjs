@@ -83,6 +83,8 @@ export async function launchApp(env) {
       capabilities: { alwaysMatch: { "tauri:options": { application: desktopBin() } } },
     });
     const session = new Session(`${base}/session/${created.sessionId}`, () => log);
+    // The X display the app is on, for tools that record or drive it.
+    session.display = display;
     session.close = async () => {
       await call(`${base}/session/${created.sessionId}`, "DELETE", "").catch(() => {});
       stop();

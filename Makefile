@@ -1,7 +1,7 @@
 MANIFEST := --manifest-path src-tauri/Cargo.toml
 VAULT ?=
 
-.PHONY: help install dev build check lint test ci e2e mcp release clean
+.PHONY: help install dev build check lint test ci e2e demo mcp release clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -29,6 +29,9 @@ ci: check lint test ## Run what CI runs
 
 e2e: ## Run the end-to-end suites (CLI, extension, desktop app)
 	pnpm test:e2e
+
+demo: ## Record docs/demo.gif (needs Xvfb, tauri-driver, WebKitWebDriver, xdotool, ffmpeg)
+	HERBARIUM_REBUILD=1 node e2e/tools/demo.mjs docs/demo.gif
 
 mcp: ## Run the MCP server on stdio (VAULT=path to override the app's vault)
 	cargo run $(MANIFEST) --quiet -- mcp $(if $(VAULT),--vault $(VAULT))
