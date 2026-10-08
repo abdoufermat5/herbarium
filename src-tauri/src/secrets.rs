@@ -1,4 +1,4 @@
-// Credentials the app keeps for the user: the Anthropic API key used to
+// Credentials the app keeps for the user: the AI service keys used to
 // remix pages and the GitHub token used to publish them. Stored apart from
 // the settings, in `<config dir>/io.herbarium.desktop/secrets.json`, readable
 // only by the user, and never sent to the window: the UI only learns whether
@@ -51,22 +51,55 @@ fn path() -> Result<PathBuf, String> {
 }
 
 pub fn load() -> Secrets {
-    path()
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+    try_load().unwrap_or_default()
+}
+
+/// The stored secrets; an error when the file exists but cannot be read or
+/// parsed, so a write never replaces keys it could not see.
+fn try_load() -> Result<Secrets, String> {
+    let path = path()?;
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str(&raw)
+            .map_err(|e| format!("{} is damaged ({e}); fix or delete it", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Secrets::default()),
+        Err(e) => Err(format!("cannot read {}: {e}", path.display())),
+    }
 }
 
 pub fn save(secrets: &Secrets) -> Result<(), String> {
     let path = path()?;
     let json = serde_json::to_vec_pretty(secrets).map_err(|e| e.to_string())?;
-    herbarium_core::vault::write_atomic(&path, &json)?;
+    write_private(&path, &json)
+}
+
+/// Write `bytes` to `path` atomically, readable only by the user from the
+/// moment the file exists (a world-readable temporary file would leak keys).
+fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let dir = path.parent().ok_or("no configuration folder")?;
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let temp = dir.join(format!(".secrets.json.tmp-{}-{nanos}", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|e| format!("cannot protect {}: {e}", path.display()))?;
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let result = (|| -> std::io::Result<()> {
+        let mut file = options.open(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        std::fs::rename(&temp, path)
+    })();
+    if let Err(e) = result {
+        let _ = std::fs::remove_file(&temp);
+        return Err(format!("cannot save {}: {e}", path.display()));
     }
     Ok(())
 }
@@ -76,7 +109,7 @@ pub fn set(
     update: impl FnOnce(&mut Secrets, Option<String>),
     value: Option<String>,
 ) -> Result<(), String> {
-    let mut secrets = load();
+    let mut secrets = try_load()?;
     update(
         &mut secrets,
         value
