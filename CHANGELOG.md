@@ -41,7 +41,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Security
 - API keys and the GitHub token are kept apart from the settings in `secrets.json` in the app's configuration folder, readable only by the user, and are never sent to the window: the interface only learns whether one is set.
-- Publishing never writes to a repository Herbarium did not create (it looks for its `.herbarium` marker), and asks before the first publication of each page, saying who will be able to read it.
+- Publishing never writes to a repository Herbarium did not create (it looks for its `.herbarium` marker), and asks before the first publication of each page, saying who will be able to read it. Unpublishing only deletes a page file from such a repository, whatever the vault's records say.
+- `secrets.json` is created readable only by the user (never world-readable, even for a moment), and a damaged one is reported instead of being replaced, which would erase the other keys.
+- Remixing with Claude Code runs it without tools, in an empty folder, so instructions hidden in a page cannot make it read local files.
+- Pages saved from the browser, including the artifacts of a conversation, never get network access, whatever the vault's default.
 
 ## [0.2.1] - 2026-10-04
 
