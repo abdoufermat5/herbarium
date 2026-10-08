@@ -258,9 +258,13 @@
 <style>
   .inline {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
     align-items: center;
     justify-content: flex-end;
+    /* The column is narrower than a field and its buttons: wrap within it
+       rather than spill over the setting's text. */
+    max-width: 100%;
   }
   .model {
     display: flex;
