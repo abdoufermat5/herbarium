@@ -49,3 +49,12 @@ windows-core = "0.62"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# What ships: one optimisation unit with link-time optimisation and no debug
+# symbols, so the binary is about half the size. Panics still unwind, so a
+# bug in one command fails that command instead of closing the app.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

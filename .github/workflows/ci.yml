@@ -46,6 +46,11 @@ jobs:
       - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
       - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
       - name: Build Linux deb bundle
+        # Checks that bundling works; the size-optimised release profile
+        # (one codegen unit, LTO) is left to releases, it takes much longer.
+        env:
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         run: pnpm tauri build --bundles deb
 
   e2e:
