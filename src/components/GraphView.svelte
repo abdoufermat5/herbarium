@@ -43,6 +43,12 @@
   });
   const slotOf = $derived(new Map(groups.slice(0, SLOTS).map((g, i) => [g, i + 1])));
   const hasOther = $derived(groups.length > SLOTS);
+  const summary = $derived(
+    t("graph.summary", {
+      pages: t("unit.page", { count: nodes.length }),
+      links: t("graph.degree", { count: edges.length }),
+    }),
+  );
 
   function topFolder(folder: string | null): string {
     return folder ? folder.split("/")[0] : "";
@@ -88,9 +94,17 @@
       byId.set(n.id, node);
       return node;
     });
+    // Pages that link both ways are one line on the map, pulled once.
+    const seen = new Set<string>();
     const links = data.edges
       .map(([a, b]) => [byId.get(a), byId.get(b)] as const)
       .filter((e): e is readonly [Node, Node] => !!e[0] && !!e[1])
+      .filter(([a, b]) => {
+        const key = a.id < b.id ? `${a.id}\n${b.id}` : `${b.id}\n${a.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
       .map((e) => [e[0], e[1]] as [Node, Node]);
     // Fewer passes for big graphs: each one costs more, and they settle sooner.
     const iterations = Math.min(400, 80 + count * 2, 60 + Math.round(300_000 / Math.max(1, count)));
@@ -250,7 +264,7 @@
       <p class="eyebrow">{t("graph.eyebrow")}</p>
       <h1 class="display">{t("graph.title")}</h1>
       {#if graph}
-        <p class="sub">{t("graph.summary", { pages: graph.nodes.length, links: graph.edges.length })}</p>
+        <p class="sub">{summary}</p>
       {/if}
     </div>
     <div class="tools">
@@ -285,7 +299,7 @@
         bind:this={svgEl}
         viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
         role="img"
-        aria-label={t("graph.label", { pages: graph.nodes.length, links: graph.edges.length })}
+        aria-label={t("graph.label", { pages: graph.nodes.length, links: edges.length })}
         onwheel={onWheel}
         onpointerdown={onDown}
         onpointermove={onMove}

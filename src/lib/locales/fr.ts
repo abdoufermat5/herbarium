@@ -937,7 +937,7 @@ export const fr: Record<MessageKey, string> = {
   "today.ctaSamplesHint": "Un petit tour de ce que fait Herbarium",
   "graph.eyebrow": "Liens",
   "graph.title": "Comment vos pages se relient",
-  "graph.summary": "{pages} pages, {links} liens",
+  "graph.summary": "{pages}, {links}",
   "graph.showAll": "Afficher les pages sans lien",
   "graph.fit": "Ajuster",
   "graph.legend": "Dossiers",

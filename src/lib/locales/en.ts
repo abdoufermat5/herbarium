@@ -927,7 +927,7 @@ export const en = {
   "today.ctaSamplesHint": "A short tour of what Herbarium can do",
   "graph.eyebrow": "Links",
   "graph.title": "How your pages connect",
-  "graph.summary": "{pages} pages, {links} links",
+  "graph.summary": "{pages}, {links}",
   "graph.showAll": "Show pages without links",
   "graph.fit": "Fit",
   "graph.legend": "Folders",
