@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-08
+
 ### Added
 - Page sources: a page can record where it came from — the address it was saved from, the tool that generated it and the prompt that asked for it. `pages.create` and `pages.update` take `source`, the tool and prompt are searchable, the details panel shows them, `herbarium add` records a fetched URL and takes `--tool` and `--prompt`, and agents are asked to fill it in.
 - MCP resources and prompts: every page is a resource (`herbarium://page/<id>` for its HTML, `herbarium://page/<id>/text` for its text), and the `save_page`, `ask_vault` and `review_session` prompts package common requests.
@@ -122,7 +124,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/abdoufermat5/herbarium/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/abdoufermat5/herbarium/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/abdoufermat5/herbarium/releases/tag/v0.1.0
