@@ -155,6 +155,27 @@
   }
 
   /** Format a UTC `YYYY-MM-DD` day as a locale date without timezone drift. */
+  /** Activity heatmap: columns are weeks (Monday first, UTC), oldest left. */
+  const activity = $derived(shownStats?.activity ?? []);
+  const activityTotal = $derived(activity.reduce((sum, d) => sum + d.count, 0));
+  const activityMax = $derived(Math.max(0, ...activity.map((d) => d.count)));
+  const activityWeeks = $derived.by(() => {
+    if (activity.length === 0) return [] as Array<Array<(typeof activity)[number] | null>>;
+    const [y, m, d] = activity[0].day.split("-").map(Number);
+    // getUTCDay: 0 = Sunday; shift so Monday is row 0.
+    const lead = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
+    const cells: Array<(typeof activity)[number] | null> = [...Array(lead).fill(null), ...activity];
+    const weeks = [];
+    for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
+    return weeks;
+  });
+
+  /** 0 for no reviews, else 1..4 by share of the busiest day. */
+  function level(count: number): number {
+    if (count === 0 || activityMax === 0) return 0;
+    return Math.min(4, Math.max(1, Math.ceil((count / activityMax) * 4)));
+  }
+
   function fmtDay(day: string): string {
     const [y, m, d] = day.split("-").map(Number);
     if (!y || !m || !d) return day;
@@ -207,19 +228,19 @@
       <dl class="stats">
         <div class="stat">
           <dt class="stat-l">{t("review.stat.due")}</dt>
-          <dd class="stat-n">{shownStats.dueTotal}</dd>
+          <dd class="stat-n" class:zero={shownStats.dueTotal === 0}>{shownStats.dueTotal}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.overdue")}</dt>
-          <dd class="stat-n" class:hot={shownStats.overdue > 0}>{shownStats.overdue}</dd>
+          <dd class="stat-n" class:hot={shownStats.overdue > 0} class:zero={shownStats.overdue === 0}>{shownStats.overdue}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.today")}</dt>
-          <dd class="stat-n">{shownStats.reviewedToday}</dd>
+          <dd class="stat-n" class:zero={shownStats.reviewedToday === 0}>{shownStats.reviewedToday}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.total")}</dt>
-          <dd class="stat-n">{shownStats.totalReviews}</dd>
+          <dd class="stat-n" class:zero={shownStats.totalReviews === 0}>{shownStats.totalReviews}</dd>
         </div>
       </dl>
       {#if statsError}
@@ -444,6 +465,52 @@
         {/if}
       </div>
     </section>
+
+    <section class="activity card">
+      <header class="fc-head">
+        <div class="fc-text">
+          <h2 class="fc-title">{t("review.activity.title")}</h2>
+          <p class="fc-hint">{t("review.activity.hint", { total: activityTotal })}</p>
+        </div>
+        <dl class="streaks">
+          <div><dt>{t("review.activity.streak")}</dt><dd>{plural(shownStats.streak, "day")}</dd></div>
+          <div><dt>{t("review.activity.longest")}</dt><dd>{plural(shownStats.longestStreak, "day")}</dd></div>
+        </dl>
+      </header>
+      {#if activityTotal === 0}
+        <p class="fc-empty muted">{t("review.activity.empty")}</p>
+      {:else}
+        <div
+          class="heatmap"
+          role="img"
+          aria-label={t("review.activity.label", {
+            total: activityTotal,
+            streak: shownStats.streak,
+            longest: shownStats.longestStreak,
+          })}
+        >
+          {#each activityWeeks as week, w (w)}
+            <div class="hm-week">
+              {#each week as cell, i (i)}
+                {#if cell}
+                  <span
+                    class="hm-cell l{level(cell.count)}"
+                    title={`${fmtDay(cell.day)}: ${plural(cell.count, "review")}`}
+                  ></span>
+                {:else}
+                  <span class="hm-cell blank"></span>
+                {/if}
+              {/each}
+            </div>
+          {/each}
+        </div>
+        <div class="hm-legend" aria-hidden="true">
+          <span>{t("review.activity.less")}</span>
+          {#each [0, 1, 2, 3, 4] as l (l)}<span class="hm-cell l{l}"></span>{/each}
+          <span>{t("review.activity.more")}</span>
+        </div>
+      {/if}
+    </section>
     {/if}
   </div>
 </div>
@@ -482,7 +549,7 @@
     flex-wrap: wrap;
   }
   h1 {
-    font-size: var(--fs-4xl);
+    font-size: var(--fs-3xl);
   }
   .sub {
     font-size: var(--fs-base);
@@ -492,20 +559,23 @@
 
   /* ------------------------------------------------------------- statistics */
 
+  /* One strip, hairlines between the figures. */
   .stats {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
     margin: 0;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: hidden;
   }
   .stat {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    padding: 16px 18px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
+    justify-content: space-between;
+    gap: 6px;
+    padding: 12px 18px;
+    box-shadow: -1px 0 0 var(--border);
   }
   .stat-l {
     font-size: var(--fs-2xs);
@@ -517,11 +587,14 @@
   .stat-n {
     margin: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-3xl);
+    font-size: var(--fs-2xl);
     font-weight: 500;
     line-height: 1;
     color: var(--text);
     font-variant-numeric: tabular-nums;
+  }
+  .stat-n.zero {
+    color: var(--faint, var(--muted));
   }
   .stat-n.hot {
     color: var(--danger);
@@ -777,6 +850,81 @@
     font-size: var(--fs-2xs);
     color: var(--muted);
     white-space: nowrap;
+  }
+
+  .activity {
+    padding: 20px 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .streaks {
+    display: flex;
+    gap: 20px;
+    margin: 0;
+  }
+  .streaks div {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .streaks dt {
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+  .streaks dd {
+    margin: 0;
+    font-size: var(--fs-sm);
+    font-weight: 500;
+    color: var(--text);
+  }
+  .heatmap {
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .hm-week {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .hm-cell {
+    display: block;
+    width: 11px;
+    height: 11px;
+    border-radius: 2px;
+    background: var(--sunken);
+    flex: none;
+  }
+  .hm-cell.blank {
+    background: transparent;
+  }
+  /* One hue, light to dark: the share of the busiest day. */
+  .hm-cell.l1 {
+    background: color-mix(in oklab, var(--leaf) 30%, var(--surface));
+  }
+  .hm-cell.l2 {
+    background: color-mix(in oklab, var(--leaf) 55%, var(--surface));
+  }
+  .hm-cell.l3 {
+    background: color-mix(in oklab, var(--leaf) 78%, var(--surface));
+  }
+  .hm-cell.l4 {
+    background: var(--leaf);
+  }
+  .hm-legend {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+  .hm-legend span:first-child {
+    margin-right: 4px;
+  }
+  .hm-legend span:last-child {
+    margin-left: 4px;
   }
 
   .fc-empty {

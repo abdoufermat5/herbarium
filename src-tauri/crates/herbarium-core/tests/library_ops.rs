@@ -390,3 +390,161 @@ fn agents_may_turn_network_off_but_not_on() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn page_icons_and_folder_and_tag_looks() {
+    let vault = std::env::temp_dir().join(format!(
+        "herbarium-looks-{}-{}",
+        std::process::id(),
+        herbarium_core::time::now_ms()
+    ));
+    let mut host = herbarium_core::Host::new();
+    host.open_vault(vault.to_str().unwrap()).unwrap();
+    let ui = herbarium_core::Caller::Ui;
+    let page = host
+        .call(
+            ui,
+            "pages.create",
+            serde_json::json!({ "html": "<title>P</title><p>p</p>", "folder": "rust/cargo" }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap();
+
+    let with_icon = host
+        .call(
+            ui,
+            "pages.update",
+            serde_json::json!({ "id": id, "icon": " 🦀 " }),
+        )
+        .unwrap();
+    assert_eq!(with_icon["ext"]["look"]["icon"], "🦀");
+    assert!(
+        host.call(
+            ui,
+            "pages.update",
+            serde_json::json!({ "id": id, "icon": "<script>" })
+        )
+        .is_err()
+    );
+    let cleared = host
+        .call(
+            ui,
+            "pages.update",
+            serde_json::json!({ "id": id, "icon": null }),
+        )
+        .unwrap();
+    assert!(cleared["ext"].get("look").is_none());
+
+    host.call(
+        ui,
+        "appearance.set_folder",
+        serde_json::json!({ "path": "/rust/", "icon": "📦", "color": "Amber" }),
+    )
+    .unwrap();
+    host.call(
+        ui,
+        "appearance.set_tag",
+        serde_json::json!({ "tag": "rust", "color": "clay" }),
+    )
+    .unwrap();
+    let looks = host
+        .call(ui, "appearance.get", serde_json::json!({}))
+        .unwrap();
+    assert_eq!(
+        looks["folders"]["rust"],
+        serde_json::json!({ "icon": "📦", "color": "amber" })
+    );
+    assert_eq!(looks["tags"]["rust"], "clay");
+    assert_eq!(looks["colors"].as_array().unwrap().len(), 8);
+    assert!(
+        host.call(
+            ui,
+            "appearance.set_tag",
+            serde_json::json!({ "tag": "x", "color": "#ff0000" })
+        )
+        .is_err()
+    );
+
+    host.call(
+        ui,
+        "appearance.set_folder",
+        serde_json::json!({ "path": "rust" }),
+    )
+    .unwrap();
+    host.call(
+        ui,
+        "appearance.set_tag",
+        serde_json::json!({ "tag": "rust" }),
+    )
+    .unwrap();
+    let looks = host
+        .call(ui, "appearance.get", serde_json::json!({}))
+        .unwrap();
+    assert_eq!(looks["folders"], serde_json::json!({}));
+    assert_eq!(looks["tags"], serde_json::json!({}));
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn previews_are_stored_until_the_page_changes() {
+    let vault = std::env::temp_dir().join(format!(
+        "herbarium-previews-{}-{}",
+        std::process::id(),
+        herbarium_core::time::now_ms()
+    ));
+    let mut host = herbarium_core::Host::new();
+    host.open_vault(vault.to_str().unwrap()).unwrap();
+    let ui = herbarium_core::Caller::Ui;
+    let page = host
+        .call(
+            ui,
+            "pages.create",
+            serde_json::json!({ "html": "<title>P</title><p>p</p>" }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap().to_string();
+    let list = host
+        .call(ui, "previews.list", serde_json::json!({}))
+        .unwrap();
+    assert_eq!(list["missing"], serde_json::json!([id]));
+
+    let digest = serde_json::json!({ "w": 800, "h": 600, "bg": "rgb(255, 255, 255)", "blocks": [
+        { "k": "text", "x": 10, "y": 10, "w": 300, "h": 20, "c": "rgb(0, 0, 0)", "s": 16 }
+    ] });
+    host.call(
+        ui,
+        "previews.save",
+        serde_json::json!({ "id": id, "digest": digest }),
+    )
+    .unwrap();
+    let list = host
+        .call(ui, "previews.list", serde_json::json!({}))
+        .unwrap();
+    assert_eq!(list["missing"], serde_json::json!([]));
+    assert_eq!(list["previews"][&id]["blocks"][0]["k"], "text");
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    host.call(
+        ui,
+        "pages.set_html",
+        serde_json::json!({ "id": id, "html": "<title>P</title><p>changed</p>" }),
+    )
+    .unwrap();
+    let list = host
+        .call(ui, "previews.list", serde_json::json!({}))
+        .unwrap();
+    assert_eq!(
+        list["missing"],
+        serde_json::json!([id]),
+        "a changed page needs a new preview"
+    );
+    assert!(
+        host.call(
+            herbarium_core::Caller::Agent,
+            "previews.list",
+            serde_json::json!({})
+        )
+        .is_err()
+    );
+    let _ = std::fs::remove_dir_all(&vault);
+}

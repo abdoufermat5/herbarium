@@ -11,6 +11,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri",
     "test": "vitest run",
+    "test:e2e": "node --test --test-concurrency=1 \"e2e/*.test.mjs\"",
     "release": "node scripts/release.mjs"
   },
   "dependencies": {
@@ -34,6 +35,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tauri-apps/cli": "^2.5.0",
+    "playwright": "1.56.1",
     "svelte": "^5.38.0",
     "svelte-check": "^4.6.0",
     "typescript": "^5.6.0",

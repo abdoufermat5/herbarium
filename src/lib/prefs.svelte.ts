@@ -6,7 +6,7 @@
 const KEY = "herbarium.prefs";
 const LAST_IMPORT_KEY = "herbarium.lastImportFolder";
 
-export type StartView = "list" | "review";
+export type StartView = "today" | "list" | "review";
 export type ImportTarget = "browsing" | "root" | "last";
 export type PreviewLayout = "right" | "below" | "off";
 export type EditorFont = "app" | "system";
@@ -37,10 +37,12 @@ export interface Prefs {
   externalEditor: string;
   /** Command template (`code --goto {file}`); overrides `externalEditor` when set. */
   externalEditorCommand: string;
+  /** Zoom applied to pages in the reader. */
+  readerZoom: number;
 }
 
 export const DEFAULT_PREFS: Prefs = {
-  startView: "list",
+  startView: "today",
   importTarget: "browsing",
   detailsOpen: false,
   refreshOnFocus: true,
@@ -55,12 +57,14 @@ export const DEFAULT_PREFS: Prefs = {
   editorPreview: "right",
   externalEditor: "",
   externalEditorCommand: "",
+  readerZoom: 1,
 };
 
 /** Values offered in the settings UI. */
 export const EDITOR_FONT_SIZES = [11, 12, 12.5, 13, 14, 15, 16, 18, 20];
 export const EDITOR_LINE_HEIGHTS = [1.4, 1.6, 1.85];
 export const EDITOR_TAB_SIZES = [2, 4, 8];
+export const READER_ZOOMS = [0.5, 0.67, 0.75, 0.85, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
 function oneOf<T>(value: unknown, allowed: readonly T[], fallback: T): T {
   return allowed.includes(value as T) ? (value as T) : fallback;
@@ -78,7 +82,7 @@ function sanitize(raw: unknown): Prefs {
   const r = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_PREFS;
   return {
-    startView: oneOf(r.startView, ["list", "review"], d.startView),
+    startView: oneOf(r.startView, ["today", "list", "review"], d.startView),
     importTarget: oneOf(r.importTarget, ["browsing", "root", "last"], d.importTarget),
     detailsOpen: bool(r.detailsOpen, d.detailsOpen),
     refreshOnFocus: bool(r.refreshOnFocus, d.refreshOnFocus),
@@ -93,6 +97,7 @@ function sanitize(raw: unknown): Prefs {
     editorPreview: oneOf(r.editorPreview, ["right", "below", "off"], d.editorPreview),
     externalEditor: text(r.externalEditor, d.externalEditor),
     externalEditorCommand: text(r.externalEditorCommand, d.externalEditorCommand),
+    readerZoom: oneOf(r.readerZoom, READER_ZOOMS, d.readerZoom),
   };
 }
 

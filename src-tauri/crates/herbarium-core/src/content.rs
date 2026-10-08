@@ -53,6 +53,41 @@ pub fn looks_like_html(content: &str) -> bool {
     doc.select(&sel).next().is_some()
 }
 
+/// Link prefix that opens a page in Herbarium; pages link to each other with it.
+pub const PAGE_LINK_PREFIX: &str = "herbarium-app://open/";
+
+/// Ids of the pages `html` links to with `herbarium-app://open/<id>` (`<a href>`
+/// only), deduplicated in document order. Anything after the id (`?`, `#`, `/`)
+/// is ignored.
+pub fn extract_page_links(html: &str) -> Vec<String> {
+    let doc = Html::parse_document(html);
+    let Ok(sel) = Selector::parse("a[href]") else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for el in doc.select(&sel) {
+        let Some(href) = el.value().attr("href") else {
+            continue;
+        };
+        let href = href.trim();
+        let Some(rest) = href
+            .get(..PAGE_LINK_PREFIX.len())
+            .filter(|p| p.eq_ignore_ascii_case(PAGE_LINK_PREFIX))
+            .map(|_| &href[PAGE_LINK_PREFIX.len()..])
+        else {
+            continue;
+        };
+        let id: String = rest
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            .collect();
+        if !id.is_empty() && !id.starts_with('.') && !out.contains(&id) {
+            out.push(id);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod html_sniff_tests {
     use super::looks_like_html;

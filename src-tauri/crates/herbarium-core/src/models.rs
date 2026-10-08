@@ -79,6 +79,80 @@ impl PageMeta {
     }
 }
 
+/// Key of a page's [`PageSource`] in `PageMeta::ext`.
+pub const SOURCE_KEY: &str = "source";
+
+const SOURCE_TOOL_MAX: usize = 100;
+const SOURCE_URL_MAX: usize = 2048;
+const SOURCE_PROMPT_MAX: usize = 20_000;
+
+/// Where a page came from: the address it was saved from, the tool that
+/// generated it and the prompt that asked for it. Stored in `ext["source"]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PageSource {
+    /// `http(s)` address the page was saved from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// The tool or model that generated the page, e.g. `Claude Code`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    /// The request that produced the page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+}
+
+impl PageSource {
+    /// Trim every field, drop blank ones and enforce the limits. Returns
+    /// `None` when nothing is left.
+    pub fn clean(self) -> Result<Option<Self>, String> {
+        fn field(value: Option<String>, name: &str, max: usize) -> Result<Option<String>, String> {
+            let Some(value) = value
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+            else {
+                return Ok(None);
+            };
+            if value.chars().count() > max {
+                return Err(format!("source {name} is longer than {max} characters"));
+            }
+            Ok(Some(value))
+        }
+        let url = field(self.url, "url", SOURCE_URL_MAX)?;
+        if let Some(url) = &url {
+            let lower = url.to_ascii_lowercase();
+            if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+                return Err("source url must start with http:// or https://".into());
+            }
+        }
+        let source = PageSource {
+            url,
+            tool: field(self.tool, "tool", SOURCE_TOOL_MAX)?,
+            prompt: field(self.prompt, "prompt", SOURCE_PROMPT_MAX)?,
+        };
+        Ok((source != PageSource::default()).then_some(source))
+    }
+
+    /// The source recorded on `meta`, if any.
+    pub fn of(meta: &PageMeta) -> Option<Self> {
+        meta.ext
+            .get(SOURCE_KEY)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
+    /// Record `source` on `meta`, or remove it when `None`.
+    pub fn set(meta: &mut PageMeta, source: Option<Self>) {
+        match source.and_then(|s| serde_json::to_value(s).ok()) {
+            Some(value) => {
+                meta.ext.insert(SOURCE_KEY.into(), value);
+            }
+            None => {
+                meta.ext.remove(SOURCE_KEY);
+            }
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Page {
@@ -99,6 +173,45 @@ pub struct MetaPatch {
     #[serde(default, deserialize_with = "present")]
     pub folder: Option<Option<String>>,
     pub note: Option<String>,
+    /// `null` removes the page's source.
+    #[serde(default, deserialize_with = "present")]
+    pub source: Option<Option<PageSource>>,
+    /// A short emoji or symbol shown with the page; `null` removes it.
+    #[serde(default, deserialize_with = "present")]
+    pub icon: Option<Option<String>>,
+}
+
+/// Key of `{ icon }` in `PageMeta::ext`.
+pub const LOOK_KEY: &str = "look";
+
+/// Most characters in a page or folder icon (an emoji with modifiers).
+const MAX_ICON_CHARS: usize = 8;
+
+/// A trimmed icon, `None` for blank; rejects long text and markup.
+pub fn clean_icon(icon: &str) -> Result<Option<String>, String> {
+    let icon = icon.trim();
+    if icon.is_empty() {
+        return Ok(None);
+    }
+    if icon.chars().count() > MAX_ICON_CHARS || icon.contains(['<', '>', '&', '"']) {
+        return Err(format!(
+            "an icon is an emoji or symbol of at most {MAX_ICON_CHARS} characters"
+        ));
+    }
+    Ok(Some(icon.to_string()))
+}
+
+/// Set or clear the page's icon.
+pub fn set_icon(meta: &mut PageMeta, icon: Option<String>) {
+    match icon {
+        Some(icon) => {
+            meta.ext
+                .insert(LOOK_KEY.into(), serde_json::json!({ "icon": icon }));
+        }
+        None => {
+            meta.ext.remove(LOOK_KEY);
+        }
+    }
 }
 
 /// Distinguishes an explicit `null` (Some(None)) from an absent field (None).

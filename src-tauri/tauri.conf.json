@@ -5,7 +5,7 @@
   "identifier": "io.herbarium.desktop",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:1520",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
@@ -27,14 +27,18 @@
     ],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost; frame-src herbarium: http://herbarium.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
-      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1420; frame-src herbarium: http://herbarium.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
-      "dangerousDisableAssetCspModification": ["style-src"]
+      "devCsp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:1520; frame-src herbarium: http://herbarium.localhost; object-src 'none'; base-uri 'none'; form-action 'none'",
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ]
     }
   },
   "plugins": {
     "deep-link": {
       "desktop": {
-        "schemes": ["herbarium-app"]
+        "schemes": [
+          "herbarium-app"
+        ]
       }
     }
   },
@@ -52,6 +56,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": {
+      "../extension/": "browser-extension/"
+    }
   }
 }

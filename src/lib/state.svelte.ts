@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
@@ -10,14 +11,20 @@ import type {
   BulkUpdateResult,
   Config,
   PageMeta,
+  ProposalSummary,
+  ReadingPath,
+  Appearance,
+  PreviewDigest,
   ReviewSettings,
   ReviewStats,
+  SavedSearch,
   TagCount,
 } from "./types";
 
-export type View = "list" | "review" | "settings" | "trash";
+export type View = "today" | "list" | "review" | "settings" | "trash" | "graph";
 export type Layout = "grid" | "list";
 /** `relevance` keeps the backend's full-text ranking while searching and falls back to recent otherwise. */
+export type SettingsTab = "general" | "review" | "vault" | "capture" | "ai" | "about";
 export type SortKey = "relevance" | "recent" | "title" | "review";
 /** The theme actually shown. */
 export type Theme = "light" | "dark";
@@ -82,6 +89,28 @@ interface AppState {
   inspectorOpen: boolean;
   /** The reader's version-history panel is open. */
   historyOpen: boolean;
+  /** Agent edits waiting for approval, newest first. */
+  proposals: ProposalSummary[];
+  /** The reader's proposal panel (review an agent's edit) is open. */
+  proposalOpen: boolean;
+  savedSearches: SavedSearch[];
+  paths: ReadingPath[];
+  /** Icons and colours of folders and tags. */
+  appearance: Appearance;
+  /** Page previews by id (made in the background by the Thumbnailer). */
+  previews: Record<string, PreviewDigest>;
+  /** The reading path the reader was opened from, for previous/next. */
+  pathId: string | null;
+  /** The reader hides the sidebar, details and review bar. */
+  focusMode: boolean;
+  /** The "import from a Claude or ChatGPT export" dialog is open. */
+  aiImportOpen: boolean;
+  /** The vault-wide page health report is open. */
+  healthOpen: boolean;
+  /** The folder or tag whose icon and colour are being edited. */
+  lookEdit: { kind: "folder" | "tag"; key: string } | null;
+  /** The Settings tab shown. */
+  settingsTab: SettingsTab;
   layout: Layout;
   sort: SortKey;
   /** The theme in effect. */
@@ -101,6 +130,8 @@ const DEFAULT_REVIEW: ReviewSettings = {
   desiredRetention: 0.9,
   importReviewMinutes: null,
   queueLimit: null,
+  excludeFolders: [],
+  excludeTags: [],
 };
 
 function storedLayout(): Layout {
@@ -158,6 +189,18 @@ export const app: AppState = $state({
   paletteOpen: false,
   inspectorOpen: prefs.detailsOpen,
   historyOpen: false,
+  proposals: [],
+  proposalOpen: false,
+  savedSearches: [],
+  paths: [],
+  appearance: { folders: {}, tags: {} },
+  previews: {},
+  pathId: null,
+  focusMode: false,
+  aiImportOpen: false,
+  lookEdit: null,
+  settingsTab: "general",
+  healthOpen: false,
   layout: storedLayout(),
   sort: storedSort(),
   theme: resolveTheme(initialThemeChoice),
@@ -201,13 +244,34 @@ export function setLayout(layout: Layout) {
   localStorage.setItem("herbarium.layout", layout);
 }
 
+/**
+ * Tell the window which theme to use, so pages in the reader (which only see
+ * `prefers-color-scheme`) follow the app's choice instead of the OS's.
+ * `null` hands it back to the OS.
+ */
+async function applyNativeTheme(choice: ThemeChoice): Promise<void> {
+  try {
+    await getCurrentWindow().setTheme(choice === "system" ? null : choice);
+  } catch (e) {
+    console.warn("window theme:", e);
+  }
+}
+
 /** Pick a theme; `system` follows the OS and keeps following it. */
 export function setTheme(choice: ThemeChoice) {
+  const fromForced = app.themeChoice !== "system";
   app.themeChoice = choice;
-  app.theme = resolveTheme(choice);
+  // While a theme was forced on the window, the media query reports that one,
+  // not the OS's: keep the current look until the window reports again.
+  app.theme = choice === "system" && fromForced ? app.theme : resolveTheme(choice);
   document.documentElement.dataset.theme = app.theme;
   if (choice === "system") localStorage.removeItem("herbarium.theme");
   else localStorage.setItem("herbarium.theme", choice);
+  void applyNativeTheme(choice).then(() => {
+    if (app.themeChoice !== "system") return;
+    app.theme = systemTheme();
+    document.documentElement.dataset.theme = app.theme;
+  });
 }
 
 /** Flip the theme in effect to its opposite as an explicit choice. */
@@ -218,6 +282,7 @@ export function toggleTheme() {
 /** Apply the theme on boot and follow OS changes while `system` is selected. */
 export function initTheme() {
   document.documentElement.dataset.theme = app.theme;
+  if (app.themeChoice !== "system") void applyNativeTheme(app.themeChoice);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (app.themeChoice !== "system") return;
     app.theme = systemTheme();
@@ -254,13 +319,17 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals, searches, paths, looks] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
     api.listPages(),
     api.reviewSettings(),
     api.reviewStats(),
+    api.listProposals(),
+    api.savedSearches(),
+    api.listPaths(),
+    api.appearance(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -286,6 +355,16 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   }
   if (due.status === "fulfilled") void notifyDue(due.value);
   else console.error(due.reason);
+  if (proposals.status === "fulfilled") {
+    app.proposals = proposals.value;
+    announceProposals(proposals.value);
+  } else console.error(proposals.reason);
+  if (searches.status === "fulfilled") app.savedSearches = searches.value;
+  else console.error(searches.reason);
+  if (paths.status === "fulfilled") app.paths = paths.value;
+  else console.error(paths.reason);
+  if (looks.status === "fulfilled") app.appearance = looks.value;
+  else console.error(looks.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -295,6 +374,40 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   app.library = library.value;
   armDueTimer(library.value);
   return library.value;
+}
+
+/** Proposals already announced (`id:at`); null until the vault's first load. */
+let knownProposals: Set<string> | null = null;
+
+/** Toast agent edits that arrived since the last refresh: on the vault's first
+ *  load, one summary of everything waiting; afterwards, each new proposal. */
+function announceProposals(list: ProposalSummary[]) {
+  const keys = new Set(list.map((p) => `${p.id}:${p.at}`));
+  // A remix is announced by its own dialog.
+  const fresh = (knownProposals ? list.filter((p) => !knownProposals!.has(`${p.id}:${p.at}`)) : list).filter(
+    (p) => p.source !== "remix",
+  );
+  knownProposals = keys;
+  if (fresh.length === 0) return;
+  const first = fresh[0];
+  const message =
+    fresh.length === 1
+      ? t("proposal.arrived", { title: first.pageTitle })
+      : t("proposal.arrivedMany", { count: fresh.length });
+  toast(message, "info", 10000, {
+    label: t("proposal.review"),
+    run: () => void reviewProposal(first.id),
+  });
+}
+
+/** Open a page with its pending agent edit shown for review. */
+export async function reviewProposal(id: string): Promise<boolean> {
+  const opened = app.readId === id || (await openPage(id));
+  if (opened) {
+    app.historyOpen = false;
+    app.proposalOpen = true;
+  }
+  return opened;
 }
 
 /** Interval of the background refresh; a review due sooner gets its own timer. */
@@ -363,6 +476,22 @@ export async function reloadPages(quiet = false) {
   }
 }
 
+/** Show the results of `app.search` (or the whole library when empty)
+ *  without reloading everything else. */
+export async function searchLibrary() {
+  const seq = ++reloadSeq;
+  const q = app.search.trim();
+  try {
+    const pages = q ? await api.searchPages(q) : app.library;
+    if (seq !== reloadSeq) return;
+    app.pages = pages;
+  } catch (e) {
+    if (seq !== reloadSeq) return;
+    console.error(e);
+    toast(`${t("toast.loadFailed")} ${errorMessage(e)}`, "error");
+  }
+}
+
 /** Pick up changes made while the window was in the background (agents over
  *  MCP, edits or sync tools touching the vault folder). */
 async function resync() {
@@ -403,6 +532,15 @@ export function resetWorkspace() {
   app.readId = null;
   app.reviewSession = false;
   app.historyOpen = false;
+  app.proposals = [];
+  app.proposalOpen = false;
+  app.savedSearches = [];
+  app.paths = [];
+  app.appearance = { folders: {}, tags: {} };
+  app.previews = {};
+  app.pathId = null;
+  app.focusMode = false;
+  knownProposals = null;
   app.createRequest = null;
   app.loadError = null;
   app.reviewError = null;
@@ -517,11 +655,18 @@ async function go(action: () => void | Promise<void>): Promise<boolean> {
 export function openPage(id: string): Promise<boolean> {
   return go(() => {
     app.reviewSession = false;
+    app.proposalOpen = false;
     app.readId = id;
   });
 }
 
 /** Show a top-level view (leaves the reader). */
+/** Open Settings on one tab. */
+export function openSettings(tab: SettingsTab): Promise<boolean> {
+  app.settingsTab = tab;
+  return goView("settings");
+}
+
 export function goView(view: View): Promise<boolean> {
   return go(() => {
     app.reviewSession = false;
@@ -541,6 +686,103 @@ export function goAll(): Promise<boolean> {
     app.search = "";
     if (hadSearch) await reloadPages(true);
   });
+}
+
+/** Open `pageId` as part of reading path `pathId` (the reader shows previous/next). */
+export async function openInPath(pathId: string, pageId: string): Promise<boolean> {
+  const opened = await openPage(pageId);
+  if (opened) app.pathId = pathId;
+  return opened;
+}
+
+/** Run a reading-path change and adopt the result; errors are toasted. */
+async function changePath(run: () => Promise<ReadingPath>): Promise<ReadingPath | null> {
+  try {
+    const path = await run();
+    const i = app.paths.findIndex((p) => p.id === path.id);
+    if (i >= 0) app.paths[i] = path;
+    else app.paths = [...app.paths, path];
+    return path;
+  } catch (e) {
+    toast(`${t("paths.failed")}: ${errorMessage(e)}`, "error");
+    return null;
+  }
+}
+
+export function createPath(name: string, pages: string[] = []) {
+  return changePath(() => api.createPath(name, pages));
+}
+
+export function renamePath(id: string, name: string) {
+  return changePath(() => api.updatePath(id, { name }));
+}
+
+/** Move a page one step earlier (-1) or later (+1) in a path. */
+export function movePageInPath(id: string, pageId: string, dir: -1 | 1) {
+  const path = app.paths.find((p) => p.id === id);
+  if (!path) return Promise.resolve(null);
+  const pages = [...path.pages];
+  const i = pages.indexOf(pageId);
+  const j = i + dir;
+  if (i < 0 || j < 0 || j >= pages.length) return Promise.resolve(path);
+  [pages[i], pages[j]] = [pages[j], pages[i]];
+  return changePath(() => api.updatePath(id, { pages }));
+}
+
+export function setPageInPath(id: string, pageId: string, inPath: boolean) {
+  return changePath(() => (inPath ? api.addToPath(id, pageId) : api.removeFromPath(id, pageId)));
+}
+
+export async function deletePath(id: string): Promise<boolean> {
+  const path = app.paths.find((p) => p.id === id);
+  const ok = await confirmAction({
+    title: t("paths.deleteTitle"),
+    message: t("paths.deleteMessage", { name: path?.name ?? id }),
+    confirmLabel: t("paths.delete"),
+    danger: true,
+  });
+  if (!ok) return false;
+  try {
+    await api.deletePath(id);
+    app.paths = app.paths.filter((p) => p.id !== id);
+    if (app.pathId === id) app.pathId = null;
+    return true;
+  } catch (e) {
+    toast(`${t("paths.failed")}: ${errorMessage(e)}`, "error");
+    return false;
+  }
+}
+
+/** Show the library searched for `query` (a saved search, filters included). */
+export function runSearch(query: string): Promise<boolean> {
+  return go(async () => {
+    app.reviewSession = false;
+    app.readId = null;
+    app.view = "list";
+    clearFilters();
+    app.search = query;
+    await reloadPages(true);
+  });
+}
+
+/** Save the search `query` under `name`; errors are toasted. */
+export async function saveSearch(name: string, query: string): Promise<boolean> {
+  try {
+    app.savedSearches = await api.saveSearch(name, query);
+    toast(t("search.saved", { name: name.trim() }), "success");
+    return true;
+  } catch (e) {
+    toast(`${t("search.saveFailed")}: ${errorMessage(e)}`, "error");
+    return false;
+  }
+}
+
+export async function deleteSavedSearch(name: string) {
+  try {
+    app.savedSearches = await api.deleteSearch(name);
+  } catch (e) {
+    toast(`${t("search.deleteFailed")}: ${errorMessage(e)}`, "error");
+  }
 }
 
 /** The list filtered to a folder and its subfolders. */

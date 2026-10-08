@@ -11,19 +11,29 @@
     duplicatePage,
     nextReviewPage,
     goView,
+    openPage,
+    openInPath,
+    setPageInPath,
   } from "../lib/state.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
   import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
-  import type { Page, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
+  import { offerWebLink, pageLinkId } from "../lib/links";
+  import type { HealthIssue, Highlight, HighlightColor, Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
-  import HtmlEditor from "./HtmlEditor.svelte";
+  import { loadHtmlEditor } from "../lib/lazy";
   import HistoryPanel from "./HistoryPanel.svelte";
-  import { prefs } from "../lib/prefs.svelte";
+  import { exportPageFile } from "../lib/exports";
+  import { ICON_CHOICES, tagColor } from "../lib/appearance";
+  import ProposalPanel from "./ProposalPanel.svelte";
+  import RemixDialog from "./RemixDialog.svelte";
+  import ShareMenu from "./ShareMenu.svelte";
+  import { prefs, setPref, READER_ZOOMS } from "../lib/prefs.svelte";
+  import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
   // Single source of truth for the page storage shim, shared with the Rust
   // reader via `include_str!` in `src-tauri/src/protocol.rs`.
@@ -241,10 +251,53 @@
     const p = page;
     const frame = servedFrame;
     if (!p || !frame || event.source !== frame.contentWindow) return;
-    const data = event.data as { type?: unknown; changes?: unknown } | null;
+    const data = event.data as { type?: unknown; changes?: unknown; items?: unknown } | null;
+    if (data?.type === "herbarium:headings") {
+      toc = sanitizeHeadings(data.items);
+      return;
+    }
+    if (data?.type === "herbarium:selection") {
+      onFrameSelection(data as unknown as FrameSelection);
+      return;
+    }
+    if (data?.type === "herbarium:highlight-click") {
+      const id = (data as { id?: unknown }).id;
+      if (typeof id === "string") focusHighlight(id);
+      return;
+    }
+    if (data?.type === "herbarium:link") {
+      const href = (data as { href?: unknown }).href;
+      if (typeof href === "string") void followLink(href);
+      return;
+    }
+    if (data?.type === "herbarium:highlights-applied") {
+      const found = (data as { found?: unknown }).found;
+      anchored = new Set(Array.isArray(found) ? found.filter((x): x is string => typeof x === "string") : []);
+      return;
+    }
     if (!data || data.type !== "herbarium:storage") return;
     const changes = sanitizeChanges(data.changes);
     if (changes.length > 0) enqueueStorage(p.meta.id, changes);
+  }
+
+  // A page's script can post the same message as a click: follow at most one
+  // link a second, so pages cannot bounce the reader between each other.
+  let lastLinkAt = 0;
+
+  /** Follow a link clicked in the page: another page opens here, a web link is offered. */
+  async function followLink(href: string) {
+    const now = Date.now();
+    if (now - lastLinkAt < 1000 || href.length > 4096 || editing) return;
+    lastLinkAt = now;
+    const id = pageLinkId(href);
+    if (id !== null) {
+      const known = () => app.library.some((p) => p.id === id) || app.pages.some((p) => p.id === id);
+      if (!known()) await reloadPages(true);
+      if (known()) await openPage(id);
+      else toast(t("deepLink.notFound"), "error");
+    } else if (/^https?:\/\//i.test(href)) {
+      offerWebLink(href);
+    }
   }
 
   /** Discard a page's saved state and reload its frame with an empty shim. */
@@ -331,6 +384,7 @@
       await flushStorage();
       const loaded = await api.getPage(id);
       page = loaded;
+      void api.markRead(id).catch((e) => console.error(e));
       baseUpdatedAt = loaded.meta.updatedAt;
       source = loaded.html;
       syncDraft(loaded.meta);
@@ -360,6 +414,218 @@
   function markReady() {
     clearTimeout(frameTimer);
     frameReady = true;
+    sendToFrame({ type: "herbarium:zoom", zoom: prefs.readerZoom });
+    selection = null;
+    sendHighlights();
+  }
+
+  /* ---------------------------------------------------- highlights & notes */
+
+  interface FrameSelection {
+    text: string;
+    prefix?: string;
+    suffix?: string;
+    rect?: { x: number; y: number; w: number; h: number };
+  }
+
+  const HIGHLIGHT_COLORS: HighlightColor[] = ["yellow", "green", "blue", "pink"];
+  const highlights = $derived<Highlight[]>(page?.meta.ext?.highlights ?? []);
+  /** Highlights the page could place (others lost their text in an edit). */
+  let anchored = $state<Set<string>>(new Set());
+  /** The selection in the page, with where to show the highlight toolbar. */
+  let selection = $state<(FrameSelection & { left: number; top: number }) | null>(null);
+  let focusedHighlight = $state<string | null>(null);
+
+  function sendHighlights() {
+    sendToFrame({
+      type: "herbarium:highlights",
+      items: highlights.map((h) => ({ id: h.id, quote: h.quote, prefix: h.prefix, suffix: h.suffix, color: h.color })),
+    });
+  }
+
+  function onFrameSelection(sel: FrameSelection) {
+    const frame = servedFrame;
+    if (!frame || typeof sel.text !== "string" || !sel.text.trim() || !sel.rect || editing) {
+      selection = null;
+      return;
+    }
+    const box = frame.getBoundingClientRect();
+    const zoom = prefs.readerZoom || 1;
+    const left = box.left + (sel.rect.x + sel.rect.w / 2) * zoom;
+    const top = box.top + sel.rect.y * zoom;
+    selection = {
+      text: sel.text.slice(0, 2000),
+      prefix: typeof sel.prefix === "string" ? sel.prefix.slice(-64) : "",
+      suffix: typeof sel.suffix === "string" ? sel.suffix.slice(0, 64) : "",
+      left: Math.min(Math.max(box.left + 80, left), box.right - 80),
+      top: Math.max(box.top + 8, top - 44),
+    };
+  }
+
+  /** Apply a highlight change: adopt the page meta and redraw the marks. */
+  function adoptHighlights(meta: PageMeta) {
+    if (!page) return;
+    page.meta = meta;
+    baseUpdatedAt = meta.updatedAt;
+    sendHighlights();
+  }
+
+  async function highlightSelection(color: HighlightColor, withNote = false) {
+    const p = page;
+    const sel = selection;
+    if (!p || !sel || pageGone) return;
+    selection = null;
+    try {
+      const out = await api.addHighlight(p.meta.id, {
+        quote: sel.text,
+        prefix: sel.prefix ?? "",
+        suffix: sel.suffix ?? "",
+        color,
+      });
+      adoptHighlights(out.page);
+      if (withNote) focusHighlight(out.highlight.id);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function saveHighlightNote(id: string, note: string) {
+    const p = page;
+    const current = highlights.find((h) => h.id === id);
+    if (!p || !current || (current.note ?? "") === note.trim()) return;
+    try {
+      adoptHighlights((await api.updateHighlight(p.meta.id, id, { note })).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function recolorHighlight(id: string, color: HighlightColor) {
+    const p = page;
+    if (!p) return;
+    try {
+      adoptHighlights((await api.updateHighlight(p.meta.id, id, { color })).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  async function removeHighlight(id: string) {
+    const p = page;
+    if (!p) return;
+    try {
+      adoptHighlights((await api.removeHighlight(p.meta.id, id)).page);
+    } catch (e) {
+      toast(`${t("hl.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  /** Show a highlight's note in the details panel and the passage in the page. */
+  function focusHighlight(id: string) {
+    focusedHighlight = id;
+    if (!app.focusMode) app.inspectorOpen = true;
+    sendToFrame({ type: "herbarium:highlight-scroll", id });
+    setTimeout(() => document.getElementById(`hl-note-${id}`)?.focus(), 50);
+  }
+
+  /* --------------------------------------------- contents, zoom, focus mode */
+
+  interface Heading {
+    level: number;
+    text: string;
+    index: number;
+  }
+
+  /** Headings the page reported through the reader bridge. */
+  let toc = $state<Heading[]>([]);
+
+  /** The page controls what it reports: keep only well-formed, bounded entries. */
+  function sanitizeHeadings(items: unknown): Heading[] {
+    if (!Array.isArray(items)) return [];
+    const out: Heading[] = [];
+    for (const item of items.slice(0, 200)) {
+      const h = item as Partial<Heading> | null;
+      if (
+        h &&
+        typeof h.text === "string" &&
+        typeof h.index === "number" &&
+        Number.isInteger(h.index) &&
+        (h.level === 1 || h.level === 2 || h.level === 3)
+      ) {
+        out.push({ level: h.level, text: h.text.slice(0, 120), index: h.index });
+      }
+    }
+    return out;
+  }
+
+  function sendToFrame(message: Record<string, unknown>) {
+    // The frame's origin is opaque (sandboxed), so "*" is the only target.
+    servedFrame?.contentWindow?.postMessage(message, "*");
+  }
+
+  function setZoom(zoom: number) {
+    setPref("readerZoom", zoom);
+    sendToFrame({ type: "herbarium:zoom", zoom });
+  }
+
+  function stepZoom(dir: 1 | -1) {
+    const i = READER_ZOOMS.indexOf(prefs.readerZoom);
+    const next = READER_ZOOMS[Math.min(READER_ZOOMS.length - 1, Math.max(0, (i < 0 ? 4 : i) + dir))];
+    setZoom(next);
+  }
+
+  const viewItems = $derived.by((): DropdownMenuItem[] => {
+    const items: DropdownMenuItem[] = [
+      {
+        label: app.focusMode ? t("read.view.exitFocus") : t("read.view.focus"),
+        checked: app.focusMode,
+        shortcut: "F",
+        onclick: () => (app.focusMode = !app.focusMode),
+      },
+      { divider: true },
+      { header: true, label: t("read.view.zoom", { percent: Math.round(prefs.readerZoom * 100) }) },
+      { label: t("read.view.zoomIn"), shortcut: `${modKey("=")}`, onclick: () => stepZoom(1) },
+      { label: t("read.view.zoomOut"), shortcut: `${modKey("-")}`, onclick: () => stepZoom(-1) },
+      { label: t("read.view.zoomReset"), shortcut: `${modKey("0")}`, onclick: () => setZoom(1) },
+    ];
+    if (toc.length > 0) {
+      items.push({ divider: true }, { header: true, label: t("read.view.contents") });
+      for (const h of toc) {
+        items.push({
+          label: `${"\u2003".repeat(h.level - 1)}${h.text}`,
+          onclick: () => sendToFrame({ type: "herbarium:goto", index: h.index }),
+        });
+      }
+    }
+    return items;
+  });
+
+  function onViewKey(e: KeyboardEvent) {
+    if (!page || confirmState.pending || folderPickerState.pending || app.paletteOpen || app.importOpen) return;
+    if (isTypingTarget(e.target) || e.altKey || e.repeat) return;
+    if (document.querySelector('[aria-modal="true"]')) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && (e.key === "=" || e.key === "+")) {
+      e.preventDefault();
+      e.stopPropagation();
+      stepZoom(1);
+    } else if (mod && e.key === "-") {
+      e.preventDefault();
+      e.stopPropagation();
+      stepZoom(-1);
+    } else if (mod && e.key === "0") {
+      e.preventDefault();
+      e.stopPropagation();
+      setZoom(1);
+    } else if (!mod && !e.shiftKey && (e.key === "f" || e.key === "F") && !app.reviewSession) {
+      e.preventDefault();
+      e.stopPropagation();
+      app.focusMode = !app.focusMode;
+    } else if (!mod && e.key === "Escape" && app.focusMode && !app.historyOpen && !app.proposalOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      app.focusMode = false;
+    }
   }
 
   async function toggleNetwork() {
@@ -384,6 +650,22 @@
 
   function toggleInspector() {
     app.inspectorOpen = !app.inspectorOpen;
+  }
+
+  let iconPicker = $state(false);
+
+  /** Set or clear the page's icon; saved right away, like the network switch. */
+  async function setIcon(icon: string | null) {
+    const p = page;
+    if (!p || pageGone) return;
+    iconPicker = false;
+    try {
+      p.meta = await api.setPageIcon(p.meta.id, icon);
+      baseUpdatedAt = p.meta.updatedAt;
+      void reloadPages(true);
+    } catch (e) {
+      toast(`${t("look.failed")}: ${errorMessage(e)}`, "error");
+    }
   }
 
   /* ------------------------------------------------------------ page actions */
@@ -436,6 +718,11 @@
   let source = $state("");
   let savingSource = $state(false);
   let previewNonce = $state(0);
+
+  /** Answers the page marks with `data-herbarium-recall`, hidden in quiz mode. */
+  const recallCount = $derived(page ? (page.html.match(/\bdata-herbarium-recall\b/gi) ?? []).length : 0);
+  /** Quiz mode hides those answers until revealed; review sessions start in it. */
+  let quizMode = $state(app.reviewSession);
   let openingExternal = $state(false);
   /** Set after the file was handed to another editor: reload it when we regain focus. */
   let externalPending = false;
@@ -459,6 +746,107 @@
 
   function discardSource() {
     if (page) source = page.html;
+  }
+
+  const pageSource = $derived(page?.meta.ext?.source ?? null);
+
+  let pageLinks = $state<PageLinks | null>(null);
+  let healthIssues = $state<HealthIssue[]>([]);
+
+  // Health follows the page's content: recheck when it changes.
+  $effect(() => {
+    const p = page;
+    void app.vaultRevision;
+    if (!p) return;
+    const pageId = p.meta.id;
+    void p.meta.updatedAt;
+    void p.meta.allowCdn;
+    api
+      .pageHealth(pageId)
+      .then((r) => {
+        if (page?.meta.id === pageId) healthIssues = r.issues;
+      })
+      .catch((e) => console.error(e));
+  });
+
+  async function inlineAssets() {
+    const p = page;
+    if (!p || pageGone) return;
+    if (!(await confirmDiscardUnsaved())) return;
+    try {
+      await api.inlineAssets(p.meta.id);
+      await load();
+      void reloadPages(true);
+      toast(t("health.inlined"), "success");
+    } catch (e) {
+      toast(`${t("health.fixFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  function issueText(issue: HealthIssue): string {
+    const items = (issue.items ?? []).slice(0, 4).join(", ") + ((issue.items?.length ?? 0) > 4 ? "…" : "");
+    return t(`health.${issue.kind}`, { items, count: issue.items?.length ?? 0 });
+  }
+
+  /** The reading path this page was opened from, when the page is in it. */
+  const currentPath = $derived.by(() => {
+    const p = page;
+    if (!p || !app.pathId) return null;
+    const path = app.paths.find((x) => x.id === app.pathId);
+    if (!path) return null;
+    const index = path.pages.indexOf(p.meta.id);
+    if (index < 0) return null;
+    // Step over pages that are no longer in the vault (trashed).
+    const present = (id: string) => app.library.some((x) => x.id === id);
+    const prev = path.pages.slice(0, index).reverse().find(present) ?? null;
+    const next = path.pages.slice(index + 1).find(present) ?? null;
+    return { path, index, prev, next };
+  });
+
+  // Links change when this page or any other is rewritten; refetch on both.
+  $effect(() => {
+    const p = page;
+    void app.vaultRevision;
+    if (!p) return;
+    const pageId = p.meta.id;
+    void p.meta.updatedAt;
+    api
+      .pageLinks(pageId)
+      .then((links) => {
+        if (page?.meta.id === pageId) pageLinks = links;
+      })
+      .catch((e) => console.error(e));
+  });
+
+  /** Copy the link other pages use to point here. */
+  async function copyPageLink() {
+    const p = page;
+    if (!p) return;
+    try {
+      await navigator.clipboard.writeText(`herbarium-app://open/${p.meta.id}`);
+      toast(t("links.copied"), "success");
+    } catch (e) {
+      toast(`${t("links.copyFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+  const sourceHost = $derived.by(() => {
+    const url = pageSource?.url;
+    if (!url) return "";
+    try {
+      return new URL(url).host || url;
+    } catch {
+      return url;
+    }
+  });
+
+  /** The user clicked the recorded source link: open it in the browser. */
+  function openSourceUrl() {
+    const url = pageSource?.url;
+    if (!url || !/^https?:\/\//i.test(url)) return;
+    api.openExternal(url).catch((e) => {
+      console.error(e);
+      toast(t("link.failed"), "error");
+    });
   }
 
   async function openExternally() {
@@ -566,6 +954,54 @@
     } catch (e) {
       const msg = errorMessage(e);
       toast(`${t("history.restoreFailed")}: ${msg}`, "error");
+      return false;
+    }
+  }
+
+  /* ------------------------------------------------------- agent proposals */
+  let remixOpen = $state(false);
+
+
+  const pendingProposal = $derived(app.proposals.find((x) => x.id === page?.meta.id) ?? null);
+
+  async function acceptProposal(): Promise<boolean> {
+    const p = page;
+    if (!p || pageGone) return false;
+    if (!(await confirmDiscardUnsaved())) return false;
+    try {
+      try {
+        await api.acceptProposal(p.meta.id);
+      } catch (e) {
+        if (!errorMessage(e).startsWith("conflict")) throw e;
+        const force = await confirmAction({
+          title: t("proposal.staleTitle"),
+          message: t("proposal.staleMessage"),
+          confirmLabel: t("proposal.acceptAnyway"),
+          danger: true,
+        });
+        if (!force) return false;
+        await api.acceptProposal(p.meta.id, true);
+      }
+      await load();
+      await reloadPages(true);
+      toast(t("proposal.accepted"), "success");
+      return true;
+    } catch (e) {
+      toast(`${t("proposal.acceptFailed")}: ${errorMessage(e)}`, "error");
+      return false;
+    }
+  }
+
+  async function rejectProposal(): Promise<boolean> {
+    const p = page;
+    if (!p) return false;
+    try {
+      await api.rejectProposal(p.meta.id);
+      await reloadPages(true);
+      toast(t("proposal.rejected"), "success");
+      return true;
+    } catch (e) {
+      toast(`${t("proposal.rejectFailed")}: ${errorMessage(e)}`, "error");
       return false;
     }
   }
@@ -850,6 +1286,7 @@
     app.historyOpen = false;
     window.addEventListener("focus", onFocus);
     window.addEventListener("keydown", onSessionKey, true);
+    window.addEventListener("keydown", onViewKey, true);
     window.addEventListener("message", onStorageMessage);
     window.addEventListener("pagehide", onPageHide);
     // Nothing leaves this page (navigation, close, delete) without flushing the
@@ -862,6 +1299,7 @@
     return () => {
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("keydown", onSessionKey, true);
+      window.removeEventListener("keydown", onViewKey, true);
       window.removeEventListener("message", onStorageMessage);
       window.removeEventListener("pagehide", onPageHide);
     };
@@ -889,6 +1327,7 @@
     {#if page}
       <div class="identity">
         <h1 class="title ellipsis" title={page.meta.title || t("common.untitled")}>
+          {#if page.meta.ext?.look?.icon}<span class="title-icon">{page.meta.ext.look.icon}</span>{/if}
           {page.meta.title || t("common.untitled")}
         </h1>
         <div class="meta">
@@ -896,12 +1335,27 @@
             <span class="loc"><Icon name="folder" size={12} />{page.meta.folder}</span>
           {/if}
           {#each page.meta.tags as tag (tag)}
-            <span class="chip chip-muted">{tag}</span>
+            <span class="chip chip-muted" data-color={tagColor(tag)}>{tag}</span>
           {/each}
         </div>
       </div>
 
       <div class="actions">
+        <DropdownMenu items={viewItems} align="right" ariaLabel={t("read.view.label")}>
+          {#snippet trigger({ open, toggle })}
+            <button
+              class="btn btn-sm details-btn"
+              class:active={open || app.focusMode}
+              aria-expanded={open}
+              aria-haspopup="menu"
+              onclick={toggle}
+              title={t("read.view.hint")}
+            >
+              <Icon name="layout-grid" size={14} />
+              {t("read.view.label")}
+            </button>
+          {/snippet}
+        </DropdownMenu>
         <button
           class="btn btn-sm details-btn"
           class:active={editing}
@@ -945,6 +1399,29 @@
             {t("read.resetStorage")}
           </button>
         {/if}
+        {#if recallCount > 0}
+          <button
+            class="btn btn-sm details-btn"
+            class:active={quizMode}
+            aria-pressed={quizMode}
+            onclick={() => (quizMode = !quizMode)}
+            title={t("read.quizHint", { count: recallCount })}
+          >
+            <Icon name="circle-check" size={14} />
+            {t("read.quiz")}
+          </button>
+        {/if}
+        <button
+          class="btn btn-sm details-btn"
+          class:active={remixOpen}
+          onclick={() => (remixOpen = true)}
+          disabled={pageGone}
+          title={t("remix.hint")}
+        >
+          <Icon name="sparkle" size={14} />
+          {t("remix.action")}
+        </button>
+        <ShareMenu id={page.meta.id} title={page.meta.title} html={source} disabled={pageGone} />
         <button
           class="btn btn-sm details-btn"
           class:active={app.historyOpen}
@@ -977,6 +1454,58 @@
         <Icon name="info" size={14} />
         <span>{t("read.deletedOnDisk")}</span>
         <button class="btn btn-xs" onclick={back}>{t("common.back")}</button>
+      </div>
+    {/if}
+
+    {#if currentPath && !app.reviewSession}
+      <div class="path-bar">
+        <span class="eyebrow">{t("paths.reading")}</span>
+        <strong class="ellipsis">{currentPath.path.name}</strong>
+        <span class="muted">{t("paths.position", { n: currentPath.index + 1, total: currentPath.path.pages.length })}</span>
+        <span class="grow"></span>
+        <button
+          class="btn btn-xs"
+          disabled={!currentPath.prev}
+          onclick={() => currentPath?.prev && void openInPath(currentPath.path.id, currentPath.prev)}
+        >
+          <Icon name="arrow-left" size={12} />{t("paths.previous")}
+        </button>
+        <button
+          class="btn btn-xs btn-primary"
+          disabled={!currentPath.next}
+          onclick={() => currentPath?.next && void openInPath(currentPath.path.id, currentPath.next)}
+        >
+          {t("paths.next")}<Icon name="chevron-right" size={12} />
+        </button>
+      </div>
+    {/if}
+
+    {#if app.reviewSession && highlights.length > 0}
+      <details class="hl-strip">
+        <summary>{t("hl.yours", { count: highlights.length })}</summary>
+        <ul>
+          {#each highlights as h (h.id)}
+            <li>
+              <button class="hl-quote" data-hl={h.color} onclick={() => focusHighlight(h.id)}>“{h.quote}”</button>
+              {#if h.note}<span class="hl-note-text">{h.note}</span>{/if}
+            </li>
+          {/each}
+        </ul>
+      </details>
+    {/if}
+
+    {#if pendingProposal && !app.proposalOpen}
+      <div class="banner proposal" role="status">
+        <Icon name="file-text" size={14} />
+        <div class="banner-text">
+          <strong>{pendingProposal.source === "remix" ? t("proposal.bannerTitleRemix") : t("proposal.bannerTitle")}</strong>
+          <span>{t("proposal.bannerMessage", { when: timeAgo(pendingProposal.at) })}</span>
+        </div>
+        <div class="banner-actions">
+          <button class="btn btn-xs btn-primary" onclick={() => (app.proposalOpen = true)}>
+            {t("proposal.review")}
+          </button>
+        </div>
       </div>
     {/if}
 
@@ -1056,10 +1585,10 @@
           <span class="spinner" role="status" aria-label={t("read.saving")}></span>
         {/if}
       </div>
-    {:else}
+    {:else if !app.focusMode}
       <div class="review-bar">
         {#if page.meta.nextReview}
-          <button class="btn btn-xs btn-primary done" onclick={() => grade("good")} disabled={saving}>
+          <button class="btn btn-xs done" onclick={() => grade("good")} disabled={saving}>
             <Icon name="check" size={12} />{t("review.done")}
           </button>
           <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.nextReview")}</span>
@@ -1130,21 +1659,23 @@
                   {t("edit.close")}
                 </button>
               </div>
-              <HtmlEditor
-                bind:value={source}
-                onsave={saveSource}
-                wrap={prefs.editorWrap}
-                fontSize={prefs.editorFontSize}
-                lineHeight={prefs.editorLineHeight}
-                tabSize={prefs.editorTabSize}
-                tabIndents={prefs.editorTabIndents}
-                spellcheck={prefs.editorSpellcheck}
-                fontFamily={prefs.editorFont === "system"
-                  ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-                  : "var(--mono)"}
-                ariaLabel={t("edit.source")}
-                readonly={pageGone}
-              />
+              {#await loadHtmlEditor() then HtmlEditor}
+                <HtmlEditor
+                  bind:value={source}
+                  onsave={saveSource}
+                  wrap={prefs.editorWrap}
+                  fontSize={prefs.editorFontSize}
+                  lineHeight={prefs.editorLineHeight}
+                  tabSize={prefs.editorTabSize}
+                  tabIndents={prefs.editorTabIndents}
+                  spellcheck={prefs.editorSpellcheck}
+                  fontFamily={prefs.editorFont === "system"
+                    ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+                    : "var(--mono)"}
+                  ariaLabel={t("edit.source")}
+                  readonly={pageGone}
+                />
+              {/await}
             </div>
             {#if prefs.editorPreview !== "off"}
               <div class="frame-holder">
@@ -1168,7 +1699,7 @@
           <iframe
             class:ready={frameReady}
             title={t("read.preview")}
-            src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}`}
+            src={`herbarium://page/${encodeURIComponent(page.meta.id)}?v=${previewNonce}${quizMode && recallCount > 0 ? "&recall=1" : ""}`}
             sandbox="allow-scripts allow-popups"
             onload={markReady}
             bind:this={servedFrame}
@@ -1177,13 +1708,36 @@
         {/if}
       </div>
 
-      {#if app.inspectorOpen}
+      {#if app.inspectorOpen && !app.focusMode}
         <aside class="inspector" aria-label={t("insp.label")}>
           <section class="insp-section">
             <h2 class="eyebrow">{t("read.details")}</h2>
             <div class="field">
               <label for="d-title">{t("insp.title")}</label>
-              <input id="d-title" type="text" bind:value={dTitle} />
+              <div class="title-row">
+                <button
+                  type="button"
+                  class="icon-btn"
+                  aria-expanded={iconPicker}
+                  onclick={() => (iconPicker = !iconPicker)}
+                  title={t("look.pageIcon")}
+                  aria-label={t("look.pageIcon")}
+                  disabled={pageGone}
+                >
+                  {#if page.meta.ext?.look?.icon}{page.meta.ext.look.icon}{:else}<Icon name="leaf" size={13} />{/if}
+                </button>
+                <input id="d-title" type="text" bind:value={dTitle} />
+              </div>
+              {#if iconPicker}
+                <div class="icon-grid" role="group" aria-label={t("look.pageIcon")}>
+                  {#each ICON_CHOICES as choice (choice)}
+                    <button type="button" onclick={() => void setIcon(choice)}>{choice}</button>
+                  {/each}
+                  <button type="button" class="clear-icon" onclick={() => void setIcon(null)} title={t("look.noIcon")}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </div>
+              {/if}
             </div>
             <div class="field">
               <label for="d-folder">{t("insp.folder")}</label>
@@ -1268,11 +1822,155 @@
               <button class="btn btn-sm" onclick={duplicate} disabled={saving} title={t("read.duplicateHint")}>
                 <Icon name="files" size={13} />{t("read.duplicate")}
               </button>
+              <button class="btn btn-sm" onclick={() => page && void exportPageFile(page.meta)} disabled={pageGone} title={t("export.pageHint")}>
+                <Icon name="upload" size={13} />{t("export.page")}
+              </button>
               <button class="btn btn-sm" onclick={reveal} disabled={pageGone} title={t("read.revealHint")}>
                 <Icon name="external-link" size={13} />{t("read.reveal")}
               </button>
             </div>
           </section>
+
+          {#if app.paths.length > 0}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("paths.title")}</h2>
+              <ul class="links-list">
+                {#each app.paths as path (path.id)}
+                  <li>
+                    <label class="path-check">
+                      <input
+                        type="checkbox"
+                        checked={path.pages.includes(page.meta.id)}
+                        disabled={pageGone}
+                        onchange={(e) => void setPageInPath(path.id, page!.meta.id, e.currentTarget.checked)}
+                      />
+                      <span class="ellipsis">{path.name}</span>
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+
+          {#if healthIssues.length > 0}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("health.title")}</h2>
+              <ul class="health">
+                {#each healthIssues as issue (issue.kind)}
+                  <li data-level={issue.level}>
+                    <Icon name={issue.level === "info" ? "info" : "wifi-off"} size={13} />
+                    <span>{issueText(issue)}</span>
+                    {#if issue.fix === "enable-network"}
+                      <button class="btn btn-xs" onclick={toggleNetwork} disabled={pageGone}>{t("health.enableNetwork")}</button>
+                    {:else if issue.fix === "inline-assets"}
+                      <button class="btn btn-xs" onclick={inlineAssets} disabled={pageGone}>{t("health.inline")}</button>
+                    {/if}
+                  </li>
+                {/each}
+              </ul>
+            </section>
+          {/if}
+
+          <section class="insp-section">
+            <h2 class="eyebrow">{t("hl.title")}</h2>
+            {#if highlights.length === 0}
+              <p class="hint">{t("hl.none")}</p>
+            {:else}
+              <ul class="hl-list">
+                {#each highlights as h (h.id)}
+                  <li class:focused={focusedHighlight === h.id}>
+                    <div class="hl-head">
+                      <span class="hl-colors">
+                        {#each HIGHLIGHT_COLORS as c (c)}
+                          <button
+                            class="hl-dot"
+                            data-hl={c}
+                            class:on={h.color === c}
+                            aria-label={t(`hl.color.${c}`)}
+                            title={t(`hl.color.${c}`)}
+                            onclick={() => void recolorHighlight(h.id, c)}
+                          ></button>
+                        {/each}
+                      </span>
+                      <button class="btn btn-ghost btn-icon hl-remove" title={t("hl.remove")} aria-label={t("hl.remove")} onclick={() => void removeHighlight(h.id)}>
+                        <Icon name="x" size={12} />
+                      </button>
+                    </div>
+                    <button class="hl-quote" data-hl={h.color} onclick={() => focusHighlight(h.id)}>“{h.quote}”</button>
+                    {#if frameReady && !anchored.has(h.id)}
+                      <span class="hl-lost">{t("hl.lost")}</span>
+                    {/if}
+                    <textarea
+                      id={`hl-note-${h.id}`}
+                      rows="2"
+                      placeholder={t("hl.notePlaceholder")}
+                      value={h.note ?? ""}
+                      onblur={(e) => void saveHighlightNote(h.id, e.currentTarget.value)}
+                    ></textarea>
+                  </li>
+                {/each}
+              </ul>
+            {/if}
+          </section>
+
+          <section class="insp-section">
+            <div class="links-head">
+              <h2 class="eyebrow">{t("links.title")}</h2>
+              <button class="btn btn-xs btn-ghost" onclick={copyPageLink} title={t("links.copyHint")}>
+                {t("links.copy")}
+              </button>
+            </div>
+            {#if pageLinks && (pageLinks.links.length || pageLinks.backlinks.length || pageLinks.broken.length)}
+              {#if pageLinks.links.length || pageLinks.broken.length}
+                <h3 class="links-sub">{t("links.to")}</h3>
+                <ul class="links-list">
+                  {#each pageLinks.links as l (l.id)}
+                    <li><button class="link-btn" onclick={() => void openPage(l.id)}>{l.title}</button></li>
+                  {/each}
+                  {#each pageLinks.broken as id (id)}
+                    <li class="broken" title={t("links.brokenHint")}>{id}</li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if pageLinks.backlinks.length}
+                <h3 class="links-sub">{t("links.from")}</h3>
+                <ul class="links-list">
+                  {#each pageLinks.backlinks as l (l.id)}
+                    <li><button class="link-btn" onclick={() => void openPage(l.id)}>{l.title}</button></li>
+                  {/each}
+                </ul>
+              {/if}
+            {:else}
+              <p class="hint">{t("links.none")}</p>
+            {/if}
+          </section>
+
+          {#if pageSource}
+            <section class="insp-section">
+              <h2 class="eyebrow">{t("insp.source")}</h2>
+              <dl class="facts">
+                {#if pageSource.tool}
+                  <div><dt>{t("insp.sourceTool")}</dt><dd>{pageSource.tool}</dd></div>
+                {/if}
+                {#if pageSource.url}
+                  <div>
+                    <dt>{t("insp.sourceUrl")}</dt>
+                    <dd>
+                      <button class="link-btn" onclick={openSourceUrl} title={pageSource.url}>
+                        {sourceHost}<Icon name="external-link" size={11} />
+                      </button>
+                    </dd>
+                  </div>
+                {/if}
+              </dl>
+              {#if pageSource.prompt}
+                <details class="source-prompt">
+                  <summary>{t("insp.sourcePrompt")}</summary>
+                  <p>{pageSource.prompt}</p>
+                </details>
+              {/if}
+            </section>
+          {/if}
 
           <section class="insp-section">
             <h2 class="eyebrow">{t("insp.activity")}</h2>
@@ -1317,6 +2015,26 @@
         onClose={() => (app.historyOpen = false)}
       />
     {/if}
+
+    {#if remixOpen && page}
+      <RemixDialog
+        pageId={page.meta.id}
+        onClose={() => (remixOpen = false)}
+        onDone={() => {
+          remixOpen = false;
+          app.proposalOpen = true;
+        }}
+      />
+    {/if}
+    {#if app.proposalOpen && pendingProposal}
+      <ProposalPanel
+        pageId={page.meta.id}
+        currentHtml={page.html}
+        onAccept={acceptProposal}
+        onReject={rejectProposal}
+        onClose={() => (app.proposalOpen = false)}
+      />
+    {/if}
   {:else}
     <div class="load">
       <span class="spinner"></span>
@@ -1324,6 +2042,17 @@
     </div>
   {/if}
 </div>
+
+{#if selection}
+  <div class="hl-toolbar" style={`left:${selection.left}px;top:${selection.top}px`} role="toolbar" aria-label={t("hl.toolbar")}>
+    {#each HIGHLIGHT_COLORS as c (c)}
+      <button class="hl-dot" data-hl={c} aria-label={t(`hl.color.${c}`)} title={t(`hl.color.${c}`)} onmousedown={(e) => e.preventDefault()} onclick={() => void highlightSelection(c)}></button>
+    {/each}
+    <button class="hl-note-btn" onmousedown={(e) => e.preventDefault()} onclick={() => void highlightSelection("yellow", true)}>
+      {t("hl.addNote")}
+    </button>
+  </div>
+{/if}
 
 <style>
   .read {
@@ -1383,6 +2112,49 @@
     flex: none;
   }
 
+  /* Quiet toolbar: borderless until hovered or switched on. */
+  .actions :global(:where(.btn.btn-sm)) {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    color: var(--muted);
+  }
+  .actions :global(:where(.btn.btn-sm):hover:not(:disabled)) {
+    background: var(--sunken);
+    color: var(--text);
+  }
+
+  .done {
+    color: var(--ok);
+    background: var(--ok-soft);
+    border-color: transparent;
+  }
+  .done:hover:not(:disabled) {
+    filter: brightness(0.97);
+  }
+
+  /* Narrow windows: the review bar keeps to one line. */
+  @media (max-width: 1240px) {
+    .review-bar .rb-label {
+      font-size: 0;
+      gap: 0;
+    }
+    .review-bar .rb-label:not(:has(:global(svg))) {
+      display: none;
+    }
+    .review-bar .rb-sep {
+      display: none;
+    }
+  }
+
+  /* Narrow windows: icons only (every button keeps its tooltip). */
+  @media (max-width: 1240px) {
+    .actions :global(.btn.btn-sm) {
+      font-size: 0;
+      gap: 0;
+    }
+  }
+
   .net.on {
     color: var(--ok);
     border-color: transparent;
@@ -1411,6 +2183,11 @@
     border-bottom-color: var(--warn-border);
   }
 
+  .banner.proposal {
+    background: var(--raised);
+    color: var(--text);
+  }
+
   .banner.danger {
     background: var(--danger-soft, var(--sunken));
     color: var(--danger);
@@ -1435,7 +2212,7 @@
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
-    padding: 8px 16px;
+    padding: 5px 16px;
     border-bottom: 1px solid var(--border);
     background: var(--raised);
     font-size: var(--fs-sm);
@@ -1603,6 +2380,57 @@
     background: var(--surface);
   }
 
+  .title-icon {
+    margin-right: 6px;
+  }
+
+  .title-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .title-row input {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .icon-btn {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .icon-grid {
+    display: grid;
+    grid-template-columns: repeat(9, 1fr);
+    gap: 2px;
+    margin-top: 6px;
+  }
+
+  .icon-grid button {
+    height: 26px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .icon-grid button:hover {
+    background: var(--sunken);
+  }
+
+  .icon-grid .clear-icon {
+    color: var(--muted);
+  }
+
   .tag-chip {
     display: inline-flex;
     align-items: center;
@@ -1717,6 +2545,278 @@
 
   .delete-btn {
     align-self: flex-start;
+  }
+
+  .link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .link-btn:hover {
+    text-decoration: underline;
+  }
+
+  .path-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--raised);
+    font-size: var(--fs-sm);
+    flex: none;
+    min-width: 0;
+  }
+
+  .path-bar .grow {
+    flex: 1;
+  }
+
+  .path-bar .muted {
+    color: var(--muted);
+    white-space: nowrap;
+  }
+
+  .path-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .health {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: var(--fs-sm);
+  }
+
+  .health li {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    align-items: start;
+    color: var(--text-soft);
+  }
+
+  .health li[data-level="error"] {
+    color: var(--danger);
+  }
+
+  .health li[data-level="warn"] {
+    color: var(--warn);
+  }
+
+  .health li :global(svg) {
+    margin-top: 3px;
+  }
+
+  .health li .btn {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .hl-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .hl-list li {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+  }
+
+  .hl-list li.focused {
+    border-color: var(--text-soft);
+  }
+
+  .hl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .hl-colors {
+    display: flex;
+    gap: 4px;
+  }
+
+  [data-hl="yellow"] { --hl: rgba(250, 204, 21, 0.55); }
+  [data-hl="green"] { --hl: rgba(74, 222, 128, 0.5); }
+  [data-hl="blue"] { --hl: rgba(96, 165, 250, 0.5); }
+  [data-hl="pink"] { --hl: rgba(244, 114, 182, 0.5); }
+
+  .hl-dot {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: 2px solid var(--surface);
+    border-radius: 50%;
+    outline: 1px solid var(--border);
+    background: var(--hl);
+    cursor: pointer;
+  }
+
+  .hl-dot.on {
+    outline: 2px solid var(--text);
+  }
+
+  .hl-quote {
+    padding: 0;
+    border: 0;
+    background: linear-gradient(transparent 55%, var(--hl) 55%);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-sm);
+    text-align: left;
+    cursor: pointer;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .hl-lost {
+    font-size: var(--fs-2xs);
+    color: var(--warn);
+  }
+
+  .hl-list textarea {
+    font-size: var(--fs-sm);
+    resize: vertical;
+  }
+
+  .hl-remove {
+    width: 22px;
+    height: 22px;
+  }
+
+  .hl-strip {
+    flex: none;
+    padding: 6px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--raised);
+    font-size: var(--fs-sm);
+  }
+
+  .hl-strip summary {
+    cursor: pointer;
+    color: var(--text-soft);
+  }
+
+  .hl-strip ul {
+    list-style: none;
+    margin: 6px 0 2px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 30vh;
+    overflow-y: auto;
+  }
+
+  .hl-note-text {
+    display: block;
+    color: var(--muted);
+    font-size: var(--fs-xs);
+  }
+
+  .hl-toolbar {
+    position: fixed;
+    z-index: var(--z-palette);
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+  }
+
+  .hl-note-btn {
+    padding: 2px 8px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--sunken);
+    color: var(--text);
+    font-size: var(--fs-xs);
+    cursor: pointer;
+  }
+
+  .links-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .links-sub {
+    margin: 8px 0 4px;
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    color: var(--muted);
+  }
+
+  .links-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: var(--fs-sm);
+  }
+
+  .links-list .link-btn {
+    text-align: left;
+  }
+
+  .links-list .broken {
+    color: var(--muted);
+    text-decoration: line-through;
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+  }
+
+  .source-prompt {
+    margin-top: 8px;
+    font-size: var(--fs-sm);
+  }
+
+  .source-prompt summary {
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .source-prompt p {
+    margin: 6px 0 0;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--text);
   }
 
   .hint {

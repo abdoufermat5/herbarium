@@ -1,12 +1,26 @@
 // Built-in features, written against the same `Extension` API a plugin uses.
 
+mod appearance;
 mod fsrs;
+mod health;
+mod highlights;
 mod history;
 mod library;
+mod links;
 mod network;
 mod pages;
+pub use health::{SCRIPT_HOSTS, STYLE_HOSTS};
+pub(crate) use highlights::of as highlights_of;
+pub use pages::import_key;
+mod paths;
+mod previews;
+mod proposals;
+mod published;
 mod review;
+mod samples;
+mod searches;
 mod storage;
+mod today;
 
 use serde_json::{Map, Value, json};
 
@@ -20,6 +34,17 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(storage::Storage),
         Box::new(network::Network),
         Box::new(history::History),
+        Box::new(proposals::Proposals),
+        Box::new(searches::Searches),
+        Box::new(links::Links),
+        Box::new(paths::Paths),
+        Box::new(today::Today),
+        Box::new(samples::Samples),
+        Box::new(appearance::Appearance),
+        Box::new(previews::Previews),
+        Box::new(highlights::Highlights),
+        Box::new(health::Health),
+        Box::new(published::Published),
     ]
 }
 

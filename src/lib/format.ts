@@ -45,7 +45,7 @@ export function timeAgo(ms: number | null | undefined): string {
 }
 
 /** "3 pages" in the active language. `word` is a `unit.*` key. */
-export function plural(n: number, word: "page" | "file" | "minute" | "hour" | "day"): string {
+export function plural(n: number, word: "page" | "file" | "minute" | "hour" | "day" | "review"): string {
   return t(`unit.${word}`, { count: n });
 }
 

@@ -10,8 +10,19 @@
 
 use tauri::{Emitter, Runtime, Url, Webview};
 
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use crate::cli::{DeepLink, parse_deep_link};
+
 /// Event sent to the UI with a blocked `http(s)` URL.
 pub const BLOCKED_EVENT: &str = "navigation-blocked";
+/// Event sent to the UI with a link a page followed to another page. Apart
+/// from the OS's deep links: only the page open in the reader may use it.
+pub const PAGE_LINK_EVENT: &str = "page-link";
+/// Pages followed from pages at most this often, so two pages that redirect
+/// to each other on load cannot bounce the reader between them.
+const PAGE_LINK_MIN_MS: i64 = 1000;
+static LAST_PAGE_LINK: AtomicI64 = AtomicI64::new(i64::MIN / 2);
 
 /// Whether `url` may load in any frame of the app.
 pub fn allowed(url: &Url) -> bool {
@@ -27,12 +38,32 @@ pub fn allowed(url: &Url) -> bool {
     }
 }
 
-/// Hand a web link the app refused to load to the UI, which offers to open it
-/// in the system browser.
+/// Hand a link the app refused to load to the UI: a web link is offered to
+/// open in the system browser; a link to another page
+/// (`herbarium-app://open/<id>`) opens that page in the app.
 pub fn offer<R: Runtime>(emitter: &impl Emitter<R>, url: &Url) {
+    if let Some(link @ DeepLink::Open { .. }) = page_link(url) {
+        let now = herbarium_core::time::now_ms();
+        let last = LAST_PAGE_LINK.load(Ordering::Relaxed);
+        if now - last >= PAGE_LINK_MIN_MS {
+            LAST_PAGE_LINK.store(now, Ordering::Relaxed);
+            let _ = emitter.emit(PAGE_LINK_EVENT, link);
+        }
+        return;
+    }
     if matches!(url.scheme(), "http" | "https") {
         let _ = emitter.emit(BLOCKED_EVENT, url.as_str());
     }
+}
+
+/// A `herbarium-app://open/<id>` link, the way pages link to each other.
+fn page_link(url: &Url) -> Option<DeepLink> {
+    if !url.scheme().eq_ignore_ascii_case("herbarium-app") {
+        return None;
+    }
+    // `Url` lowercases the scheme; the parser expects the canonical form.
+    let canonical = format!("herbarium-app:{}", &url.as_str()[url.scheme().len() + 1..]);
+    parse_deep_link(&canonical).filter(|l| matches!(l, DeepLink::Open { .. }))
 }
 
 /// Decide a navigation; a blocked web link is offered to the user.
@@ -40,7 +71,9 @@ pub fn decide<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
     if allowed(url) {
         return true;
     }
-    eprintln!("herbarium: blocked navigation to {url}");
+    if page_link(url).is_none() {
+        eprintln!("herbarium: blocked navigation to {url}");
+    }
     offer(webview, url);
     false
 }
@@ -133,7 +166,33 @@ mod windows_frames {
 
 #[cfg(test)]
 mod tests {
-    use super::allowed;
+    use super::{allowed, page_link};
+    use crate::cli::DeepLink;
+
+    #[test]
+    fn page_links_open_pages_only() {
+        let link = |u: &str| page_link(&u.parse().unwrap());
+        assert_eq!(
+            link("herbarium-app://open/cargo-lock#x"),
+            Some(DeepLink::Open {
+                id: "cargo-lock".into()
+            })
+        );
+        assert_eq!(
+            link("HERBARIUM-APP://open/a"),
+            Some(DeepLink::Open { id: "a".into() })
+        );
+        assert_eq!(
+            link("herbarium-app://review"),
+            None,
+            "pages cannot switch views"
+        );
+        assert_eq!(link("https://example.com/"), None);
+        assert!(
+            !allowed(&"herbarium-app://open/a".parse().unwrap()),
+            "never loads in a frame"
+        );
+    }
 
     #[test]
     fn only_app_documents_may_load() {

@@ -730,3 +730,549 @@ fn ui_only_restrictions() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn source_is_recorded_cleaned_searchable_and_editable() {
+    let vault = temp_vault("source");
+    let host = open(&vault);
+
+    let page = host
+        .call(
+            Caller::Agent,
+            "pages.create",
+            json!({
+                "html": doc("Cargo"),
+                "source": { "url": " https://example.com/cargo ", "tool": "Claude Code", "prompt": "explain workspaces", }
+            }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap().to_string();
+    assert_eq!(page["ext"]["source"]["url"], "https://example.com/cargo");
+    assert_eq!(page["ext"]["source"]["tool"], "Claude Code");
+
+    // The prompt is searchable even though it is not in the page text.
+    let hits = host
+        .call(Caller::Ui, "pages.search", json!({ "query": "workspaces" }))
+        .unwrap();
+    assert_eq!(hits[0]["id"], id.as_str());
+
+    // The sidecar carries it, so it survives a rebuilt index.
+    let sidecar: Value =
+        serde_json::from_str(&std::fs::read_to_string(vault.join(format!("{id}.json"))).unwrap())
+            .unwrap();
+    assert_eq!(sidecar["ext"]["source"]["prompt"], "explain workspaces");
+
+    // A duplicate keeps where the original came from.
+    let copy = host
+        .call(Caller::Ui, "pages.duplicate", json!({ "id": id }))
+        .unwrap();
+    assert_eq!(copy["ext"]["source"]["tool"], "Claude Code");
+
+    // Blank fields are dropped; an all-blank source is no source.
+    let updated = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": { "tool": "ChatGPT", "url": "  " } }),
+        )
+        .unwrap();
+    assert_eq!(updated["ext"]["source"], json!({ "tool": "ChatGPT" }));
+    let cleared = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": null }),
+        )
+        .unwrap();
+    assert!(cleared["ext"].get("source").is_none());
+    let blank = host
+        .call(
+            Caller::Ui,
+            "pages.update",
+            json!({ "id": id, "source": { "tool": " " } }),
+        )
+        .unwrap();
+    assert!(blank["ext"].get("source").is_none());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn source_rejects_non_web_urls_before_writing() {
+    let vault = temp_vault("source-invalid");
+    let host = open(&vault);
+
+    let err = host
+        .call(
+            Caller::Agent,
+            "pages.create",
+            json!({ "html": doc("Bad"), "source": { "url": "javascript:alert(1)" } }),
+        )
+        .unwrap_err();
+    assert!(err.contains("http"), "{err}");
+    let pages = host.call(Caller::Ui, "pages.list", json!({})).unwrap();
+    assert_eq!(pages.as_array().unwrap().len(), 0, "nothing was written");
+
+    let page = create(&host, "Good", None, &[]);
+    let err = host
+        .call(
+            Caller::Agent,
+            "pages.update",
+            json!({ "id": page["id"], "source": { "url": "file:///etc/passwd" }, "folder": "moved" }),
+        )
+        .unwrap_err();
+    assert!(err.contains("http"), "{err}");
+    let after = host
+        .call(Caller::Ui, "pages.get", json!({ "id": page["id"] }))
+        .unwrap();
+    assert!(
+        after["meta"]["folder"].is_null(),
+        "a rejected update moves nothing"
+    );
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn search_filters_narrow_results_before_the_limit() {
+    let vault = temp_vault("filters");
+    let host = open(&vault);
+    for i in 0..5 {
+        create(&host, &format!("Rust {i}"), Some("lang/rust"), &["rust"]);
+    }
+    create(
+        &host,
+        "Rust in python folder",
+        Some("lang/python"),
+        &["python"],
+    );
+    let due = create(&host, "Due page", None, &["rust"]);
+    host.call(
+        Caller::Ui,
+        "review.schedule",
+        json!({ "id": due["id"], "intervalMinutes": 1 }),
+    )
+    .unwrap();
+
+    let ids = |q: &str, limit: Option<usize>| -> Vec<String> {
+        let mut args = json!({ "query": q });
+        if let Some(l) = limit {
+            args["limit"] = json!(l);
+        }
+        host.call(Caller::Ui, "pages.search", args)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    assert_eq!(ids("rust folder:lang/python", None).len(), 1);
+    assert_eq!(ids("tag:rust", None).len(), 6);
+    assert_eq!(
+        ids("tag:rust -folder:lang", None),
+        vec![due["id"].as_str().unwrap()]
+    );
+    // The limit applies after filtering, so a filtered match is never cut off.
+    assert_eq!(ids("folder:lang/python", Some(1)).len(), 1);
+    assert_eq!(
+        ids("is:scheduled due:1d", None),
+        vec![due["id"].as_str().unwrap()]
+    );
+    assert_eq!(ids("is:unscheduled", None).len(), 6);
+
+    let err = host
+        .call(
+            Caller::Ui,
+            "pages.search",
+            json!({ "query": "is:whatever" }),
+        )
+        .unwrap_err();
+    assert!(err.contains("is:whatever"), "{err}");
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn saved_searches_round_trip() {
+    let vault = temp_vault("saved");
+    let host = open(&vault);
+    let list = host
+        .call(
+            Caller::Agent,
+            "searches.save",
+            json!({ "name": "Rust due", "query": "tag:rust is:due" }),
+        )
+        .unwrap();
+    assert_eq!(
+        list,
+        json!([{ "name": "Rust due", "query": "tag:rust is:due" }])
+    );
+    // Same name, any case: replaced in place.
+    host.call(
+        Caller::Ui,
+        "searches.save",
+        json!({ "name": "rust due", "query": "tag:rust" }),
+    )
+    .unwrap();
+    host.call(
+        Caller::Ui,
+        "searches.save",
+        json!({ "name": "Notes", "query": "has:note" }),
+    )
+    .unwrap();
+    let list = host.call(Caller::Ui, "searches.list", json!({})).unwrap();
+    assert_eq!(list[0], json!({ "name": "rust due", "query": "tag:rust" }));
+    assert_eq!(list[1]["name"], "Notes");
+
+    assert!(
+        host.call(
+            Caller::Ui,
+            "searches.save",
+            json!({ "name": "Bad", "query": "is:nope" })
+        )
+        .is_err()
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "searches.save",
+            json!({ "name": " ", "query": "x" })
+        )
+        .is_err()
+    );
+
+    let list = host
+        .call(Caller::Ui, "searches.delete", json!({ "name": "RUST DUE" }))
+        .unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 1);
+    assert!(vault.join(".herbarium/searches.json").exists());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn links_and_backlinks_follow_the_files() {
+    let vault = temp_vault("links");
+    let host = open(&vault);
+    let target = create(&host, "Target", None, &[]);
+    let tid = target["id"].as_str().unwrap().to_string();
+    let linker = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": format!(
+                "<title>Linker</title><a href=\"herbarium-app://open/{tid}#part\">t</a>\
+                 <a href=\"HERBARIUM-APP://open/{tid}\">again</a>\
+                 <a href=\"herbarium-app://open/ghost\">g</a><a href=\"https://x.y/\">web</a>\
+                 <p>herbarium-app://open/not-a-link</p>"
+            ) }),
+        )
+        .unwrap();
+    let lid = linker["id"].as_str().unwrap().to_string();
+
+    let links = host
+        .call(Caller::Agent, "pages.links", json!({ "id": lid }))
+        .unwrap();
+    assert_eq!(links["links"].as_array().unwrap().len(), 1);
+    assert_eq!(links["links"][0]["id"], tid.as_str());
+    assert_eq!(links["broken"], json!(["ghost"]));
+    let back = host
+        .call(Caller::Agent, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert_eq!(back["backlinks"][0]["id"], lid.as_str());
+    let graph = host.call(Caller::Agent, "pages.graph", json!({})).unwrap();
+    assert_eq!(
+        graph["edges"],
+        json!([[lid.clone(), tid.clone()]]),
+        "only links to existing pages"
+    );
+    assert_eq!(graph["nodes"].as_array().unwrap().len(), 2);
+    let everything = host
+        .call(Caller::Ui, "pages.graph", json!({ "all": true }))
+        .unwrap();
+    assert!(everything["nodes"].as_array().unwrap().len() >= 2);
+
+    // Rewriting the page drops the link; the index notices the change.
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    host.call(
+        Caller::Ui,
+        "pages.set_html",
+        json!({ "id": lid, "html": "<title>Linker</title><p>no links</p>" }),
+    )
+    .unwrap();
+    let back = host
+        .call(Caller::Ui, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert!(back["backlinks"].as_array().unwrap().is_empty());
+
+    // A trashed linker no longer counts.
+    host.call(
+        Caller::Ui,
+        "pages.set_html",
+        json!({ "id": lid, "html": format!("<title>Linker</title><a href=\"herbarium-app://open/{tid}\">t</a>") }),
+    )
+    .unwrap();
+    assert_eq!(
+        host.call(Caller::Ui, "pages.links", json!({ "id": tid }))
+            .unwrap()["backlinks"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    host.call(Caller::Ui, "pages.delete", json!({ "id": lid }))
+        .unwrap();
+    let back = host
+        .call(Caller::Ui, "pages.links", json!({ "id": tid }))
+        .unwrap();
+    assert!(back["backlinks"].as_array().unwrap().is_empty());
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn created_at_import_key_and_find_by_url() {
+    let vault = temp_vault("import-key");
+    let host = open(&vault);
+    let page = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({
+                "html": doc("Old"),
+                "createdAt": 1_600_000_000_000i64,
+                "importKey": "claude:c1:solar",
+                "source": { "url": "https://Claude.AI/chat/c1#frag" }
+            }),
+        )
+        .unwrap();
+    assert_eq!(page["createdAt"], 1_600_000_000_000i64);
+    assert_eq!(page["ext"]["import"]["key"], "claude:c1:solar");
+
+    // A future date is clamped to now.
+    let future = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": doc("Future"), "createdAt": i64::MAX / 2 }),
+        )
+        .unwrap();
+    assert!(future["createdAt"].as_i64().unwrap() <= now_ms());
+
+    let keys = herbarium_core::importer::imported_keys(host.store().unwrap()).unwrap();
+    assert!(keys.contains("claude:c1:solar") && keys.len() == 1);
+
+    for url in [
+        "https://claude.ai/chat/c1",
+        "https://claude.ai/chat/c1/",
+        "HTTPS://CLAUDE.AI/chat/c1#other",
+    ] {
+        let found = host
+            .call(Caller::Agent, "pages.find_by_url", json!({ "url": url }))
+            .unwrap();
+        assert_eq!(found.as_array().unwrap().len(), 1, "{url}");
+    }
+    let none = host
+        .call(
+            Caller::Agent,
+            "pages.find_by_url",
+            json!({ "url": "https://claude.ai/chat/C1" }),
+        )
+        .unwrap();
+    assert!(
+        none.as_array().unwrap().is_empty(),
+        "paths stay case-sensitive"
+    );
+
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn highlights_with_notes_are_kept_and_searchable() {
+    let vault = temp_vault("highlights");
+    let host = open(&vault);
+    let page = create(&host, "Ferns", None, &[]);
+    let id = page["id"].as_str().unwrap();
+
+    let added = host
+        .call(Caller::Ui, "pages.create", json!({ "html": doc("Other") }))
+        .unwrap();
+    assert!(added["id"].is_string());
+
+    let out = host
+        .call(
+            Caller::Ui,
+            "highlights.add",
+            json!({ "page": id, "quote": " Ferns content ", "prefix": "x".repeat(200), "suffix": "", "note": "spores, not seeds" }),
+        )
+        .unwrap();
+    let hid = out["highlight"]["id"].as_str().unwrap().to_string();
+    assert_eq!(out["highlight"]["quote"], "Ferns content");
+    assert_eq!(out["highlight"]["color"], "yellow");
+    assert_eq!(
+        out["highlight"]["prefix"].as_str().unwrap().len(),
+        64,
+        "context is clipped"
+    );
+    assert_eq!(out["page"]["ext"]["highlights"][0]["id"], hid.as_str());
+
+    let hits = host
+        .call(Caller::Agent, "pages.search", json!({ "query": "spores" }))
+        .unwrap();
+    assert_eq!(hits[0]["id"], id, "notes are searchable");
+
+    let updated = host
+        .call(
+            Caller::Ui,
+            "highlights.update",
+            json!({ "page": id, "id": hid, "color": "green", "note": "  sporangia  " }),
+        )
+        .unwrap();
+    assert_eq!(updated["highlights"][0]["color"], "green");
+    assert_eq!(updated["highlights"][0]["note"], "sporangia");
+    assert!(
+        host.call(
+            Caller::Ui,
+            "highlights.update",
+            json!({ "page": id, "id": hid, "color": "red" })
+        )
+        .is_err()
+    );
+
+    let listed = host
+        .call(Caller::Agent, "highlights.list", json!({ "page": id }))
+        .unwrap();
+    assert_eq!(listed.as_array().unwrap().len(), 1);
+    assert!(
+        host.call(
+            Caller::Agent,
+            "highlights.add",
+            json!({ "page": id, "quote": "x" })
+        )
+        .is_err(),
+        "only the user highlights"
+    );
+    assert!(
+        host.call(
+            Caller::Ui,
+            "highlights.add",
+            json!({ "page": id, "quote": "   " })
+        )
+        .is_err()
+    );
+
+    let removed = host
+        .call(
+            Caller::Ui,
+            "highlights.remove",
+            json!({ "page": id, "id": hid }),
+        )
+        .unwrap();
+    assert!(removed["page"]["ext"].get("highlights").is_none());
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn health_finds_what_breaks_a_page_and_inlines_local_files() {
+    let vault = temp_vault("health");
+    let host = open(&vault);
+    let html = r#"<!doctype html><html><head><title>Sick</title>
+        <script src="https://cdn.jsdelivr.net/npm/x.js"></script>
+        <script src="https://evil.example/tracker.js"></script>
+        <link rel="stylesheet" href="style.css"></head>
+        <body><img src="img/gone.png"><a href="herbarium-app://open/nowhere">x</a></body></html>"#;
+    let page = host
+        .call(
+            Caller::Ui,
+            "pages.create",
+            json!({ "html": html, "folder": "notes" }),
+        )
+        .unwrap();
+    let id = page["id"].as_str().unwrap().to_string();
+    std::fs::write(vault.join("notes/style.css"), "p { color: red }").unwrap();
+
+    let report = host
+        .call(Caller::Agent, "health.check", json!({ "id": id }))
+        .unwrap();
+    let kinds: Vec<&str> = report["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["kind"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "missing-asset",
+            "needs-network",
+            "broken-links",
+            "local-assets"
+        ],
+        "{report}"
+    );
+    assert_eq!(report["issues"][0]["items"], json!(["img/gone.png"]));
+    assert_eq!(report["issues"][1]["fix"], "enable-network");
+
+    // With network on, only the host outside the allowlist is a problem.
+    host.call(
+        Caller::Ui,
+        "network.set",
+        json!({ "id": id, "allowCdn": true }),
+    )
+    .unwrap();
+    let report = host
+        .call(Caller::Ui, "health.check", json!({ "id": id }))
+        .unwrap();
+    let blocked = report["issues"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["kind"] == "blocked-host")
+        .unwrap();
+    assert_eq!(blocked["items"], json!(["evil.example"]));
+
+    let vault_report = host.call(Caller::Ui, "health.check", json!({})).unwrap();
+    assert_eq!(vault_report["pages"][0]["id"], id.as_str());
+
+    let fixed = host
+        .call(
+            Caller::Ui,
+            "health.fix",
+            json!({ "id": id, "fix": "inline-assets" }),
+        )
+        .unwrap();
+    assert_eq!(fixed["id"], id.as_str());
+    let html = host
+        .call(
+            Caller::Ui,
+            "pages.get",
+            json!({ "id": id, "format": "html" }),
+        )
+        .unwrap()["html"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        html.contains("data:text/css;charset=utf-8;base64,"),
+        "{html}"
+    );
+    assert!(
+        html.contains(r#"src="img/gone.png""#),
+        "missing files keep their URL"
+    );
+    let history = host
+        .call(Caller::Ui, "history.list", json!({ "id": id }))
+        .unwrap();
+    assert_eq!(history.as_array().unwrap().len(), 1, "the original is kept");
+    assert!(
+        host.call(
+            Caller::Agent,
+            "health.fix",
+            json!({ "id": id, "fix": "inline-assets" })
+        )
+        .is_err()
+    );
+    let _ = std::fs::remove_dir_all(&vault);
+}

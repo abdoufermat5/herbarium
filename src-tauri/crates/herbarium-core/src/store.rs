@@ -33,6 +33,16 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
   id UNINDEXED, title, tags, folder, note, text, tokenize='porter'
 );
+CREATE TABLE IF NOT EXISTS links (
+  src TEXT NOT NULL,
+  dst TEXT NOT NULL,
+  PRIMARY KEY (src, dst)
+);
+CREATE INDEX IF NOT EXISTS links_dst ON links(dst);
+CREATE TABLE IF NOT EXISTS link_scans (
+  src         TEXT PRIMARY KEY,
+  fingerprint TEXT NOT NULL
+);
 ";
 
 pub struct Store {
@@ -121,7 +131,7 @@ impl Store {
                 meta.title,
                 tags,
                 meta.folder.as_deref().unwrap_or_default(),
-                meta.note,
+                fts_note(meta),
                 text,
             ],
         )?;
@@ -181,6 +191,18 @@ impl Store {
         self.query_metas(
             &format!("SELECT {COLUMNS} FROM pages ORDER BY title COLLATE NOCASE"),
             [],
+        )
+    }
+
+    /// Pages whose `ext` JSON contains `needle`, ignoring ASCII case: a cheap
+    /// prefilter before looking at one `ext` field properly.
+    pub fn with_ext_containing(&self, needle: &str) -> rusqlite::Result<Vec<PageMeta>> {
+        self.query_metas(
+            &format!(
+                "SELECT {COLUMNS} FROM pages WHERE instr(lower(ext), lower(?1)) > 0
+                 ORDER BY title COLLATE NOCASE"
+            ),
+            params![needle],
         )
     }
 
@@ -254,6 +276,92 @@ impl Store {
             })
         })?;
         rows.collect()
+    }
+
+    /// Bring the link index up to date: rescan every page whose files changed
+    /// since its last scan (`html` reads a page's HTML; `None` skips it) and
+    /// forget pages that are gone. Cheap when nothing changed.
+    pub fn refresh_links(
+        &self,
+        html: impl Fn(&PageMeta) -> Option<String>,
+    ) -> rusqlite::Result<()> {
+        let stale: Vec<(String, String)> = self
+            .conn
+            .prepare(
+                "SELECT p.id, p.fingerprint FROM pages p
+                 LEFT JOIN link_scans s ON s.src = p.id
+                 WHERE s.fingerprint IS NULL OR s.fingerprint != p.fingerprint",
+            )?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM links WHERE src NOT IN (SELECT id FROM pages)",
+            [],
+        )?;
+        tx.execute(
+            "DELETE FROM link_scans WHERE src NOT IN (SELECT id FROM pages)",
+            [],
+        )?;
+        for (id, fingerprint) in stale {
+            let Some(meta) = self.get_meta(&id)? else {
+                continue;
+            };
+            let Some(doc) = html(&meta) else {
+                continue;
+            };
+            tx.execute("DELETE FROM links WHERE src = ?1", params![id])?;
+            for dst in crate::content::extract_page_links(&doc) {
+                if dst != id {
+                    tx.execute(
+                        "INSERT OR IGNORE INTO links (src, dst) VALUES (?1, ?2)",
+                        params![id, dst],
+                    )?;
+                }
+            }
+            tx.execute(
+                "INSERT INTO link_scans (src, fingerprint) VALUES (?1, ?2)
+                 ON CONFLICT(src) DO UPDATE SET fingerprint = excluded.fingerprint",
+                params![id, fingerprint],
+            )?;
+        }
+        tx.commit()
+    }
+
+    /// Every link between two pages that both exist, as `(from, to)`.
+    pub fn all_links(&self) -> rusqlite::Result<Vec<(String, String)>> {
+        self.conn
+            .prepare(
+                "SELECT l.src, l.dst FROM links l
+                 JOIN pages a ON a.id = l.src JOIN pages b ON b.id = l.dst
+                 ORDER BY l.src, l.dst",
+            )?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
+    }
+
+    /// Ids `id` links to (existing or not), in id order.
+    pub fn links_from(&self, id: &str) -> rusqlite::Result<Vec<String>> {
+        self.conn
+            .prepare("SELECT dst FROM links WHERE src = ?1 ORDER BY dst")?
+            .query_map(params![id], |r| r.get(0))?
+            .collect()
+    }
+
+    /// Pages that link to `id`, by title.
+    pub fn links_to(&self, id: &str) -> rusqlite::Result<Vec<PageMeta>> {
+        let cols = COLUMNS
+            .split(',')
+            .map(|c| format!("p.{c}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        self.query_metas(
+            &format!(
+                "SELECT {cols} FROM links l JOIN pages p ON p.id = l.src
+                 WHERE l.dst = ?1 ORDER BY p.title COLLATE NOCASE"
+            ),
+            params![id],
+        )
     }
 
     /// Count of every page due for review at or before `now_ms`, with no cap.
@@ -438,6 +546,28 @@ fn like_pattern(query: &str) -> String {
         })
         .collect();
     format!("%{esc}%")
+}
+
+/// The note as indexed for search: the page's source tool and prompt, and its
+/// highlights and their notes, are searchable alongside it.
+fn fts_note(meta: &PageMeta) -> String {
+    let mut out = meta.note.clone();
+    if let Some(source) = crate::models::PageSource::of(meta) {
+        for part in [source.tool, source.prompt].into_iter().flatten() {
+            out.push('\n');
+            out.push_str(&part);
+        }
+    }
+    // Highlighted passages and their notes are searchable too.
+    for h in crate::builtin::highlights_of(meta) {
+        out.push('\n');
+        out.push_str(&h.quote);
+        if !h.note.is_empty() {
+            out.push('\n');
+            out.push_str(&h.note);
+        }
+    }
+    out
 }
 
 #[cfg(test)]

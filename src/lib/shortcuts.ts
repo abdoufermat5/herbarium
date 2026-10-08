@@ -119,6 +119,10 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   // Reader and HTML editor
   { id: "inspector", section: "editor", context: "reader", action: "shortcuts.action.inspector", keys: ["I"] },
   { id: "exitReader", section: "editor", context: "reader", action: "shortcuts.action.exitReader", keys: ["Esc"] },
+  { id: "focusMode", section: "editor", context: "reader", action: "shortcuts.action.focusMode", keys: ["F"] },
+  { id: "zoomIn", section: "editor", context: "reader", action: "shortcuts.action.zoomIn", keys: [{ mod: "=" }] },
+  { id: "zoomOut", section: "editor", context: "reader", action: "shortcuts.action.zoomOut", keys: [{ mod: "-" }] },
+  { id: "zoomReset", section: "editor", context: "reader", action: "shortcuts.action.zoomReset", keys: [{ mod: "0" }] },
   { id: "save", section: "editor", context: "editor", action: "shortcuts.action.save", keys: [{ mod: "S" }] },
   { id: "undo", section: "editor", context: "editor", action: "shortcuts.action.undo", keys: [{ mod: "Z" }] },
   { id: "redo", section: "editor", context: "editor", action: "shortcuts.action.redo", keys: [{ mod: "Shift+Z" }, { mod: "Y" }] },

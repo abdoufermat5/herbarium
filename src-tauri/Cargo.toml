@@ -33,8 +33,10 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde.workspace = true
 serde_json.workspace = true
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
+tauri-plugin-clipboard-manager = "2"
 tauri-plugin-deep-link = "2"
 tauri-plugin-dialog = "2.8.1"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2.5.1"
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
@@ -47,3 +49,12 @@ windows-core = "0.62"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+
+# What ships: one optimisation unit with link-time optimisation and no debug
+# symbols, so the binary is about half the size. Panics still unwind, so a
+# bug in one command fails that command instead of closing the app.
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

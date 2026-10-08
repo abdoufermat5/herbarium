@@ -2,8 +2,10 @@
 // iframe. Injects a Content-Security-Policy and never grants same-origin access.
 
 use std::borrow::Cow;
+#[cfg(test)]
 use std::path::{Path, PathBuf};
 
+pub use herbarium_core::assets::{mime_for_path, resolve_safe_asset_path};
 use percent_encoding::percent_decode_str;
 use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::{AppHandle, Manager, UriSchemeContext, UriSchemeResponder};
@@ -42,43 +44,6 @@ pub fn handle<R: tauri::Runtime>(
 ) {
     let app = ctx.app_handle().clone();
     tauri::async_runtime::spawn_blocking(move || responder.respond(serve(&app, &request)));
-}
-
-pub fn mime_for_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("html" | "htm") => "text/html; charset=utf-8",
-        Some("css") => "text/css; charset=utf-8",
-        Some("js" | "mjs") => "text/javascript; charset=utf-8",
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("gif") => "image/gif",
-        Some("webp") => "image/webp",
-        Some("svg") => "image/svg+xml",
-        Some("ico") => "image/x-icon",
-        Some("avif") => "image/avif",
-        Some("bmp") => "image/bmp",
-        Some("mp3") => "audio/mpeg",
-        Some("wav") => "audio/wav",
-        Some("ogg" | "oga") => "audio/ogg",
-        Some("mp4") => "video/mp4",
-        Some("webm") => "video/webm",
-        Some("ogv") => "video/ogg",
-        Some("woff2") => "font/woff2",
-        Some("woff") => "font/woff",
-        Some("ttf") => "font/ttf",
-        Some("otf") => "font/otf",
-        Some("txt" | "text") => "text/plain; charset=utf-8",
-        Some("csv") => "text/csv; charset=utf-8",
-        Some("xml") => "application/xml",
-        Some("pdf") => "application/pdf",
-        Some("wasm") => "application/wasm",
-        _ => "application/octet-stream",
-    }
 }
 
 /// Percent-decode one path segment exactly once. `None` for invalid UTF-8, an
@@ -162,7 +127,7 @@ pub fn parse_uri_and_referer(uri: &Uri, referer: Option<&str>) -> Option<ParsedR
     if let Some((ref_id, validated_rel)) = referer
         .and_then(extract_page_id_from_referer)
         .filter(|id| id != decoded_first.as_ref())
-        .and_then(|id| validate_relative_path(first_seg).map(|rel| (id, rel)))
+        .zip(validate_relative_path(first_seg))
     {
         return Some(ParsedRequest {
             page_id: ref_id,
@@ -182,52 +147,6 @@ pub fn extract_page_id_from_referer(referer: &str) -> Option<String> {
     let trimmed = raw_path.trim_start_matches('/');
     let id_part = trimmed.split('/').next()?;
     decode_segment(id_part).map(Cow::into_owned)
-}
-
-/// Resolve `rel_path` under `page_folder`, which itself must canonically live
-/// inside `vault` (an indexed folder may have been swapped for a symlink).
-pub fn resolve_safe_asset_path(
-    vault: &Path,
-    page_folder: &Path,
-    rel_path: &str,
-) -> Option<PathBuf> {
-    let canon_vault = vault.canonicalize().ok()?;
-    let canon_folder = page_folder.canonicalize().ok()?;
-    if !canon_folder.is_dir() || !canon_folder.starts_with(&canon_vault) {
-        return None;
-    }
-
-    let mut current = canon_folder.clone();
-    for seg in rel_path.split('/') {
-        if seg.is_empty() || seg.starts_with('.') || seg == ".." {
-            return None;
-        }
-        current.push(seg);
-        let meta = std::fs::symlink_metadata(&current).ok()?;
-        if meta.file_type().is_symlink() {
-            return None; // Reject symlinks
-        }
-    }
-
-    if !current.is_file() {
-        return None;
-    }
-
-    let canon_file = current.canonicalize().ok()?;
-    if !canon_file.starts_with(&canon_folder) {
-        return None;
-    }
-
-    if canon_file
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("json"))
-        .unwrap_or(false)
-    {
-        return None;
-    }
-
-    Some(current)
 }
 
 pub fn inject_base_tag(html: &str, base_href: &str) -> String {
@@ -287,11 +206,31 @@ fn storage_state_json(storage: Option<&serde_json::Value>) -> String {
 /// and persists them into the sidecar.
 const SHIM_JS: &str = include_str!("storage_shim.js");
 
-/// Inject the storage shim immediately after the base tag. `state_json` is the
-/// normalised page state (see [`storage_state_json`]).
-fn inject_storage_shim(html: &str, state_json: &str) -> String {
+/// Recall mode: hides `data-herbarium-recall` answers until revealed. Injected
+/// after the storage shim when the page URL carries `recall=1`.
+const RECALL_JS: &str = include_str!("recall.js");
+
+/// Lets the reader list the page's headings, jump to one and set the zoom.
+/// Injected into every served page, after the storage shim.
+const BRIDGE_JS: &str = include_str!("reader_bridge.js");
+
+/// True when the request asks for recall mode (`?recall=1`).
+fn wants_recall(uri: &Uri) -> bool {
+    uri.query()
+        .is_some_and(|q| q.split('&').any(|pair| pair == "recall=1"))
+}
+
+/// Inject the storage shim (and, with `recall`, the recall script) immediately
+/// after the base tag. `state_json` is the normalised page state (see
+/// [`storage_state_json`]).
+fn inject_storage_shim(html: &str, state_json: &str, recall: bool) -> String {
+    let recall_script = if recall {
+        format!("<script>{RECALL_JS}</script>")
+    } else {
+        String::new()
+    };
     let script = format!(
-        "<script>window.__herbariumState={};window.__herbariumPersist=true;{SHIM_JS}</script>",
+        "<script>window.__herbariumState={};window.__herbariumPersist=true;{SHIM_JS}</script><script>{BRIDGE_JS}</script>{recall_script}",
         escape_script_json(state_json)
     );
     if let Some(base_at) = html.find("<base ")
@@ -399,7 +338,11 @@ fn serve<R: tauri::Runtime>(
             )
         };
         let html = inject_base_tag(&raw_html, &base_href);
-        let html = inject_storage_shim(&html, &storage_state_json(storage.as_ref()));
+        let html = inject_storage_shim(
+            &html,
+            &storage_state_json(storage.as_ref()),
+            wants_recall(uri),
+        );
 
         let csp = if allow_cdn { CSP_ALLOW } else { CSP_BLOCK };
 
@@ -584,7 +527,7 @@ mod tests {
             "<html><head><title>t</title></head><body>x</body></html>",
             "herbarium://page/p/",
         );
-        let out = inject_storage_shim(&html, r#"{"local":{},"personal":{},"shared":{}}"#);
+        let out = inject_storage_shim(&html, r#"{"local":{},"personal":{},"shared":{}}"#, false);
         let base_at = out.find("<base ").expect("base tag");
         let script_at = out
             .find("<script>window.__herbariumState=")
@@ -597,9 +540,70 @@ mod tests {
     }
 
     #[test]
+    fn csp_matches_the_cdn_allowlist_health_checks_use() {
+        let directive = |name: &str| {
+            CSP_ALLOW
+                .split(';')
+                .map(str::trim)
+                .find(|d| d.starts_with(name))
+                .unwrap()
+                .to_string()
+        };
+        let script = directive("script-src");
+        let style = directive("style-src");
+        let hosts = |d: &str| -> Vec<String> {
+            d.split_whitespace()
+                .filter_map(|t| t.strip_prefix("https://"))
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(
+            hosts(&script),
+            herbarium_core::SCRIPT_HOSTS.map(String::from)
+        );
+        let mut style_hosts = hosts(&style);
+        style_hosts.sort();
+        let mut expected = herbarium_core::STYLE_HOSTS.map(String::from).to_vec();
+        expected.sort();
+        assert_eq!(style_hosts, expected);
+    }
+
+    #[test]
+    fn recall_script_is_injected_only_when_asked_and_after_the_shim() {
+        let html = inject_base_tag(
+            "<html><head><title>T</title></head><body><p data-herbarium-recall>A</p></body></html>",
+            "herbarium://page/p/",
+        );
+        let state = r#"{"local":{},"personal":{},"shared":{}}"#;
+        let plain = inject_storage_shim(&html, state, false);
+        assert!(!plain.contains(RECALL_JS), "no recall script unless asked");
+        let recall = inject_storage_shim(&html, state, true);
+        let shim_at = recall.find("__herbariumPersist").unwrap();
+        let recall_at = recall.find(RECALL_JS).unwrap();
+        let title_at = recall.find("<title>").unwrap();
+        assert!(shim_at < recall_at && recall_at < title_at, "{recall}");
+        assert!(
+            !RECALL_JS.contains("</script"),
+            "the script cannot close its own tag"
+        );
+        assert!(!BRIDGE_JS.contains("</script"));
+        assert!(
+            plain.contains("herbarium:headings"),
+            "the bridge is always injected"
+        );
+
+        let uri = |s: &str| s.parse::<Uri>().unwrap();
+        assert!(wants_recall(&uri("herbarium://page/p?v=3&recall=1")));
+        assert!(wants_recall(&uri("herbarium://page/p?recall=1")));
+        assert!(!wants_recall(&uri("herbarium://page/p?v=3")));
+        assert!(!wants_recall(&uri("herbarium://page/p?recall=10")));
+        assert!(!wants_recall(&uri("herbarium://page/p")));
+    }
+
+    #[test]
     fn storage_shim_escapes_script_breaks_and_line_separators() {
         let state = "{\"local\":{\"a\":\"</script><img>\",\"b\":\"x\u{2028}y\u{2029}z\"},\"personal\":{},\"shared\":{}}";
-        let out = inject_storage_shim("<base href=\"herbarium://page/p/\">", state);
+        let out = inject_storage_shim("<base href=\"herbarium://page/p/\">", state, false);
         assert!(!out.contains("</script><img>"), "raw `<` must be escaped");
         assert!(out.contains("\\u003c/script>"));
         assert!(!out.contains('\u{2028}'));

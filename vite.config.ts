@@ -9,7 +9,7 @@ export default defineConfig({
   // Prevent Vite from obscuring Rust errors
   clearScreen: false,
   server: {
-    port: 1420,
+    port: 1520,
     strictPort: true,
     host: host || false,
     hmr: host

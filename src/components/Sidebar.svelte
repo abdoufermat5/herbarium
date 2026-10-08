@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { publishSite } from "../lib/exports";
+  import { folderLook } from "../lib/appearance";
   import { tick } from "svelte";
   import { flip } from "svelte/animate";
   import {
@@ -9,6 +11,14 @@
     duplicatePage,
     errorMessage,
     goAll,
+    runSearch,
+    deleteSavedSearch,
+    openInPath,
+    createPath,
+    renamePath,
+    deletePath,
+    movePageInPath,
+    setPageInPath,
     goView,
     inFolder,
     movePages,
@@ -494,10 +504,89 @@
         onclick: () => toggleFolder(path),
       },
       { divider: true },
+      { id: "look", label: t("look.menu"), icon: "leaf", onclick: () => (app.lookEdit = { kind: "folder", key: path }) },
+      { id: "publish", label: t("export.siteFolder"), icon: "upload", onclick: () => void publishSite(path) },
       { id: "move", label: t("folderPicker.move"), icon: "folder", onclick: () => void moveFolder(row) },
       { id: "rename", label: t("sidebar.rename"), icon: "folder", shortcut: shortcutHint("renameItem"), onclick: () => startRename(row) },
       { id: "delete", label: t("sidebar.deleteFolder"), icon: "trash-2", danger: true, shortcut: shortcutHint("deleteItem"), onclick: () => void confirmDeleteFolder(path, row.name) },
     ]);
+  }
+
+  /** A folder's own icon, and its colour (or its nearest coloured parent's). */
+  function folderIcon(path: string | undefined): string | undefined {
+    return path ? app.appearance.folders[path]?.icon : undefined;
+  }
+  function folderColor(path: string | undefined): string | undefined {
+    const color = folderLook(path).color;
+    return color ? `var(--c-${color})` : undefined;
+  }
+
+  /* ---------------------------------------------------------- reading paths */
+
+  let openPaths = $state<Set<string>>(new Set());
+  /** Inline name field: a new path, or renaming one. */
+  let pathDraft = $state<{ id: string | null; name: string } | null>(null);
+
+  function togglePathOpen(id: string) {
+    const next = new Set(openPaths);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    openPaths = next;
+  }
+
+  function pageTitle(id: string): string | null {
+    return app.library.find((p) => p.id === id)?.title ?? null;
+  }
+
+  async function commitPathDraft() {
+    const draft = pathDraft;
+    if (!draft) return;
+    const name = draft.name.trim();
+    pathDraft = null;
+    if (!name) return;
+    if (draft.id) {
+      await renamePath(draft.id, name);
+    } else {
+      const path = await createPath(name);
+      if (path) openPaths = new Set([...openPaths, path.id]);
+    }
+  }
+
+  function onPathDraftKey(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void commitPathDraft();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      pathDraft = null;
+    }
+  }
+
+  function pathMenu(e: MouseEvent, id: string, name: string) {
+    e.preventDefault();
+    menu = {
+      ...anchor(e),
+      items: [
+        { id: "rename", label: t("sidebar.rename"), icon: "file-text", onclick: () => (pathDraft = { id, name }) },
+        { id: "delete", label: t("paths.delete"), icon: "trash-2", danger: true, onclick: () => void deletePath(id) },
+      ],
+    };
+  }
+
+  function pathPageMenu(e: MouseEvent, pathId: string, pageId: string, index: number, count: number) {
+    e.preventDefault();
+    menu = {
+      ...anchor(e),
+      items: [
+        { id: "open", label: t("common.open"), icon: "file-text", onclick: () => void openInPath(pathId, pageId) },
+        { divider: true },
+        { id: "up", label: t("paths.moveUp"), disabled: index === 0, onclick: () => void movePageInPath(pathId, pageId, -1) },
+        { id: "down", label: t("paths.moveDown"), disabled: index === count - 1, onclick: () => void movePageInPath(pathId, pageId, 1) },
+        { divider: true },
+        { id: "remove", label: t("paths.remove"), icon: "x", onclick: () => void setPageInPath(pathId, pageId, false) },
+      ],
+    };
   }
 
   function pageMenu(e: MouseEvent, row: TreeRow) {
@@ -723,7 +812,9 @@
         onclick={() => void showFolder(row.path!)}
         oncontextmenu={(e) => folderMenu(e, row)}
       >
-        <span class="nav-icon"><Icon name={row.expanded ? "folder-open" : "folder"} size={14} /></span>
+        <span class="nav-icon" style:color={folderColor(row.path)}>
+          {#if folderIcon(row.path)}<span class="row-emoji">{folderIcon(row.path)}</span>{:else}<Icon name={row.expanded ? "folder-open" : "folder"} size={14} />{/if}
+        </span>
         <span class="nav-label ellipsis">{row.name}</span>
       </button>
       <span class="row-actions">
@@ -774,7 +865,9 @@
         ondragover={(e) => e.stopPropagation()}
         ondrop={(e) => e.stopPropagation()}
       >
-        <span class="nav-icon"><Icon name="file-text" size={14} /></span>
+        <span class="nav-icon">
+          {#if row.page?.ext?.look?.icon}<span class="row-emoji">{row.page.ext.look.icon}</span>{:else}<Icon name="file-text" size={14} />{/if}
+        </span>
         <span class="nav-label ellipsis">{row.name}</span>
       </button>
     {/if}
@@ -794,6 +887,15 @@
 
   <div class="body">
     <nav class="nav" aria-label={t("sidebar.library")}>
+      <button
+        class="nav-item"
+        class:active={!app.readId && app.view === "today"}
+        aria-current={!app.readId && app.view === "today" ? "page" : undefined}
+        onclick={() => void goView("today")}
+      >
+        <span class="nav-icon"><Icon name="sun" size={15} /></span>
+        <span class="nav-label ellipsis">{t("sidebar.today")}</span>
+      </button>
       <button
         class="nav-item"
         class:active={!app.readId && app.view === "list" && !app.folderFilter && !app.tagFilter}
@@ -821,7 +923,129 @@
           <span class="badge">{app.dueCount}</span>
         {/if}
       </button>
+      <button
+        class="nav-item"
+        class:active={!app.readId && app.view === "graph"}
+        aria-current={!app.readId && app.view === "graph" ? "page" : undefined}
+        onclick={() => void goView("graph")}
+      >
+        <span class="nav-icon"><Icon name="hash" size={15} /></span>
+        <span class="nav-label ellipsis">{t("sidebar.graph")}</span>
+      </button>
     </nav>
+
+    <div class="group">
+      <div class="group-head">
+        <div class="group-title static">{t("sidebar.paths")}</div>
+        <div class="tools">
+          <button
+            class="tool"
+            title={t("paths.new")}
+            aria-label={t("paths.new")}
+            onclick={() => (pathDraft = { id: null, name: "" })}
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        </div>
+      </div>
+      <nav class="nav" aria-label={t("sidebar.paths")}>
+        {#if pathDraft && !pathDraft.id}
+          <!-- svelte-ignore a11y_autofocus -->
+          <input
+            class="path-input"
+            bind:value={pathDraft.name}
+            onkeydown={onPathDraftKey}
+            onblur={() => void commitPathDraft()}
+            placeholder={t("paths.namePlaceholder")}
+            aria-label={t("paths.nameLabel")}
+            maxlength="100"
+            autofocus
+          />
+        {/if}
+        {#each app.paths as path (path.id)}
+          {#if pathDraft?.id === path.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="path-input"
+              bind:value={pathDraft.name}
+              onkeydown={onPathDraftKey}
+              onblur={() => void commitPathDraft()}
+              aria-label={t("paths.nameLabel")}
+              maxlength="100"
+              autofocus
+            />
+          {:else}
+            <button
+              class="nav-item"
+              aria-expanded={openPaths.has(path.id)}
+              title={path.description || path.name}
+              onclick={() => togglePathOpen(path.id)}
+              oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
+            >
+              <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
+              <span class="nav-label ellipsis">{path.name}</span>
+              <span class="badge muted-badge">{path.pages.length}</span>
+            </button>
+          {/if}
+          {#if openPaths.has(path.id)}
+            {#each path.pages as pageId, i (pageId)}
+              {@const title = pageTitle(pageId)}
+              <button
+                class="nav-item path-page"
+                class:active={app.readId === pageId && app.pathId === path.id}
+                class:missing={title === null}
+                disabled={title === null}
+                title={title ?? t("paths.missing")}
+                onclick={() => void openInPath(path.id, pageId)}
+                oncontextmenu={(e) => pathPageMenu(e, path.id, pageId, i, path.pages.length)}
+              >
+                <span class="path-num">{i + 1}</span>
+                <span class="nav-label ellipsis">{title ?? pageId}</span>
+              </button>
+            {:else}
+              <p class="path-empty">{t("paths.empty")}</p>
+            {/each}
+          {/if}
+        {:else}
+          {#if !pathDraft}
+            <p class="path-empty">{t("paths.none")}</p>
+          {/if}
+        {/each}
+      </nav>
+    </div>
+
+    {#if app.savedSearches.length > 0}
+      <div class="group">
+        <div class="group-head">
+          <div class="group-title static">{t("sidebar.savedSearches")}</div>
+        </div>
+        <nav class="nav" aria-label={t("sidebar.savedSearches")}>
+          {#each app.savedSearches as s (s.name)}
+            {@const active = !app.readId && app.view === "list" && app.search === s.query}
+            <div class="saved-row">
+              <button
+                class="nav-item"
+                class:active
+                aria-current={active ? "page" : undefined}
+                title={s.query}
+                onclick={() => void runSearch(s.query)}
+              >
+                <span class="nav-icon"><Icon name="search" size={14} /></span>
+                <span class="nav-label ellipsis">{s.name}</span>
+              </button>
+              <button
+                class="tool saved-remove"
+                title={t("sidebar.removeSearch", { name: s.name })}
+                aria-label={t("sidebar.removeSearch", { name: s.name })}
+                onclick={() => void deleteSavedSearch(s.name)}
+              >
+                <Icon name="x" size={12} />
+              </button>
+            </div>
+          {/each}
+        </nav>
+      </div>
+    {/if}
 
     <div
       class="group"
@@ -1188,9 +1412,66 @@
     flex: 1;
     text-align: left;
   }
+  @media (max-height: 700px) {
+    .shortcut-hint {
+      display: none;
+    }
+  }
   .shortcut-hint {
     font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: center;
+  }
+  .saved-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .saved-row .nav-item {
+    flex: 1;
+    min-width: 0;
+    padding-right: 26px;
+  }
+  .saved-remove {
+    position: absolute;
+    right: 4px;
+    opacity: 0;
+  }
+  .saved-row:hover .saved-remove,
+  .saved-remove:focus-visible {
+    opacity: 1;
+  }
+  .path-input {
+    width: 100%;
+    margin: 2px 0;
+    font-size: var(--fs-sm);
+  }
+  .path-page {
+    padding-left: 26px;
+  }
+  .path-page.missing {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .path-num {
+    flex: none;
+    width: 16px;
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    text-align: right;
+  }
+  .path-empty {
+    margin: 2px 0 4px 26px;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+  .muted-badge {
+    background: transparent;
+    color: var(--muted);
+  }
+  .row-emoji {
+    font-size: 13px;
+    line-height: 1;
   }
 </style>

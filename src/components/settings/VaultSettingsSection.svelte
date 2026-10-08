@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "../../lib/api";
-  import { app, adoptVault, rescanVault, toast, errorMessage } from "../../lib/state.svelte";
+  import { app, adoptVault, rescanVault, reloadPages, toast, errorMessage } from "../../lib/state.svelte";
   import { navigate } from "../../lib/navigation.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { prefs, setPref } from "../../lib/prefs.svelte";
@@ -10,6 +10,7 @@
   import SettingsSection from "./SettingsSection.svelte";
   import SettingRow from "./SettingRow.svelte";
   import Switch from "./Switch.svelte";
+  import { publishSite } from "../../lib/exports";
 
   let scanning = $state(false);
   let busy = $state<"open" | "create" | null>(null);
@@ -35,7 +36,40 @@
     }
   }
 
-  onMount(() => void loadNetwork());
+  let reviewEdits = $state(false);
+  let agentsLoaded = $state(false);
+  let agentsSaving = $state(false);
+  let agentsError = $state("");
+
+  async function loadAgents() {
+    try {
+      reviewEdits = (await api.agentSettings()).reviewEdits;
+    } catch (e) {
+      console.error(e);
+      agentsError = errorMessage(e);
+    } finally {
+      agentsLoaded = true;
+    }
+  }
+
+  async function setReviewEdits(value: boolean) {
+    if (agentsSaving) return;
+    agentsSaving = true;
+    try {
+      reviewEdits = (await api.configureAgents({ reviewEdits: value })).reviewEdits;
+      toast(value ? t("settings.reviewEditsOn") : t("settings.reviewEditsOff"), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.agentsSaveFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      agentsSaving = false;
+    }
+  }
+
+  onMount(() => {
+    void loadNetwork();
+    void loadAgents();
+  });
 
   async function rescan() {
     if (scanning) return;
@@ -146,6 +180,16 @@
     }
   }
 
+  async function addSampleVaultPages() {
+    try {
+      const result = await api.addSamples();
+      await reloadPages(true);
+      toast(result.added > 0 ? t("samples.added", { count: result.added }) : t("samples.already"), "success");
+    } catch (e) {
+      toast(`${t("samples.failed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
   async function setNetworkDefault(value: boolean) {
     if (netSaving) return;
     netSaving = true;
@@ -177,6 +221,24 @@
     <button class="btn" disabled={exporting} onclick={exportVaultCopy}>
       <Icon name="upload" size={13} />
       {exporting ? t("settings.exporting") : t("settings.exportAction")}
+    </button>
+  </SettingRow>
+  <SettingRow title={t("health.settingTitle")} hint={t("health.settingHint")}>
+    <button class="btn" onclick={() => (app.healthOpen = true)}>
+      <Icon name="circle-check" size={13} />
+      {t("health.check")}
+    </button>
+  </SettingRow>
+  <SettingRow title={t("samples.title")} hint={t("samples.hint")}>
+    <button class="btn" onclick={addSampleVaultPages}>
+      <Icon name="file-plus" size={13} />
+      {t("samples.action")}
+    </button>
+  </SettingRow>
+  <SettingRow title={t("export.site")} hint={t("export.siteHint")}>
+    <button class="btn" onclick={() => void publishSite(null)}>
+      <Icon name="upload" size={13} />
+      {t("export.siteAction")}
     </button>
   </SettingRow>
   <SettingRow title={t("settings.refreshOnFocus")} hint={t("settings.refreshOnFocusHint")}>
@@ -265,6 +327,20 @@
   </SettingRow>
   {#if netError}
     <p class="net-error">{t("settings.networkReadFailed", { detail: netError })}</p>
+  {/if}
+</SettingsSection>
+
+<SettingsSection id="settings-agents" title={t("settings.agents")} note={t("settings.agentsNote")}>
+  <SettingRow title={t("settings.reviewEdits")} hint={t("settings.reviewEditsHint")}>
+    <Switch
+      checked={reviewEdits}
+      disabled={!agentsLoaded || agentsSaving || !!agentsError}
+      label={t("settings.reviewEdits")}
+      onchange={setReviewEdits}
+    />
+  </SettingRow>
+  {#if agentsError}
+    <p class="net-error">{t("settings.agentsReadFailed", { detail: agentsError })}</p>
   {/if}
 </SettingsSection>
 

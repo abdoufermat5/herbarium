@@ -5,6 +5,47 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Page sources: a page can record where it came from — the address it was saved from, the tool that generated it and the prompt that asked for it. `pages.create` and `pages.update` take `source`, the tool and prompt are searchable, the details panel shows them, `herbarium add` records a fetched URL and takes `--tool` and `--prompt`, and agents are asked to fill it in.
+- MCP resources and prompts: every page is a resource (`herbarium://page/<id>` for its HTML, `herbarium://page/<id>/text` for its text), and the `save_page`, `ask_vault` and `review_session` prompts package common requests.
+- Review agent edits: with Settings → Agents → "Review agent edits" on, an agent's `pages.set_html` or `history.restore` leaves a proposal instead of changing the page. The reader shows a banner and a side-by-side diff to accept or reject it, new proposals are announced, and accepting one for a page that changed since asks first. Agents get `agents.settings`, `proposals.list` and `proposals.get`; only the user can accept, reject or change the setting.
+- Quiz mode: answers a page marks with `data-herbarium-recall` (optionally holding the question) are hidden behind a "show answer" button during review sessions, or on any page with "Quiz me" in the reader.
+- Search filters: `tag:`, `folder:`, `tool:`, `is:due`/`scheduled`/`unscheduled`/`network`, `has:note`/`source` and `due:`/`updated:`/`created:` windows such as `7d`, each negatable with `-`, mixed into any search. Searches can be saved, are listed in the sidebar and are available to agents (`searches.*`).
+- Links between pages: a link to `herbarium-app://open/<id>` inside a page opens that page in the app. The details panel lists a page's links, broken links and backlinks and copies its link; agents get `pages.links`.
+- Review activity: a heatmap of the last year's reviews with the current and longest streak, and Settings → Review can skip folders or tags, whose pages keep their schedule but stay out of the queue, due counts and reminders.
+- Reader View menu: the page's contents (including headings built by script), zoom from 50 to 200 % (`Ctrl/⌘ +`, `-`, `0`) and a focus mode (`F`) that hides the sidebar, details and review bar.
+- Reading paths: ordered lists of pages read like a course, with previous/next in the reader, managed from the sidebar and the details panel, and open to agents (`paths.*`). A trashed page keeps its place in a path.
+- Exports: save a page as one self-contained HTML file with its local images, scripts and styles inlined, or publish the vault or a folder as a static website (an index plus one file per page, links between them kept) into a new or empty folder.
+- Import from Claude and ChatGPT: point Herbarium at a data export (`.zip` or `conversations.json`) and pick the artifacts to keep — Claude artifacts (every revision resolved), ChatGPT canvases and HTML code blocks — each saved with its conversation as the source and its original date, and never imported twice. `herbarium import <export>` does the same from the terminal (`--dry-run` lists them).
+- Browser extension (Chrome, Edge, Brave, Firefox): finds the HTML artifacts in the Claude, ChatGPT or Gemini conversation you are reading and saves them in one click, saves any page or selection with its images and styles inlined, shows on the toolbar when a page is already in the vault, searches the vault from the address bar (`h` + space) and offers a Today new-tab page. It talks to the app through a native messaging host that Settings → Browser registers (`herbarium native-host install` from the terminal).
+- Quick capture: a global shortcut (default `Ctrl/⌘+Alt+H`) and the tray save the clipboard as a page; new HTML files in Downloads, and optionally whole pages copied to the clipboard, are offered for saving.
+- Sample pages: a short tour (welcome, why reviewing works, a flexbox playground) as a reading path, offered on first launch and from Settings → Vault.
+- Today: a home screen with what is due, the reading path in progress, recent pages, a page to rediscover, what you saved on this day, and the review streak. It is the default start view.
+- Icons and colours: give a page an emoji icon and a folder or tag a colour and icon; they show in the sidebar, lists and chips.
+- Page previews: the library grid shows a miniature of each page's first screen, measured in the page and redrawn by the app.
+- Graph: the links between pages as an interactive map, grouped by folder.
+- Highlights and margin notes: select text in a page to highlight it in one of four colours and attach a note. Highlights survive edits elsewhere in the page, are searchable, are listed in the details panel and during review, and agents can read them (`highlights.list`).
+- Page health: `health.check` and the details panel say why a page may not work — missing local files, remote resources with network access off, hosts outside the CDN allowlist, broken links, very large or untitled pages — and a page can be made self-contained by inlining its local files. Settings → Vault checks every page.
+- Remix with AI: rework a page — simplify it, explain it deeper, add quiz questions, translate it, turn it into a cheat sheet, fix and modernize it, or follow your own instructions. Your highlights and notes go with it. The result waits as a proposal you compare with the page and accept or reject. Works with Anthropic's Claude (your API key, streamed, with server-side fallbacks enabled so a declined request is retried on Anthropic's recommended fallback model), the Claude Code command line, OpenAI, Google Gemini, DeepSeek, Mistral, OpenRouter, a local Ollama, or any OpenAI-compatible service at an address you give; each keeps its own key. Nobody has to type a model name: Settings → AI & sharing is pick a service, paste a key (checked on the spot: "Ready — connected, 23 models available"), done. The model stays on Automatic, which asks the service for its models and uses its best current one (the newest Opus, GPT or Gemini Pro, DeepSeek's chat model…); a dropdown with readable names lists the others, and any name can still be typed. `herbarium remix` does the same from the terminal (`--provider`, `--model`, `--base-url`).
+- Publish and share: share a page as a secret GitHub gist or publish it on your GitHub Pages site (the repository is created on first use and keeps an index of what you published), update it in place or take it down, and copy a share card — the page's first screen, title, a line of text and its link — to paste into a note, chat or email. Settings → AI & sharing connects your GitHub account; `herbarium publish` works from the terminal.
+- End-to-end tests (`pnpm test:e2e`) run the command line, the native messaging host, the browser extension in Chromium, publishing and remixing against fake GitHub and Anthropic APIs, and the desktop app itself through tauri-driver, in CI.
+
+### Changed
+- Settings is split into tabs — General, Review, Vault, Capture, AI & sharing, About — instead of one long page.
+- A lighter interface: a borderless reader toolbar that shows icons only in narrow windows, one preview area on every library card, sentence-case chips, one heading size across views, a single review statistics strip, and a narrower sidebar in small windows.
+- Large libraries stay fast: the library draws the cards near the viewport only, so showing all pages, searching, filtering and switching layouts take milliseconds with thousands of pages (measured on 3,000: All pages 4.2 s → 80 ms, grid/list 6.6 s → 5 ms). Typing a search fetches only the search, and page previews are made only while you are idle, never for pages over 1.5 MB.
+- Pasting a very large page (over 100 KB) into the import dialog no longer freezes the window: it is held aside and shown as a summary.
+
+### Fixed
+- The library sort setting showed no value until changed.
+
+### Security
+- API keys and the GitHub token are kept apart from the settings in `secrets.json` in the app's configuration folder, readable only by the user, and are never sent to the window: the interface only learns whether one is set.
+- Publishing never writes to a repository Herbarium did not create (it looks for its `.herbarium` marker), and asks before the first publication of each page, saying who will be able to read it. Unpublishing only deletes a page file from such a repository, whatever the vault's records say.
+- `secrets.json` is created readable only by the user (never world-readable, even for a moment), and a damaged one is reported instead of being replaced, which would erase the other keys.
+- Remixing with Claude Code runs it without tools, in an empty folder, so instructions hidden in a page cannot make it read local files.
+- Pages saved from the browser, including the artifacts of a conversation, never get network access, whatever the vault's default.
+
 ## [0.2.1] - 2026-10-04
 
 ### Added

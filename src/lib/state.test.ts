@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PageMeta, ReviewSettings, ReviewStats } from "./types";
+import type { PageMeta, ProposalSummary, ReviewSettings, ReviewStats } from "./types";
 
 const mocks = vi.hoisted(() => {
   const storage = new Map<string, string>();
@@ -11,12 +11,12 @@ const mocks = vi.hoisted(() => {
   vi.stubGlobal("window", { matchMedia: () => ({ matches: false, addEventListener: () => {} }) });
   return {
     tags: vi.fn(), folders: vi.fn(), reviewToday: vi.fn(), listPages: vi.fn(),
-    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(),
+    reviewSettings: vi.fn(), reviewStats: vi.fn(), searchPages: vi.fn(), listProposals: vi.fn(), savedSearches: vi.fn(), listPaths: vi.fn(), updatePath: vi.fn(), appearance: vi.fn(),
   };
 });
 vi.mock("./api", () => ({ api: mocks }));
 vi.mock("./notifier", () => ({ notifyDue: vi.fn().mockResolvedValue(undefined) }));
-import { app, inFolder, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
+import { app, inFolder, movePageInPath, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
 
 function page(id: string, patch: Partial<PageMeta> = {}): PageMeta {
   return { schemaVersion: 1, id, title: id, tags: [], folder: null, note: "", createdAt: 1,
@@ -28,8 +28,10 @@ function deferred<T>() {
   return { promise, resolve };
 }
 const settings: ReviewSettings = { presets: [1440], strategy: "ladder", multiplier: 2,
-  maxIntervalMinutes: 525600, desiredRetention: 0.9, importReviewMinutes: null, queueLimit: 1 };
-const stats: ReviewStats = { dueTotal: 250, overdue: 100, reviewedToday: 0, upcoming: [], totalReviews: 0 };
+  maxIntervalMinutes: 525600, desiredRetention: 0.9, importReviewMinutes: null, queueLimit: 1,
+  excludeFolders: [], excludeTags: [] };
+const stats: ReviewStats = { dueTotal: 250, overdue: 100, reviewedToday: 0, upcoming: [], totalReviews: 0,
+  activity: [], streak: 0, longestStreak: 0 };
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -44,6 +46,10 @@ beforeEach(() => {
   mocks.listPages.mockResolvedValue([]);
   mocks.reviewSettings.mockResolvedValue(settings);
   mocks.reviewStats.mockResolvedValue(stats);
+  mocks.listProposals.mockResolvedValue([]);
+  mocks.savedSearches.mockResolvedValue([]);
+  mocks.listPaths.mockResolvedValue([]);
+  mocks.appearance.mockResolvedValue({ folders: {}, tags: {} });
 });
 afterEach(() => { resetWorkspace(); vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
 afterAll(() => vi.unstubAllGlobals());
@@ -113,5 +119,59 @@ describe("library state", () => {
     expect(app.library).toEqual([]);
     expect(app.dueCount).toBe(0);
     expect(app.reviewStats).toBeNull();
+  });
+});
+
+describe("agent proposals", () => {
+  const proposal = (id: string, at: number): ProposalSummary => ({
+    id, at, baseUpdatedAt: 1, title: `${id} v2`, pageTitle: id, bytes: 10, stale: false,
+  });
+
+  it("announces what is waiting once, then only proposals that arrive later", async () => {
+    mocks.listProposals.mockResolvedValue([proposal("a", 2), proposal("b", 1)]);
+    await refreshAll();
+    expect(app.proposals.map((p) => p.id)).toEqual(["a", "b"]);
+    expect(app.toasts).toHaveLength(1);
+    expect(app.toasts[0].message).toContain("2");
+
+    await refreshAll();
+    expect(app.toasts).toHaveLength(1);
+
+    mocks.listProposals.mockResolvedValue([proposal("a", 3), proposal("b", 1)]);
+    await refreshAll();
+    expect(app.toasts).toHaveLength(2);
+    expect(app.toasts[1].action).toBeDefined();
+  });
+
+  it("keeps the library when proposals cannot be read, and forgets them on reset", async () => {
+    mocks.listPages.mockResolvedValue([page("p")]);
+    mocks.listProposals.mockRejectedValue("proposals unreadable");
+    expect(await refreshAll()).toHaveLength(1);
+    expect(app.proposals).toEqual([]);
+
+    mocks.listProposals.mockResolvedValue([proposal("p", 1)]);
+    await refreshAll();
+    expect(app.proposals).toHaveLength(1);
+    resetWorkspace();
+    expect(app.proposals).toEqual([]);
+    expect(app.proposalOpen).toBe(false);
+  });
+});
+
+describe("reading paths", () => {
+  it("moves a page one step and adopts the saved order", async () => {
+    mocks.listPaths.mockResolvedValue([{ id: "p", name: "P", pages: ["a", "b", "c"] }]);
+    await refreshAll();
+    mocks.updatePath.mockImplementation((id: string, patch: { pages: string[] }) =>
+      Promise.resolve({ id, name: "P", pages: patch.pages }),
+    );
+    await movePageInPath("p", "c", -1);
+    expect(mocks.updatePath).toHaveBeenCalledWith("p", { pages: ["a", "c", "b"] });
+    expect(app.paths[0].pages).toEqual(["a", "c", "b"]);
+
+    // At an end it is a no-op, with no backend call.
+    mocks.updatePath.mockClear();
+    await movePageInPath("p", "a", -1);
+    expect(mocks.updatePath).not.toHaveBeenCalled();
   });
 });

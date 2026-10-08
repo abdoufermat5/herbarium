@@ -6,6 +6,21 @@ export interface Config {
   recentVaults: string[];
   /** Closing the window hides it to the tray instead of quitting. */
   closeToTray: boolean;
+  /** Global shortcut that saves the clipboard's HTML; null turns it off. */
+  captureShortcut: string | null;
+  /** Offer to save HTML files that appear in the Downloads folder. */
+  watchDownloads: boolean;
+  /** Offer to save whole HTML pages when they are copied. */
+  watchClipboard: boolean;
+}
+
+/** An HTML page offered by the Downloads or clipboard watcher. */
+export interface CaptureOffer {
+  title: string;
+  bytes: number;
+  /** Set for a downloaded file. */
+  path?: string;
+  name?: string;
 }
 
 export interface PageMeta {
@@ -25,7 +40,22 @@ export interface PageMeta {
   /** The `<title>` extracted from the HTML at its last write or index. */
   sourceTitle?: string | null;
   /** Extension-owned data keyed by extension id; absent when empty. */
-  ext?: Record<string, unknown> & { review?: ReviewHistory };
+  ext?: Record<string, unknown> & {
+    review?: ReviewHistory;
+    source?: PageSource;
+    look?: { icon?: string };
+    highlights?: Highlight[];
+  };
+}
+
+/** Where a page came from (`ext.source`); every field is optional. */
+export interface PageSource {
+  /** http(s) address the page was saved from. */
+  url?: string;
+  /** Tool or model that generated the page. */
+  tool?: string;
+  /** The request that produced the page. */
+  prompt?: string;
 }
 
 /** A full-text hit: the page plus a `[match]`-marked excerpt of its text, when the match was there. */
@@ -46,6 +76,133 @@ export interface HistoryEntry {
   /** Who made the change the snapshot preserved. */
   caller: "ui" | "agent";
   bytes: number;
+}
+
+/** An agent's rewrite of a page waiting for approval (`proposals.list`). */
+export interface ProposalSummary {
+  /** The page id. */
+  id: string;
+  /** When the agent proposed it, unix ms. */
+  at: number;
+  baseUpdatedAt: number;
+  /** The `<title>` of the proposed HTML. */
+  title: string;
+  /** The page's current title. */
+  pageTitle: string;
+  bytes: number;
+  /** The page changed after the agent read it. */
+  stale: boolean;
+  /** `remix` when Claude made it from the app's Remix; absent for an agent. */
+  source?: "remix";
+}
+
+/** A page's links (`pages.links`). */
+export interface PageLinks {
+  /** Pages this page links to. */
+  links: PageMeta[];
+  /** Linked ids with no page in the vault. */
+  broken: string[];
+  /** Pages linking to this page. */
+  backlinks: PageMeta[];
+}
+
+/** A reading path: pages read in order (`.herbarium/paths.json`). */
+export interface ReadingPath {
+  id: string;
+  name: string;
+  description?: string;
+  /** Page ids in reading order; a trashed page keeps its place. */
+  pages: string[];
+}
+
+/** An HTML artifact found in a Claude or ChatGPT data export. */
+export interface AiExportCandidate {
+  key: string;
+  title: string;
+  bytes: number;
+  createdAt: number;
+  tool: string;
+  url: string;
+  prompt: string;
+  conversation: string;
+  alreadyImported: boolean;
+}
+
+export interface AiExportListing {
+  candidates: AiExportCandidate[];
+  conversations: number;
+  /** Artifacts that are not standalone pages (React components, code…). */
+  unsupported: number;
+}
+
+/** `today.summary`: what to do with the library now. */
+export interface TodaySummary {
+  dueTotal: number;
+  due: PageMeta[];
+  continue: Array<{ pathId: string; pathName: string; position: number; total: number; page: PageMeta }>;
+  recent: PageMeta[];
+  rediscover: PageMeta | null;
+  onThisDay: PageMeta[];
+  streak: number;
+  totalPages: number;
+}
+
+/** Label colours offered for folders and tags (see app.css `--c-*`). */
+export type LabelColor = "sage" | "sky" | "plum" | "rose" | "amber" | "clay" | "teal" | "slate";
+
+/** Icons and colours of folders and tags (`.herbarium/appearance.json`). */
+export interface Appearance {
+  folders: Record<string, { icon?: string; color?: LabelColor }>;
+  tags: Record<string, LabelColor>;
+}
+
+/** `pages.graph`: linked pages and their links. */
+export interface PageGraph {
+  nodes: Array<{ id: string; title: string; folder: string | null; degree: number }>;
+  /** `[from, to]` page ids. */
+  edges: Array<[string, string]>;
+}
+
+/** A page's first-screen layout, drawn as its miniature (see previews.rs). */
+export interface PreviewDigest {
+  w: number;
+  h: number;
+  bg: string;
+  blocks: Array<{ k: "box" | "text" | "img"; x: number; y: number; w: number; h: number; c?: string; r?: number; s?: number; lh?: number }>;
+  image?: { x: number; y: number; w: number; h: number; src: string };
+}
+
+/** A highlighted passage of a page, anchored by its text and context. */
+export interface Highlight {
+  id: string;
+  quote: string;
+  prefix: string;
+  suffix: string;
+  color: HighlightColor;
+  note?: string;
+  at: number;
+}
+
+export type HighlightColor = "yellow" | "green" | "blue" | "pink";
+
+/** Something that may stop a page from working (`health.check`). */
+export interface HealthIssue {
+  kind: "missing-asset" | "needs-network" | "blocked-host" | "broken-links" | "local-assets" | "large" | "untitled";
+  level: "error" | "warn" | "info";
+  items?: string[];
+  fix?: "enable-network" | "inline-assets";
+}
+
+/** A named search (`.herbarium/searches.json`); `query` may include filters. */
+export interface SavedSearch {
+  name: string;
+  query: string;
+}
+
+/** Vault-wide agent settings (`.herbarium/agents.json`). */
+export interface AgentSettings {
+  /** Agent rewrites of a page's HTML wait for approval. */
+  reviewEdits: boolean;
 }
 
 export interface Page {
@@ -161,6 +318,11 @@ export interface ReviewStats {
   upcoming: ReviewDay[];
   /** All completed reviews. */
   totalReviews: number;
+  /** Reviews on each of the last 365 UTC days, oldest first (last = today). */
+  activity: ReviewDay[];
+  /** Consecutive days with a review up to today. */
+  streak: number;
+  longestStreak: number;
 }
 
 /** Output of `check_update`; null when this build is current. */
@@ -194,6 +356,10 @@ export interface ReviewSettings {
   importReviewMinutes: number | null;
   /** Cap on the review queue; null = show everything due. */
   queueLimit: number | null;
+  /** Folders (with subfolders) kept out of the queue, due counts and reminders. */
+  excludeFolders: string[];
+  /** Tags whose pages are kept out of the queue, due counts and reminders. */
+  excludeTags: string[];
 }
 
 /** A file the rescan could not index. */
@@ -214,4 +380,63 @@ export interface IndexReport {
 export interface EditorInfo {
   id: string;
   name: string;
+}
+
+export type AiProvider = string;
+
+/** An AI service a remix can use. */
+export interface AiProviderInfo {
+  id: AiProvider;
+  label: string;
+  defaultModel: string;
+  /** The OpenAI-compatible API address; null for Anthropic, Claude Code and custom. */
+  baseUrl: string | null;
+  needsKey: boolean;
+  keyUrl: string | null;
+}
+
+export interface AiSettings {
+  provider: AiProvider;
+  model: string;
+  /** A custom API address (custom services, or Ollama elsewhere). */
+  baseUrl: string | null;
+  /** Providers with a stored key (the keys stay in the backend). */
+  keys: AiProvider[];
+  providers: AiProviderInfo[];
+}
+
+export type RemixPreset = "simplify" | "deeper" | "quiz" | "translate" | "cheatsheet" | "modernize" | "custom";
+
+export interface GithubSettings {
+  hasToken: boolean;
+  /** The account the token belongs to. */
+  login: string | null;
+  /** Repository of the GitHub Pages site. */
+  repo: string;
+}
+
+export type PublishTarget = "gist" | "site";
+
+/** Where a page was published. */
+export interface PublishRecord {
+  url: string;
+  title?: string;
+  at: number;
+  /** The gist's id (gist). */
+  id?: string;
+  /** `login/repo` and the file's path (site). */
+  repo?: string;
+  path?: string;
+}
+
+/** A model an AI service offers. */
+export interface AiModel {
+  id: string;
+  name: string;
+}
+
+export interface AiModelList {
+  models: AiModel[];
+  /** The model "Automatic" uses now. */
+  recommended: string | null;
 }

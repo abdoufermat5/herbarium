@@ -11,10 +11,16 @@
   import Sidebar from "./components/Sidebar.svelte";
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
+  import TodayView from "./components/TodayView.svelte";
+  import GraphView from "./components/GraphView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
   import TrashView from "./components/TrashView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
+  import AiImportDialog from "./components/AiImportDialog.svelte";
+  import LookDialog from "./components/LookDialog.svelte";
+  import HealthDialog from "./components/HealthDialog.svelte";
+  import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
   import TitleBar from "./components/TitleBar.svelte";
@@ -24,6 +30,7 @@
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import type { ShortcutContext } from "./lib/shortcuts";
+  import type { CaptureOffer } from "./lib/types";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
@@ -130,6 +137,8 @@
     }
 
     if (isTyping(e.target) || e.defaultPrevented || e.repeat) return;
+    // Single-key shortcuts never act behind an open dialog.
+    if (document.querySelector('[aria-modal="true"]')) return;
 
     if (e.key === "?" && !mod && app.config?.vaultPath && !app.importOpen && !app.paletteOpen) {
       e.preventDefault();
@@ -282,9 +291,48 @@
       }),
     );
 
+    // Quick capture: pages saved from outside the window, and offers from
+    // the Downloads and clipboard watchers.
+    keep(listen("vault-changed", () => void reloadPages(true)));
+    keep(
+      listen<CaptureOffer>("download-offer", (event) => {
+        const offer = event.payload;
+        if (!offer.path || !app.config?.vaultPath) return;
+        toast(t("capture.downloadOffer", { name: offer.name ?? offer.title }), "info", 15000, {
+          label: t("capture.save"),
+          run: () =>
+            void api
+              .saveDownload(offer.path!)
+              .then((title) => toast(t("capture.saved", { title }), "success"))
+              .catch((e) => toast(`${t("capture.failed")}: ${errorMessage(e)}`, "error")),
+        });
+      }),
+    );
+    keep(
+      listen<CaptureOffer>("clipboard-offer", (event) => {
+        if (!app.config?.vaultPath) return;
+        toast(t("capture.clipboardOffer", { title: event.payload.title }), "info", 15000, {
+          label: t("capture.save"),
+          run: () =>
+            void api
+              .saveClipboardPage()
+              .then((title) => toast(t("capture.saved", { title }), "success"))
+              .catch((e) => toast(`${t("capture.failed")}: ${errorMessage(e)}`, "error")),
+        });
+      }),
+    );
+
     // Deep links from the backend, and any the app was launched with (the
     // matching event fired before this listener existed, so ask for them).
     keep(listen<DeepLinkPayload>("deep-link", (event) => queueDeepLink(event.payload)));
+    // A page following a link to another page. Only the page open in the
+    // reader may: the hidden frame that draws previews runs pages too, and
+    // one that redirects on load would otherwise switch pages out of nowhere.
+    keep(
+      listen<DeepLinkPayload>("page-link", (event) => {
+        if (app.readId) queueDeepLink(event.payload);
+      }),
+    );
     void invoke<DeepLinkPayload[]>("take_deep_links")
       .then((links) => {
         if (disposed) return;
@@ -336,13 +384,17 @@
 {:else if !app.config?.vaultPath}
   <Onboarding />
 {:else}
-  <div class="shell" class:collapsed={!app.sidebarOpen}>
-    {#if app.sidebarOpen}<Sidebar />{/if}
+  <div class="shell" class:collapsed={!app.sidebarOpen || (app.focusMode && !!app.readId)}>
+    {#if app.sidebarOpen && !(app.focusMode && app.readId)}<Sidebar />{/if}
     <main class="main">
       {#if app.readId}
         {#key app.readId}
           <ReadView id={app.readId} />
         {/key}
+      {:else if app.view === "today"}
+        <TodayView />
+      {:else if app.view === "graph"}
+        <GraphView />
       {:else if app.view === "review"}
         <ReviewView />
       {:else if app.view === "settings"}
@@ -359,6 +411,22 @@
 </div>
 </div>
 
+{#if app.config?.vaultPath && app.initialized}
+  <Thumbnailer />
+{/if}
+{#if app.healthOpen}
+  <HealthDialog />
+{/if}
+{#if app.lookEdit}
+  {#key app.lookEdit}
+    <LookDialog />
+  {/key}
+{/if}
+{#if app.aiImportOpen}
+  <div inert={app.paletteOpen || !!confirmState.pending}>
+    <AiImportDialog />
+  </div>
+{/if}
 {#if app.importOpen}
   <div inert={app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
     <ImportDialog />

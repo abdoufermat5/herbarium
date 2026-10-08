@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Flexbox playground</title>
+<style>
+  :root { --bg: #fbfaf7; --card: #fff; --text: #2f3437; --muted: #6b6a68; --leaf: #346538; --line: #e6e4df; --box: #edf3ec; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --card: #232322; --text: #e6e5e3; --muted: #9b9a97; --leaf: #8cbf91; --line: #353533; --box: #233025; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 24px 72px; }
+  .eyebrow { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--leaf); }
+  h1 { font: 500 34px/1.2 Georgia, serif; margin: 10px 0 12px; }
+  .controls { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin: 20px 0; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+  select, input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text); }
+  .stage { display: flex; min-height: 220px; padding: 12px; border: 1px dashed var(--line); border-radius: 14px; background: var(--card); }
+  .item { padding: 18px 22px; border-radius: 10px; background: var(--box); color: var(--leaf); font-weight: 600; }
+  .item:nth-child(2) { padding: 30px 22px; }
+  .item:nth-child(3) { padding: 12px 40px; }
+  pre { margin: 16px 0 0; padding: 14px 16px; border-radius: 10px; background: var(--card); border: 1px solid var(--line); font-size: 13px; overflow: auto; }
+  .note { color: var(--muted); font-size: 14px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  a { color: var(--leaf); }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Getting started · 3 of 3</p>
+  <h1>Flexbox playground</h1>
+  <p>Change the settings and watch the boxes move. Leave the page and come back: your settings are still here, because Herbarium keeps each page's saved state with the page.</p>
+
+  <div class="controls">
+    <label>flex-direction
+      <select data-prop="flexDirection"><option>row</option><option>row-reverse</option><option>column</option><option>column-reverse</option></select>
+    </label>
+    <label>justify-content
+      <select data-prop="justifyContent"><option>flex-start</option><option>center</option><option>flex-end</option><option>space-between</option><option>space-around</option><option>space-evenly</option></select>
+    </label>
+    <label>align-items
+      <select data-prop="alignItems"><option>stretch</option><option>flex-start</option><option>center</option><option>flex-end</option><option>baseline</option></select>
+    </label>
+    <label>gap
+      <input data-prop="gap" type="range" min="0" max="48" value="12">
+    </label>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="item">1</div><div class="item">2</div><div class="item">3</div>
+  </div>
+  <pre id="code"></pre>
+  <p class="note"><span id="visits"></span> <button id="reset">Reset</button></p>
+  <p data-herbarium-recall="What does justify-content control?"><strong>justify-content</strong> places items along the main axis (the direction of <code>flex-direction</code>); <strong>align-items</strong> places them across it.</p>
+  <p>Back to <a href="herbarium-app://open/herbarium-welcome">the welcome page</a>.</p>
+</main>
+<script>
+  const KEY = "flexbox-playground";
+  const stage = document.getElementById("stage");
+  const code = document.getElementById("code");
+  const controls = [...document.querySelectorAll("[data-prop]")];
+  const defaults = { flexDirection: "row", justifyContent: "flex-start", alignItems: "stretch", gap: "12" };
+  let state = { ...defaults, visits: 0 };
+  try { state = { ...state, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch {}
+  state.visits = (state.visits || 0) + 1;
+
+  const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
+  function apply() {
+    for (const c of controls) {
+      c.value = state[c.dataset.prop];
+      stage.style[c.dataset.prop] = c.dataset.prop === "gap" ? state.gap + "px" : state[c.dataset.prop];
+    }
+    code.textContent = ".stage {\n  display: flex;\n" +
+      Object.keys(defaults).map((k) => `  ${kebab(k)}: ${k === "gap" ? state.gap + "px" : state[k]};`).join("\n") + "\n}";
+    document.getElementById("visits").textContent = `Visit ${state.visits} to this page.`;
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch {}
+  }
+  for (const c of controls) c.addEventListener("input", () => { state[c.dataset.prop] = c.value; apply(); });
+  document.getElementById("reset").addEventListener("click", () => { state = { ...defaults, visits: state.visits }; apply(); });
+  apply();
+</script>
+</body>
+</html>

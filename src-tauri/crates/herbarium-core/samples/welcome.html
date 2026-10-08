@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome to Herbarium</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --card: #ffffff; --text: #2f3437; --muted: #6b6a68;
+    --leaf: #346538; --leaf-soft: #edf3ec; --line: #e6e4df;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1b1b1a; --card: #232322; --text: #e6e5e3; --muted: #9b9a97; --leaf: #8cbf91; --leaf-soft: #233025; --line: #353533; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 17px/1.65 Georgia, "Iowan Old Style", serif; }
+  main { max-width: 720px; margin: 0 auto; padding: 56px 24px 80px; }
+  .eyebrow { font: 600 12px/1 system-ui, sans-serif; letter-spacing: .08em; text-transform: uppercase; color: var(--leaf); }
+  h1 { font-size: 40px; line-height: 1.15; margin: 10px 0 14px; font-weight: 500; }
+  h2 { font-size: 24px; margin: 44px 0 10px; font-weight: 500; }
+  .lead { font-size: 20px; color: var(--muted); }
+  .tabs { display: flex; gap: 6px; margin: 18px 0 0; flex-wrap: wrap; font-family: system-ui, sans-serif; }
+  .tabs button { font: 500 14px system-ui, sans-serif; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--leaf); border-color: var(--leaf); color: var(--bg); }
+  .panel { margin-top: 12px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); min-height: 150px; }
+  .panel p { margin: 0 0 8px; }
+  kbd { font: 13px ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--bg); }
+  .next { display: grid; gap: 12px; margin-top: 14px; }
+  .next a { display: block; padding: 14px 18px; border-radius: 12px; background: var(--leaf-soft); color: var(--text); text-decoration: none; }
+  .next a strong { color: var(--leaf); }
+  .quiz { margin-top: 12px; padding: 18px 20px; border-left: 3px solid var(--leaf); background: var(--card); border-radius: 0 12px 12px 0; }
+  .quiz p { margin: 0 0 6px; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 14px; font-family: system-ui, sans-serif; }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Getting started · 1 of 3</p>
+  <h1>Welcome to your herbarium</h1>
+  <p class="lead">A herbarium is a collection of pressed plants, each one kept, labelled and easy to find again. This one keeps the pages AI tools make for you: explainers, cheat sheets, little interactive tools.</p>
+
+  <h2>A quick tour</h2>
+  <div class="tabs" role="tablist" aria-label="Tour">
+    <button role="tab" aria-selected="true" data-tab="save">Save</button>
+    <button role="tab" aria-selected="false" data-tab="find">Find</button>
+    <button role="tab" aria-selected="false" data-tab="learn">Learn</button>
+    <button role="tab" aria-selected="false" data-tab="agents">Agents</button>
+  </div>
+  <div class="panel" role="tabpanel" id="panel"></div>
+
+  <h2>Try it</h2>
+  <div class="quiz">
+    <p><strong>Where does Herbarium keep your pages?</strong></p>
+    <p data-herbarium-recall="Where are your pages stored?">As ordinary <code>.html</code> files in a folder you own, each with a small <code>.json</code> file holding its title, tags, note and review dates. Back it up or sync it with any tool.</p>
+  </div>
+  <div class="quiz">
+    <p><strong>What happens when a page wants the internet?</strong></p>
+    <p data-herbarium-recall="Can a page reach the internet?">Nothing, unless you allow it: pages run in a sandbox with network access off. You can turn it on per page with the network switch in the reader.</p>
+  </div>
+  <p>Answers marked like these hide during review sessions, so a page can quiz you. Press <kbd>F</kbd> for focus mode, or open <em>View</em> for the contents and zoom.</p>
+
+  <h2>Keep going</h2>
+  <div class="next">
+    <a href="herbarium-app://open/herbarium-spaced-repetition"><strong>Why reviewing works →</strong><br>An interactive look at the forgetting curve.</a>
+    <a href="herbarium-app://open/herbarium-flexbox-playground"><strong>A page that remembers →</strong><br>A small tool that keeps its state between visits.</a>
+  </div>
+
+  <footer>Made for Herbarium. Delete these sample pages whenever you like; they are just files.</footer>
+</main>
+<script>
+  const text = {
+    save: `<p>Drop HTML files on the window, paste a page with <kbd>Ctrl</kbd>+<kbd>V</kbd> in the import dialog, or import everything from a Claude or ChatGPT data export.</p>
+           <p>With the browser extension, one click saves the page or AI artifact in front of you, and the toolbar shows when a page is already saved.</p>`,
+    find: `<p>Search titles, tags, notes and page text from the library, or press <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere.</p>
+           <p>Filters narrow it down: <code>tag:rust is:due updated:7d</code>. Save a search to keep it in the sidebar.</p>`,
+    learn: `<p>Schedule any page for review. Herbarium brings it back right before you would forget it, and adapts to how well you remember.</p>
+            <p>Highlight passages and add notes in the margin; reading paths walk you through a topic page by page.</p>`,
+    agents: `<p>Herbarium is also an MCP server: agents like Claude Code can save, search, organise and schedule pages for you.</p>
+             <p>Turn on <em>Review agent edits</em> in Settings to approve every rewrite an agent proposes.</p>`,
+  };
+  const panel = document.getElementById("panel");
+  const tabs = [...document.querySelectorAll("[data-tab]")];
+  function show(name) {
+    panel.innerHTML = text[name];
+    for (const t of tabs) t.setAttribute("aria-selected", String(t.dataset.tab === name));
+  }
+  for (const t of tabs) t.addEventListener("click", () => show(t.dataset.tab));
+  show("save");
+</script>
+</body>
+</html>

@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Herbarium</title>
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+<header class="head">
+  <img src="icons/icon-32.png" alt="" width="20" height="20">
+  <strong>Herbarium</strong>
+  <span id="status" class="status muted">Connecting…</span>
+</header>
+
+<section id="setup" class="setup" hidden>
+  <p><strong>Connect the Herbarium app</strong></p>
+  <p class="muted">Install Herbarium, then open <em>Settings → Browser</em> and click <em>Connect browsers</em>. Reopen this popup afterwards.</p>
+  <p class="error" id="setup-error"></p>
+</section>
+
+<main id="main" hidden>
+  <section id="saved" class="saved" hidden>
+    <span>✓ Saved as <button class="link" id="saved-open"></button></span>
+  </section>
+
+  <section id="artifacts" class="artifacts" hidden>
+    <div class="row">
+      <h2 class="eyebrow" id="artifacts-title">Pages in this chat</h2>
+      <button class="link" id="artifacts-all">Select all</button>
+    </div>
+    <p id="artifacts-empty" class="muted" hidden>No HTML pages in this chat yet.</p>
+    <ul id="artifact-list" class="list"></ul>
+    <button id="artifacts-save" class="primary" disabled>Save selected</button>
+  </section>
+
+  <section class="actions">
+    <button id="save-page">Save page</button>
+    <button id="save-selection" disabled>Save selection</button>
+  </section>
+
+  <p id="message" class="message" role="status"></p>
+
+  <section class="find">
+    <input type="search" id="search" placeholder="Search your Herbarium…" aria-label="Search your Herbarium">
+    <ul id="results" class="list"></ul>
+  </section>
+
+  <footer class="foot">
+    <button class="link" id="open-today">Today</button>
+    <button class="link" id="open-review">Review</button>
+    <span class="muted">Tip: type <kbd>h</kbd> + space in the address bar</span>
+  </footer>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>

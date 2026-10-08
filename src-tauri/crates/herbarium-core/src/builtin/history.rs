@@ -6,7 +6,7 @@
 use serde::Deserialize;
 use serde_json::json;
 
-use super::pages::overwrite_html;
+use super::proposals::overwrite_or_propose;
 use super::{id_prop, object};
 use crate::extension::{Ctx, Extension, OpResult, Operation, Registry};
 use crate::vault;
@@ -63,7 +63,7 @@ impl Extension for History {
 
         r.add(Operation::new(
             "history.restore",
-            "Restore a page to an earlier version (`at` from `history.list`), undoing a later `pages.set_html` or `history.restore`. The current HTML is snapshotted first, so the restore is itself undoable. Pass `expectedUpdatedAt` (the page's `updatedAt` when you read it) to fail with a `conflict:` error instead of overwriting a newer edit.",
+            "Restore a page to an earlier version (`at` from `history.list`), undoing a later `pages.set_html` or `history.restore`. The current HTML is snapshotted first, so the restore is itself undoable. If the user reviews agent edits, the restore waits for their approval like `pages_set_html`. Pass `expectedUpdatedAt` (the page's `updatedAt` when you read it) to fail with a `conflict:` error instead of overwriting a newer edit.",
             object(
                 json!({
                     "id": id_prop(),
@@ -74,7 +74,7 @@ impl Extension for History {
             ),
             |ctx: &mut Ctx, a: RestoreArgs| {
                 let html = vault::read_history(&ctx.store.vault, &a.id, a.at)?;
-                overwrite_html(ctx, &a.id, &html, a.expected_updated_at)
+                overwrite_or_propose(ctx, &a.id, &html, a.expected_updated_at)
             },
         ))?;
 

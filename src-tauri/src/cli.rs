@@ -44,6 +44,10 @@ pub struct AddArgs {
     pub title: Option<String>,
     /// `--network` / `--no-network`; absent follows the vault default.
     pub network: Option<bool>,
+    /// `--tool`: what generated the pages, recorded as their source.
+    pub tool: Option<String>,
+    /// `--prompt`: the request that produced the pages.
+    pub prompt: Option<String>,
     pub inputs: Vec<String>,
 }
 
@@ -52,7 +56,11 @@ pub const USAGE: &str = "Herbarium — keep generated HTML pages in a local vaul
 usage:
   herbarium                              open the desktop app
   herbarium add [options] <file|-|url>…  save pages into the vault
+  herbarium import [options] <export>    import artifacts from a Claude or ChatGPT data export
+  herbarium publish [options] <page-id>  share a page as a gist or on your GitHub Pages site
+  herbarium remix [options] <page-id>    rework a page with Claude; the result waits for approval
   herbarium mcp [--vault <path>]         serve the MCP protocol on stdin/stdout
+  herbarium native-host install          connect the browser extension
   herbarium help                         show this help
 
 Run `herbarium add --help` for the add options.";
@@ -69,8 +77,11 @@ options:
   --title <title>   page title; only with a single input (default: the page's <title>)
   --network         allow the page to load from allowlisted CDNs
   --no-network      block all network access for the page (default: the vault setting)
+  --tool <name>     record the tool that generated the page, e.g. \"Claude Code\"
+  --prompt <text>   record the request that produced the page
   -h, --help        show this help
 
+A page fetched from a URL records that URL as its source.
 Fetched URLs time out after 30 s and are capped at 20 MiB.
 Exit status: 0 on success, 1 when any input failed, 2 on a usage error.";
 
@@ -115,6 +126,14 @@ pub fn parse_add(args: &[String]) -> Result<Option<AddArgs>, String> {
             }
             "--title" => {
                 parsed.title = Some(take_value(args, &mut i, "--title")?);
+                continue;
+            }
+            "--tool" => {
+                parsed.tool = Some(take_value(args, &mut i, "--tool")?);
+                continue;
+            }
+            "--prompt" => {
+                parsed.prompt = Some(take_value(args, &mut i, "--prompt")?);
                 continue;
             }
             "--network" => parsed.network = Some(true),
@@ -173,6 +192,308 @@ pub fn parse_deep_link(url: &str) -> Option<DeepLink> {
 }
 
 /// Process exit code for `herbarium add …`.
+pub const IMPORT_USAGE: &str = "usage: herbarium import [options] <export.zip|conversations.json>
+
+Import every HTML artifact from a Claude or ChatGPT data export into the
+vault, each with its prompt, its original date and a link to the
+conversation. Artifacts imported before are skipped.
+
+options:
+  --vault <path>    vault to write to (default: HERBARIUM_VAULT, then the app's last vault)
+  --folder <path>   destination folder (default: the vault root)
+  --dry-run         list what would be imported without saving anything
+  -h, --help        show this help
+
+Exit status: 0 on success, 1 when any artifact failed, 2 on a usage error.";
+
+/// `herbarium import …`: returns the exit status.
+pub const PUBLISH_USAGE: &str = "usage: herbarium publish [options] <page-id>
+
+Publish a page, as a self-contained file, with your GitHub account and print
+its address. Publishing again updates it.
+
+options:
+  --vault <path>   vault to read from (default: HERBARIUM_VAULT, then the app's last vault)
+  --gist           as a secret gist: anyone with the link can see it (default)
+  --site           on your GitHub Pages site, a public website (repository: --repo)
+  --repo <name>    the site's repository (default: the app setting, herbarium-pages)
+  --unpublish      take the page down instead
+  -h, --help       show this help
+
+The GitHub token is GITHUB_TOKEN, or the one saved in the app.";
+
+pub fn run_publish(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut target = "gist";
+    let mut repo = None;
+    let mut unpublish = false;
+    let mut ids = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{PUBLISH_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--repo" => take_value(args, &mut i, "--repo").map(|v| repo = Some(v)),
+            flag @ ("--gist" | "--site" | "--unpublish") => {
+                match flag {
+                    "--gist" => target = "gist",
+                    "--site" => target = "site",
+                    _ => unpublish = true,
+                }
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                ids.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium publish: {e}\n\n{PUBLISH_USAGE}");
+            return 2;
+        }
+    }
+    let [id] = ids.as_slice() else {
+        eprintln!("herbarium publish: pass exactly one page id\n\n{PUBLISH_USAGE}");
+        return 2;
+    };
+    let run = || -> Result<Value, String> {
+        let token = std::env::var("GITHUB_TOKEN")
+            .ok()
+            .filter(|t| !t.trim().is_empty())
+            .or(crate::secrets::load().github_token)
+            .ok_or("no GitHub token: set GITHUB_TOKEN or connect GitHub in the app")?;
+        let repo = match repo.clone() {
+            Some(r) => r,
+            None => crate::config::load()?.publish_repo,
+        };
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        crate::publish::run(&host, token.trim(), id, target, &repo, unpublish)
+    };
+    match run() {
+        Ok(info) => {
+            match info["url"].as_str() {
+                Some(url) => println!("{url}"),
+                None => println!("unpublished {id}"),
+            }
+            0
+        }
+        Err(e) => {
+            eprintln!("herbarium publish: {e}");
+            1
+        }
+    }
+}
+
+pub const REMIX_USAGE: &str = "usage: herbarium remix [options] <page-id>
+
+Rework a page with Claude. The new version is kept as a proposal: compare it
+with the page and accept or reject it in the app.
+
+options:
+  --vault <path>          vault to use (default: HERBARIUM_VAULT, then the app's last vault)
+  --preset <name>         simplify, deeper, quiz, translate, cheatsheet, modernize or custom
+                          (default: custom when --instructions is given, else simplify)
+  --instructions <text>   what to change (for translate: the language)
+  --provider <id>         anthropic, claude-code, openai, gemini, deepseek, mistral,
+                          openrouter, ollama or custom (default: the app setting)
+  --claude-code           same as --provider claude-code
+  --model <model>         default: the app setting, or the service's recommended model
+  --base-url <url>        the API address (custom, or Ollama elsewhere)
+  -h, --help              show this help
+
+The key comes from the provider's variable (ANTHROPIC_API_KEY, OPENAI_API_KEY,
+GEMINI_API_KEY, DEEPSEEK_API_KEY, MISTRAL_API_KEY, OPENROUTER_API_KEY,
+HERBARIUM_AI_KEY for custom), or the one saved in the app.";
+
+pub fn run_remix(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut preset = None;
+    let mut instructions = String::new();
+    let mut model = None;
+    let mut provider = None;
+    let mut base_url = None;
+    let mut ids = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{REMIX_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--preset" => take_value(args, &mut i, "--preset").map(|v| preset = Some(v)),
+            "--instructions" => {
+                take_value(args, &mut i, "--instructions").map(|v| instructions = v)
+            }
+            "--model" => take_value(args, &mut i, "--model").map(|v| model = Some(v)),
+            "--provider" => take_value(args, &mut i, "--provider").map(|v| provider = Some(v)),
+            "--base-url" => take_value(args, &mut i, "--base-url").map(|v| base_url = Some(v)),
+            "--claude-code" => {
+                provider = Some("claude-code".to_string());
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                ids.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium remix: {e}\n\n{REMIX_USAGE}");
+            return 2;
+        }
+    }
+    let [id] = ids.as_slice() else {
+        eprintln!("herbarium remix: pass exactly one page id\n\n{REMIX_USAGE}");
+        return 2;
+    };
+    let preset = preset.unwrap_or_else(|| {
+        if instructions.trim().is_empty() {
+            "simplify"
+        } else {
+            "custom"
+        }
+        .to_string()
+    });
+    let run = || -> Result<Value, String> {
+        let cfg = crate::config::load()?;
+        let provider_id = provider.clone().unwrap_or_else(|| cfg.ai_provider.clone());
+        let info = crate::ai::provider(&provider_id)
+            .ok_or_else(|| format!("unknown provider `{provider_id}`"))?;
+        let key = info
+            .key_env
+            .and_then(|var| std::env::var(var).ok())
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .or_else(|| crate::secrets::load().ai_key(&provider_id));
+        let base_url = base_url.clone().or_else(|| {
+            (provider_id == cfg.ai_provider)
+                .then(|| cfg.ai_base_url.clone())
+                .flatten()
+        });
+        // No model named: the app's choice for its own service, else the
+        // service's recommended model.
+        let model = match model.clone() {
+            Some(m) => m,
+            None if provider_id == cfg.ai_provider && !cfg.ai_model.trim().is_empty() => {
+                cfg.ai_model.clone()
+            }
+            None => crate::ai::resolve_model(info, key.as_deref(), base_url.as_deref()),
+        };
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        let (prompt, base) = crate::remix::prompt_for(&host, id, &preset, &instructions)?;
+        let job = crate::remix::Job {
+            provider: &provider_id,
+            model: &model,
+            key: key.as_deref(),
+            base_url: base_url.as_deref(),
+            prompt,
+        };
+        let html = crate::remix::run(job, |_| true)?;
+        crate::remix::propose(&host, id, &html, base)
+    };
+    match run() {
+        Ok(proposal) => {
+            println!(
+                "proposal ready for {id}: {}",
+                proposal["title"].as_str().unwrap_or_default()
+            );
+            0
+        }
+        Err(e) => {
+            eprintln!("herbarium remix: {e}");
+            1
+        }
+    }
+}
+
+pub fn run_import(args: &[String]) -> i32 {
+    let mut vault = None;
+    let mut folder = None;
+    let mut dry_run = false;
+    let mut inputs = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        let parsed = match args[i].as_str() {
+            "--help" | "-h" => {
+                println!("{IMPORT_USAGE}");
+                return 0;
+            }
+            "--vault" => take_value(args, &mut i, "--vault").map(|v| vault = Some(v)),
+            "--folder" => take_value(args, &mut i, "--folder").map(|v| folder = Some(v)),
+            "--dry-run" => {
+                dry_run = true;
+                i += 1;
+                Ok(())
+            }
+            other if other.starts_with("--") => Err(format!("unknown option `{other}`")),
+            other => {
+                inputs.push(other.to_string());
+                i += 1;
+                Ok(())
+            }
+        };
+        if let Err(e) = parsed {
+            eprintln!("herbarium import: {e}\n\n{IMPORT_USAGE}");
+            return 2;
+        }
+    }
+    let [input] = inputs.as_slice() else {
+        eprintln!("herbarium import: pass exactly one export file\n\n{IMPORT_USAGE}");
+        return 2;
+    };
+    let run = || -> Result<i32, String> {
+        let mut host = Host::new();
+        host.open_vault(&resolve_vault(vault.clone())?)?;
+        let (scan, listing) = crate::ai_import::scan_file(&host, std::path::Path::new(input))?;
+        let fresh = listing
+            .candidates
+            .iter()
+            .filter(|c| !c.already_imported)
+            .count();
+        println!(
+            "{} artifacts in {} conversations ({} new, {} not standalone pages)",
+            listing.candidates.len(),
+            listing.conversations,
+            fresh,
+            listing.unsupported
+        );
+        if dry_run {
+            for c in listing.candidates.iter().filter(|c| !c.already_imported) {
+                println!(
+                    "{}\t{}\t{}",
+                    c.candidate.tool, c.candidate.title, c.candidate.key
+                );
+            }
+            return Ok(0);
+        }
+        let report =
+            crate::ai_import::import(&host, &scan.candidates, None, folder.as_deref(), None)?;
+        println!("imported {}, skipped {}", report.imported, report.skipped);
+        for e in &report.errors {
+            eprintln!("herbarium import: {e}");
+        }
+        Ok(if report.errors.is_empty() { 0 } else { 1 })
+    };
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("herbarium import: {e}");
+            1
+        }
+    }
+}
+
 pub fn run_add(args: &[String]) -> i32 {
     let parsed = match parse_add(args) {
         Ok(Some(parsed)) => parsed,
@@ -222,10 +543,11 @@ fn add(args: &AddArgs) -> Result<bool, String> {
 
 /// Import one input (file, `-`, or URL) and return the new page id.
 fn import_one(host: &Host, args: &AddArgs, input: &str) -> Result<String, String> {
+    let is_url = input.starts_with("http://") || input.starts_with("https://");
     let html = if input == "-" {
         let body = read_capped(std::io::stdin().lock(), "input")?;
         String::from_utf8(body).map_err(|_| "input is not valid UTF-8".to_string())?
-    } else if input.starts_with("http://") || input.starts_with("https://") {
+    } else if is_url {
         fetch(input)?
     } else {
         std::fs::read_to_string(input).map_err(|e| e.to_string())?
@@ -244,6 +566,19 @@ fn import_one(host: &Host, args: &AddArgs, input: &str) -> Result<String, String
     }
     if let Some(network) = args.network {
         op.insert("allowCdn".into(), Value::Bool(network));
+    }
+    let mut source = Map::new();
+    if is_url {
+        source.insert("url".into(), Value::String(input.to_string()));
+    }
+    if let Some(tool) = &args.tool {
+        source.insert("tool".into(), Value::String(tool.clone()));
+    }
+    if let Some(prompt) = &args.prompt {
+        source.insert("prompt".into(), Value::String(prompt.clone()));
+    }
+    if !source.is_empty() {
+        op.insert("source".into(), Value::Object(source));
     }
 
     // The user is invoking this directly, so the CLI counts as the UI; the
@@ -315,6 +650,10 @@ mod tests {
             "--title",
             "T",
             "--network",
+            "--tool",
+            "Claude Code",
+            "--prompt",
+            "explain cargo",
             "page.html",
         ]))
         .unwrap()
@@ -327,6 +666,8 @@ mod tests {
                 tags: vec!["rust".into(), "cargo".into()],
                 title: Some("T".into()),
                 network: Some(true),
+                tool: Some("Claude Code".into()),
+                prompt: Some("explain cargo".into()),
                 inputs: vec!["page.html".into()],
             }
         );

@@ -7,11 +7,13 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 
 use super::network::default_allow_cdn;
+use super::proposals::{delete_proposal, overwrite_or_propose};
 use super::review::{apply_schedule, load_settings};
 use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
-use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta};
+use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource};
+use crate::query::{FILTER_HELP, Query};
 use crate::store::Store;
 use crate::time::now_ms;
 use crate::vault;
@@ -24,16 +26,48 @@ const AGENT_DEFAULT_LIMIT: usize = 50;
 
 const CONFLICT: &str = "conflict: page changed since it was loaded";
 
+/// Key of `{ key }` in `PageMeta::ext` naming the original a page was
+/// imported from.
+pub(crate) const IMPORT_KEY: &str = "import";
+
+/// The import key recorded on `meta`, if any.
+pub fn import_key(meta: &PageMeta) -> Option<&str> {
+    meta.ext.get(IMPORT_KEY)?.get("key")?.as_str()
+}
+
+/// A URL reduced to what identifies a page: scheme and host lowercased, no
+/// fragment, no trailing slash.
+pub fn normalize_url(url: &str) -> String {
+    let url = url.trim();
+    let url = url.split('#').next().unwrap_or(url);
+    let (scheme_host, rest) = match url.find("://") {
+        Some(i) => {
+            let after = &url[i + 3..];
+            let end = after.find(['/', '?']).map_or(url.len(), |j| i + 3 + j);
+            (url[..end].to_ascii_lowercase(), &url[end..])
+        }
+        None => (url.to_string(), ""),
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    format!("{scheme_host}{rest}")
+}
+
 #[derive(Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-struct CreateArgs {
-    html: String,
-    title: Option<String>,
-    folder: Option<String>,
-    tags: Option<Vec<String>>,
-    note: Option<String>,
-    review_in_minutes: Option<i64>,
-    allow_cdn: Option<bool>,
+pub(crate) struct CreateArgs {
+    pub(crate) html: String,
+    pub(crate) title: Option<String>,
+    pub(crate) folder: Option<String>,
+    pub(crate) tags: Option<Vec<String>>,
+    pub(crate) note: Option<String>,
+    pub(crate) review_in_minutes: Option<i64>,
+    pub(crate) allow_cdn: Option<bool>,
+    pub(crate) source: Option<PageSource>,
+    /// When the page was originally made (unix ms), e.g. for an imported
+    /// artifact; defaults to now. Never in the future.
+    pub(crate) created_at: Option<i64>,
+    /// Identifies the imported original, so importing it again is skipped.
+    pub(crate) import_key: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,6 +132,11 @@ struct IdArgs {
 }
 
 #[derive(Deserialize)]
+struct UrlArgs {
+    url: String,
+}
+
+#[derive(Deserialize)]
 struct PurgeArgs {
     id: Option<String>,
 }
@@ -155,7 +194,7 @@ fn clean_tags(tags: Vec<String>) -> Vec<String> {
     out
 }
 
-fn ensure_html(html: &str) -> OpResult<()> {
+pub(crate) fn ensure_html(html: &str) -> OpResult<()> {
     if looks_like_html(html) {
         Ok(())
     } else {
@@ -164,7 +203,11 @@ fn ensure_html(html: &str) -> OpResult<()> {
 }
 
 /// Reject an edit made against a stale copy of the page.
-fn check_base(vault: &Path, meta: &PageMeta, base_updated_at: Option<i64>) -> OpResult<()> {
+pub(crate) fn check_base(
+    vault: &Path,
+    meta: &PageMeta,
+    base_updated_at: Option<i64>,
+) -> OpResult<()> {
     if let Some(base) = base_updated_at {
         if base != meta.updated_at {
             return Err(CONFLICT.into());
@@ -227,6 +270,19 @@ fn reconcile_with_disk(store: &Store, mut meta: PageMeta) -> OpResult<PageMeta> 
     Ok(meta)
 }
 
+fn source_schema() -> serde_json::Value {
+    json!({
+        "type": "object",
+        "description": "Where the page came from, shown with the page and searchable.",
+        "properties": {
+            "url": { "type": "string", "description": "http(s) address the page was saved from." },
+            "tool": { "type": "string", "description": "Tool or model that generated the page, e.g. `Claude Code`." },
+            "prompt": { "type": "string", "description": "The request that produced the page." }
+        },
+        "additionalProperties": false
+    })
+}
+
 /// The explicit `limit`, else 50 for agents and unlimited for the UI.
 fn effective_limit(caller: Caller, limit: Option<usize>) -> usize {
     limit.unwrap_or(match caller {
@@ -244,6 +300,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
     // page must not inherit its history.
     if !vault::trash_entry_exists(&store.vault, &meta.id) {
         vault::delete_history(&store.vault, &meta.id)?;
+        delete_proposal(&store.vault, &meta.id)?;
     }
     vault::write_page(&store.vault, meta, html)?;
     // The bytes are on disk now; keep the returned `updatedAt` at least their
@@ -268,7 +325,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
 /// `fallback_title` is used when neither `title` nor the HTML provides one;
 /// `id_source` (e.g. an imported file's stem) is slugged into the id instead
 /// of the title.
-fn create(
+pub(crate) fn create(
     ctx: &mut Ctx,
     args: CreateArgs,
     fallback_title: Option<&str>,
@@ -302,6 +359,23 @@ fn create(
     meta.allow_cdn = args
         .allow_cdn
         .unwrap_or_else(|| default_allow_cdn(&store.vault));
+    PageSource::set(
+        &mut meta,
+        args.source.map(PageSource::clean).transpose()?.flatten(),
+    );
+    if let Some(at) = args.created_at.filter(|at| *at > 0) {
+        meta.created_at = at.min(meta.created_at);
+    }
+    if let Some(key) = args
+        .import_key
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+    {
+        if key.len() > 200 {
+            return Err("importKey is longer than 200 characters".into());
+        }
+        meta.ext.insert(IMPORT_KEY.into(), json!({ "key": key }));
+    }
     if let Some(minutes) = args.review_in_minutes {
         apply_schedule(&mut meta, minutes);
     }
@@ -340,16 +414,18 @@ fn bulk_edit(
     Ok(meta)
 }
 
-/// Replace a page's HTML: the one code path shared by `pages.set_html` and
-/// `history.restore`. Snapshots the current on-disk HTML first (unless the new
-/// bytes are identical), enforces the same `baseUpdatedAt` conflict rule, keeps
-/// the title following the document unless the user renamed the page, and
-/// emits `page.updated`.
-pub(crate) fn overwrite_html(
+/// Replace a page's HTML: the one code path shared by `pages.set_html`,
+/// `history.restore` and `proposals.accept`. Snapshots the current on-disk HTML
+/// first (unless the new bytes are identical), tagged with `caller` (`ui` or
+/// `agent`), enforces the same `baseUpdatedAt` conflict rule, keeps the title
+/// following the document unless the user renamed the page, and emits
+/// `page.updated`.
+pub(crate) fn overwrite_html_by(
     ctx: &mut Ctx,
     id: &str,
     html: &str,
     base_updated_at: Option<i64>,
+    caller: &str,
 ) -> OpResult<PageMeta> {
     ensure_html(html)?;
     let mut meta = ctx.page(id)?;
@@ -364,13 +440,7 @@ pub(crate) fn overwrite_html(
     meta.updated_at = now_ms();
     let store = ctx.store;
     // Keep the bytes being replaced recoverable before they are overwritten.
-    vault::snapshot_history(
-        &store.vault,
-        &meta.id,
-        meta.folder.as_deref(),
-        html,
-        ctx.caller.tag(),
-    )?;
+    vault::snapshot_history(&store.vault, &meta.id, meta.folder.as_deref(), html, caller)?;
     vault::write_page(&store.vault, &meta, html)?;
     // The optimistic check compares `updatedAt` with the HTML's mtime, so the
     // value we hand back must not be older than the file just written.
@@ -394,7 +464,7 @@ impl Extension for Pages {
     fn register(&self, r: &mut Registry) -> OpResult<()> {
         r.add(Operation::new(
             "pages.create",
-            "Save a new HTML page to the vault and return its metadata (including the new `id`, a readable slug of the title). The page must be one self-contained HTML document; its <title> (or first <h1>) becomes the page title unless `title` is given. Network access follows the vault's default (off unless the user enabled it): pass `allowCdn: true` if the page loads scripts or styles from a CDN; only allowlisted CDNs work.",
+            "Save a new HTML page to the vault and return its metadata (including the new `id`, a readable slug of the title). Pass `source` with the tool you are (`tool`) and the user's request (`prompt`) so the user can tell later where the page came from. The page must be one self-contained HTML document; its <title> (or first <h1>) becomes the page title unless `title` is given. Network access follows the vault's default (off unless the user enabled it): pass `allowCdn: true` if the page loads scripts or styles from a CDN; only allowlisted CDNs work.",
             object(
                 json!({
                     "html": { "type": "string", "description": "Complete HTML document." },
@@ -403,7 +473,10 @@ impl Extension for Pages {
                     "tags": { "type": "array", "items": { "type": "string" } },
                     "note": { "type": "string", "description": "Personal note shown next to the page." },
                     "reviewInMinutes": { "type": "integer", "minimum": 1, "description": "Schedule a review this many minutes from now (1 day = 1440)." },
-                    "allowCdn": { "type": "boolean", "description": "Allow loading from allowlisted CDNs. Defaults to the vault setting (normally false, which blocks all network access)." }
+                    "allowCdn": { "type": "boolean", "description": "Allow loading from allowlisted CDNs. Defaults to the vault setting (normally false, which blocks all network access)." },
+                    "source": source_schema(),
+                    "createdAt": { "type": "integer", "description": "When the page was originally made (unix ms), e.g. an older artifact; defaults to now." },
+                    "importKey": { "type": "string", "description": "Identifies the original this page is imported from, so a later import can skip it." }
                 }),
                 &["html"],
             ),
@@ -509,17 +582,50 @@ impl Extension for Pages {
 
         r.add(Operation::new(
             "pages.search",
-            "Full-text search over titles, tags, folders, notes and page text; best matches first (title matches rank highest). Each hit is the page metadata plus an optional `snippet` of matching text with the match in [brackets]. An empty query lists every page. Returns at most `limit` hits (default 50).",
+            &format!("Full-text search over titles, tags, folders, notes, page text and source prompts; best matches first (title matches rank highest). Each hit is the page metadata plus an optional `snippet` of matching text with the match in [brackets]. An empty query lists every page. Returns at most `limit` hits (default 50). {FILTER_HELP}"),
             object(
                 json!({
-                    "query": { "type": "string", "description": "Words to find; all must match." },
+                    "query": { "type": "string", "description": "Words to find (all must match), plus optional filters such as `tag:rust is:due`." },
                     "limit": { "type": "integer", "minimum": 1, "description": "Maximum number of hits (default 50)." }
                 }),
                 &["query"],
             ),
             |ctx: &mut Ctx, a: SearchArgs| {
                 let limit = effective_limit(ctx.caller, a.limit);
-                ctx.store.search(&a.query, limit).map_err(|e| e.to_string())
+                let query = Query::parse(&a.query)?;
+                if !query.has_filters() {
+                    return ctx.store.search(&query.text, limit).map_err(|e| e.to_string());
+                }
+                let now = now_ms();
+                let hits = ctx.store.search(&query.text, usize::MAX).map_err(|e| e.to_string())?;
+                Ok(hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect())
+            },
+        ))?;
+
+        r.add(Operation::new(
+            "pages.find_by_url",
+            "Pages saved from a web address (their source `url`), compared without the `#fragment` or a trailing slash. Use it to avoid saving the same page twice.",
+            object(json!({ "url": { "type": "string" } }), &["url"]),
+            |ctx: &mut Ctx, a: UrlArgs| {
+                let want = normalize_url(&a.url);
+                if want.is_empty() {
+                    return Ok(Vec::new());
+                }
+                // The extension asks on every page load: only parse the pages
+                // whose metadata mentions the address at all.
+                let needle = want.split_once("://").map_or(want.as_str(), |(_, rest)| rest);
+                let pages = ctx
+                    .store
+                    .with_ext_containing(needle)
+                    .map_err(|e| e.to_string())?;
+                Ok(pages
+                    .into_iter()
+                    .filter(|m| {
+                        PageSource::of(m)
+                            .and_then(|s| s.url)
+                            .is_some_and(|u| normalize_url(&u) == want)
+                    })
+                    .collect::<Vec<_>>())
             },
         ))?;
 
@@ -533,6 +639,8 @@ impl Extension for Pages {
                     "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces all tags." },
                     "folder": { "type": ["string", "null"] },
                     "note": { "type": "string" },
+                    "source": { "anyOf": [source_schema(), { "type": "null" }], "description": "Replaces the page's source; `null` removes it." },
+                    "icon": { "type": ["string", "null"], "description": "An emoji shown with the page; `null` or \"\" removes it." },
                     "baseUpdatedAt": { "type": "integer", "description": "The page's `updatedAt` when you read it; the edit is rejected if it changed since." }
                 }),
                 &["id"],
@@ -551,6 +659,16 @@ impl Extension for Pages {
                 if let Some(note) = p.note {
                     meta.note = note;
                 }
+                if let Some(icon) = p.icon {
+                    let icon = match icon {
+                        Some(i) => crate::models::clean_icon(&i)?,
+                        None => None,
+                    };
+                    crate::models::set_icon(&mut meta, icon);
+                }
+                if let Some(source) = p.source {
+                    PageSource::set(&mut meta, source.map(PageSource::clean).transpose()?.flatten());
+                }
                 if let Some(folder) = p.folder {
                     vault::move_page(&ctx.store.vault, &mut meta, folder.as_deref())?;
                 }
@@ -562,7 +680,7 @@ impl Extension for Pages {
 
         r.add(Operation::new(
             "pages.set_html",
-            "Replace a page's HTML (e.g. to revise generated documentation). Tags, folder, note and review state are kept; the title follows the new <title> unless the user renamed the page. Pass `baseUpdatedAt` (the `updatedAt` you last read) to fail with a `conflict:` error instead of overwriting a newer edit.",
+            "Replace a page's HTML (e.g. to revise generated documentation). Tags, folder, note and review state are kept; the title follows the new <title> unless the user renamed the page. Pass `baseUpdatedAt` (the `updatedAt` you last read) to fail with a `conflict:` error instead of overwriting a newer edit. If the user reviews agent edits (see `agents_settings`), the page is left unchanged and the result is `{ pendingApproval: true, proposal, page }` until the user accepts it.",
             object(
                 json!({
                     "id": id_prop(),
@@ -571,7 +689,7 @@ impl Extension for Pages {
                 }),
                 &["id", "html"],
             ),
-            |ctx: &mut Ctx, a: SetHtmlArgs| overwrite_html(ctx, &a.id, &a.html, a.base_updated_at),
+            |ctx: &mut Ctx, a: SetHtmlArgs| overwrite_or_propose(ctx, &a.id, &a.html, a.base_updated_at),
         ))?;
 
         r.add(Operation::new(

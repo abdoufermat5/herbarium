@@ -15,6 +15,26 @@ use crate::editors::{self, Choice, EditorInfo};
 
 pub struct AppState {
     pub host: Mutex<Host>,
+    /// Model lists read from the AI services, by `provider|address`.
+    pub models: Mutex<std::collections::HashMap<String, Vec<crate::ai::Model>>>,
+    /// The last AI export scanned, waiting for the user to pick what to import.
+    pub ai_scan: Mutex<Option<herbarium_core::importer::Scan>>,
+}
+
+impl AppState {
+    pub fn new() -> Self {
+        AppState {
+            host: Mutex::new(Host::new()),
+            models: Mutex::new(std::collections::HashMap::new()),
+            ai_scan: Mutex::new(None),
+        }
+    }
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -31,12 +51,13 @@ fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
         report.removed,
         report.total
     );
-    let mut cfg = config::load().unwrap_or_default();
-    cfg.vault_path = canonical.clone();
-    if let Some(p) = &canonical {
-        config::add_recent(&mut cfg, p);
-    }
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.vault_path = canonical.clone();
+        if let Some(p) = &canonical {
+            config::add_recent(cfg, p);
+        }
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
@@ -66,17 +87,19 @@ pub async fn create_vault(
 
 #[tauri::command]
 pub async fn remove_recent_vault(path: String) -> CmdResult<Config> {
-    let mut cfg = config::load().unwrap_or_default();
-    config::remove_recent(&mut cfg, &path);
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        config::remove_recent(cfg, &path);
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
 #[tauri::command]
 pub async fn set_close_to_tray(enabled: bool) -> CmdResult<Config> {
-    let mut cfg = config::load().unwrap_or_default();
-    cfg.close_to_tray = enabled;
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.close_to_tray = enabled;
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
@@ -290,6 +313,259 @@ pub async fn export_page(
     let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
     export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
 }
+/// Read pages for an export while holding the vault lock only as long as
+/// needed. `folder` limits it to a folder and its subfolders.
+fn pages_for_export(
+    state: &State<'_, AppState>,
+    folder: Option<&str>,
+    only: Option<&str>,
+) -> CmdResult<(PathBuf, Vec<crate::export::ExportPage>)> {
+    let host = state.host.lock().map_err(|e| e.to_string())?;
+    let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+    let ids: Vec<String> = match only {
+        Some(id) => vec![id.to_string()],
+        None => {
+            let list = host.call(Caller::Ui, "pages.list", json!({ "folder": folder }))?;
+            list.as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|m| m["id"].as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+    };
+    let mut pages = Vec::with_capacity(ids.len());
+    for id in ids {
+        let page = host.call(
+            Caller::Ui,
+            "pages.get",
+            json!({ "id": id, "format": "html" }),
+        )?;
+        let meta = &page["meta"];
+        pages.push(crate::export::ExportPage {
+            title: meta["title"].as_str().unwrap_or(&id).to_string(),
+            folder: meta["folder"].as_str().map(str::to_string),
+            tags: meta["tags"]
+                .as_array()
+                .map(|t| {
+                    t.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            html: page["html"].as_str().unwrap_or_default().to_string(),
+            id,
+        });
+    }
+    Ok((vault, pages))
+}
+
+/// Save one page as a self-contained HTML file (local assets inlined).
+#[tauri::command]
+pub async fn export_page_html(
+    state: State<'_, AppState>,
+    page_id: String,
+    dest: String,
+) -> CmdResult<()> {
+    let (vault, pages) = pages_for_export(&state, None, Some(&page_id))?;
+    let page = pages.first().ok_or("page not found")?;
+    let html = crate::export::standalone(&vault, page);
+    herbarium_core::vault::write_atomic(&PathBuf::from(dest), html.as_bytes())
+}
+
+/// Publish the vault, or one folder of it, as a static website in `dest_dir`
+/// (a new or empty folder).
+#[tauri::command]
+pub async fn export_site(
+    state: State<'_, AppState>,
+    folder: Option<String>,
+    title: String,
+    dest_dir: String,
+) -> CmdResult<crate::export::SiteReport> {
+    let (vault, pages) = pages_for_export(&state, folder.as_deref(), None)?;
+    if pages.is_empty() {
+        return Err("there are no pages to publish".into());
+    }
+    crate::export::write_site(&vault, &title, &pages, &PathBuf::from(dest_dir))
+}
+
+/// List the HTML artifacts in a Claude or ChatGPT data export (.zip or
+/// conversations.json) and mark those already imported.
+#[tauri::command]
+pub async fn scan_ai_export(
+    state: State<'_, AppState>,
+    path: String,
+) -> CmdResult<crate::ai_import::Listing> {
+    // Parsing a large export happens before the vault is locked.
+    let scan =
+        herbarium_core::importer::scan(&crate::ai_import::read_conversations(Path::new(&path))?)?;
+    let have = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        herbarium_core::importer::imported_keys(host.store().ok_or("no vault open")?)?
+    };
+    let listing = crate::ai_import::Listing {
+        candidates: scan
+            .candidates
+            .iter()
+            .map(|c| crate::ai_import::Listed {
+                already_imported: have.contains(&c.key),
+                candidate: c.clone(),
+            })
+            .collect(),
+        conversations: scan.conversations,
+        unsupported: scan.unsupported,
+    };
+    *state.ai_scan.lock().map_err(|e| e.to_string())? = Some(scan);
+    Ok(listing)
+}
+
+/// Import the chosen artifacts (by key) of the last scanned export.
+#[tauri::command]
+pub async fn import_ai_export(
+    state: State<'_, AppState>,
+    keys: Vec<String>,
+    folder: Option<String>,
+) -> CmdResult<crate::ai_import::ImportReport> {
+    let scan = state
+        .ai_scan
+        .lock()
+        .map_err(|e| e.to_string())?
+        .take()
+        .ok_or("scan the export again before importing")?;
+    let keys: std::collections::HashSet<String> = keys.into_iter().collect();
+    let host = state.host.lock().map_err(|e| e.to_string())?;
+    crate::ai_import::import(
+        &host,
+        &scan.candidates,
+        Some(&keys),
+        folder.as_deref(),
+        None,
+    )
+}
+
+/// Copy the browser extension bundled with the app to a stable folder and
+/// reveal it, for "Load unpacked" until the extension is in the stores. (An
+/// AppImage's own files vanish when it exits, so the copy is what browsers
+/// keep loading.)
+#[tauri::command]
+pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
+    use tauri::Manager;
+    let bundled = app
+        .path()
+        .resource_dir()
+        .map(|d| d.join("browser-extension"))
+        .ok()
+        .filter(|d| d.join("manifest.json").is_file());
+    let source = match bundled {
+        Some(dir) => dir,
+        // `tauri dev`: the extension next to the app's sources.
+        None if cfg!(debug_assertions) => {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../extension")
+        }
+        None => return Err("the browser extension is not bundled with this build".into()),
+    };
+    let dest = dirs::data_dir()
+        .ok_or("no data folder")?
+        .join("Herbarium")
+        .join("browser-extension");
+    copy_dir(&source, &dest).map_err(|e| format!("cannot copy the extension: {e}"))?;
+    tauri_plugin_opener::reveal_item_in_dir(dest.join("manifest.json"))
+        .map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let target = to.join(entry.file_name());
+        if entry.file_type()?.is_dir() {
+            copy_dir(&entry.path(), &target)?;
+        } else {
+            std::fs::copy(entry.path(), &target)?;
+        }
+    }
+    Ok(())
+}
+
+/// Save the clipboard's HTML as a page (the UI's answer to a clipboard offer).
+#[tauri::command]
+pub async fn save_clipboard_page(
+    app: tauri::AppHandle,
+    watchers: State<'_, std::sync::Arc<crate::capture::Watchers>>,
+) -> CmdResult<String> {
+    crate::capture::save_offered_clipboard(&app, &watchers)
+}
+
+/// Save an HTML file the Downloads watcher offered.
+#[tauri::command]
+pub async fn save_download(app: tauri::AppHandle, path: String) -> CmdResult<String> {
+    crate::capture::save_download(&app, &path)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureSettings {
+    capture_shortcut: Option<String>,
+    watch_downloads: bool,
+    watch_clipboard: bool,
+}
+
+/// Change the capture shortcut and watchers; the shortcut is checked before
+/// anything is saved.
+#[tauri::command]
+pub async fn set_capture(
+    app: tauri::AppHandle,
+    watchers: State<'_, std::sync::Arc<crate::capture::Watchers>>,
+    settings: CaptureSettings,
+) -> CmdResult<Config> {
+    use std::sync::atomic::Ordering;
+    let shortcut = settings
+        .capture_shortcut
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let (cfg, ()) = config::update(|cfg| {
+        if let Err(e) = crate::capture::set_shortcut(&app, shortcut.as_deref()) {
+            // Put the previous shortcut back before reporting the bad one.
+            let _ = crate::capture::set_shortcut(&app, cfg.capture_shortcut.as_deref());
+            return Err(e);
+        }
+        cfg.capture_shortcut = shortcut;
+        cfg.watch_downloads = settings.watch_downloads;
+        cfg.watch_clipboard = settings.watch_clipboard;
+        Ok(())
+    })?;
+    watchers
+        .downloads
+        .store(cfg.watch_downloads, Ordering::Relaxed);
+    watchers
+        .clipboard
+        .store(cfg.watch_clipboard, Ordering::Relaxed);
+    Ok(cfg)
+}
+
+#[derive(serde::Serialize)]
+pub struct BrowserStatus {
+    browser: String,
+    connected: bool,
+}
+
+/// Browsers found and whether the extension's native host is registered with each.
+#[tauri::command]
+pub async fn browser_status() -> Vec<BrowserStatus> {
+    crate::native_host::status()
+        .into_iter()
+        .map(|(browser, connected)| BrowserStatus { browser, connected })
+        .collect()
+}
+
+/// Register the native messaging host with every browser found.
+#[tauri::command]
+pub async fn connect_browsers() -> CmdResult<Vec<String>> {
+    crate::native_host::install_default()
+}
+
 #[tauri::command]
 pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
     let host = state.host.lock().map_err(|e| e.to_string())?;
@@ -435,4 +711,275 @@ mod tests {
         assert!(!std::fs::read(&dest).unwrap().starts_with(b"not a zip"));
         let _ = std::fs::remove_dir_all(&dir);
     }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AiSettings {
+    provider: String,
+    model: String,
+    base_url: Option<String>,
+    /// Providers with a stored key (the keys never leave the backend).
+    keys: Vec<&'static str>,
+    providers: &'static [crate::ai::Provider],
+}
+
+fn ai_settings_of(cfg: &Config) -> AiSettings {
+    let secrets = crate::secrets::load();
+    AiSettings {
+        provider: cfg.ai_provider.clone(),
+        model: cfg.ai_model.clone(),
+        base_url: cfg.ai_base_url.clone(),
+        keys: crate::ai::PROVIDERS
+            .iter()
+            .filter(|p| secrets.ai_key(p.id).is_some())
+            .map(|p| p.id)
+            .collect(),
+        providers: crate::ai::PROVIDERS,
+    }
+}
+
+#[tauri::command]
+pub async fn ai_settings() -> AiSettings {
+    ai_settings_of(&config::load().unwrap_or_default())
+}
+
+/// Change the AI provider, model and API address; `key` stores (or, blank,
+/// removes) that provider's key, and is left alone when absent.
+#[tauri::command]
+pub async fn set_ai_settings(
+    provider: String,
+    model: String,
+    base_url: Option<String>,
+    key: Option<String>,
+) -> CmdResult<AiSettings> {
+    if crate::ai::provider(&provider).is_none() {
+        return Err(format!("unknown AI provider `{provider}`"));
+    }
+    let model = model.trim();
+    if model.len() > 200 || model.chars().any(char::is_whitespace) {
+        return Err("enter a model name such as claude-opus-5-5".into());
+    }
+    let base_url = base_url
+        .map(|u| u.trim().to_string())
+        .filter(|u| !u.is_empty());
+    if let Some(url) = &base_url {
+        crate::ai::check_url(url)?;
+    }
+    if key.is_some() {
+        crate::secrets::set_ai_key(&provider, key)?;
+    }
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.ai_provider = provider;
+        // Empty means automatic: the service's recommended model at each remix.
+        cfg.ai_model = model.to_string();
+        cfg.ai_base_url = base_url;
+        Ok(())
+    })?;
+    Ok(ai_settings_of(&cfg))
+}
+
+#[derive(serde::Serialize)]
+pub struct ModelList {
+    models: Vec<crate::ai::Model>,
+    recommended: Option<String>,
+}
+
+/// The models `provider` offers with its stored key (and, for the current
+/// provider, the configured address), and the one to recommend. Kept for the
+/// session unless `refresh`. Reading the list also proves the key works.
+#[tauri::command]
+pub async fn ai_models(
+    state: State<'_, AppState>,
+    provider: String,
+    refresh: bool,
+) -> CmdResult<ModelList> {
+    let info = crate::ai::provider(&provider)
+        .ok_or_else(|| format!("unknown AI provider `{provider}`"))?;
+    let cfg = config::load().unwrap_or_default();
+    let base = (cfg.ai_provider == provider)
+        .then_some(cfg.ai_base_url)
+        .flatten();
+    let cache_key = format!("{provider}|{}", base.as_deref().unwrap_or_default());
+    let cached = if refresh {
+        None
+    } else {
+        state
+            .models
+            .lock()
+            .map_err(|e| e.to_string())?
+            .get(&cache_key)
+            .cloned()
+    };
+    let models = match cached {
+        Some(models) => models,
+        None => {
+            let key = crate::secrets::load().ai_key(&provider);
+            let models = tauri::async_runtime::spawn_blocking(move || {
+                crate::ai::list_models(info, key.as_deref(), base.as_deref())
+            })
+            .await
+            .map_err(|e| e.to_string())??;
+            state
+                .models
+                .lock()
+                .map_err(|e| e.to_string())?
+                .insert(cache_key, models.clone());
+            models
+        }
+    };
+    let recommended = crate::ai::recommend(info, &models);
+    Ok(ModelList {
+        models,
+        recommended,
+    })
+}
+
+/// Remix a page with the configured model and keep the result as a proposal.
+/// Emits `remix-progress` `{ id, chars }` while the answer comes in.
+#[tauri::command]
+pub async fn remix_page(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    id: String,
+    preset: String,
+    instructions: String,
+) -> CmdResult<Value> {
+    use tauri::Emitter;
+
+    let running = crate::remix::start(&id)?;
+    let (prompt, base_updated_at) =
+        crate::remix::prompt_for(&state.host, &id, &preset, &instructions)?;
+
+    let cfg = config::load().unwrap_or_default();
+    let key = crate::secrets::load().ai_key(&cfg.ai_provider);
+    let page_id = id.clone();
+    let emitter = app.clone();
+    // `running` stays held until the proposal is saved.
+    let stop = running.flag();
+    let remixed = tauri::async_runtime::spawn_blocking(move || {
+        // No model saved: the service's recommended one.
+        let model = if cfg.ai_model.trim().is_empty() {
+            crate::ai::provider(&cfg.ai_provider)
+                .map(|p| crate::ai::resolve_model(p, key.as_deref(), cfg.ai_base_url.as_deref()))
+                .unwrap_or_default()
+        } else {
+            cfg.ai_model.clone()
+        };
+        let job = crate::remix::Job {
+            provider: &cfg.ai_provider,
+            model: &model,
+            key: key.as_deref(),
+            base_url: cfg.ai_base_url.as_deref(),
+            prompt,
+        };
+        crate::remix::run(job, |chars| {
+            let _ = emitter.emit("remix-progress", json!({ "id": page_id, "chars": chars }));
+            !stop.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let proposal = crate::remix::propose(&state.host, &id, &remixed, base_updated_at);
+    drop(running);
+    proposal
+}
+
+#[tauri::command]
+pub async fn cancel_remix(id: String) {
+    crate::remix::cancel(&id);
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GithubSettings {
+    has_token: bool,
+    login: Option<String>,
+    repo: String,
+}
+
+fn github_settings_of(cfg: &Config) -> GithubSettings {
+    GithubSettings {
+        has_token: crate::secrets::load().github_token.is_some(),
+        login: cfg.github_login.clone(),
+        repo: cfg.publish_repo.clone(),
+    }
+}
+
+#[tauri::command]
+pub async fn github_settings() -> GithubSettings {
+    github_settings_of(&config::load().unwrap_or_default())
+}
+
+/// Store (checking it with GitHub first) or remove (blank) the token, when
+/// `token` is given, and set the site's repository.
+#[tauri::command]
+pub async fn set_github(token: Option<String>, repo: String) -> CmdResult<GithubSettings> {
+    let repo = repo.trim().to_string();
+    crate::publish::check_repo_name(&repo)?;
+    // Check a new token with GitHub first: the config is not held meanwhile,
+    // so other settings changed during the check are kept.
+    let token = token.map(|t| t.trim().to_string());
+    let login = match token.as_deref() {
+        Some(t) if !t.is_empty() => {
+            let check = t.to_string();
+            Some(
+                tauri::async_runtime::spawn_blocking(move || {
+                    crate::publish::GitHub::new(&check)?.login()
+                })
+                .await
+                .map_err(|e| e.to_string())??,
+            )
+        }
+        _ => None,
+    };
+    if let Some(token) = &token {
+        crate::secrets::set(
+            |s, v| s.github_token = v,
+            (!token.is_empty()).then(|| token.clone()),
+        )?;
+    }
+    let (cfg, ()) = config::update(|cfg| {
+        if token.is_some() {
+            cfg.github_login = login;
+        }
+        cfg.publish_repo = repo;
+        Ok(())
+    })?;
+    Ok(github_settings_of(&cfg))
+}
+
+/// Publish a page (`target`: `gist` or `site`) or, with `unpublish`, take it
+/// down. Returns the record (`url`…).
+#[tauri::command]
+pub async fn publish_page(
+    app: tauri::AppHandle,
+    id: String,
+    target: String,
+    unpublish: bool,
+) -> CmdResult<Value> {
+    use tauri::Manager;
+    let token = crate::secrets::load()
+        .github_token
+        .ok_or("connect your GitHub account in Settings → AI & sharing first")?;
+    let repo = config::load().unwrap_or_default().publish_repo;
+    // Network calls run off the async runtime, and the vault is locked only
+    // while a step reads or records.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::publish::run(&state.host, &token, &id, &target, &repo, unpublish)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Put rich content on the clipboard: `html`, with `text` for apps that take
+/// no HTML.
+#[tauri::command]
+pub async fn copy_rich(app: tauri::AppHandle, html: String, text: String) -> CmdResult<()> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard()
+        .write_html(html, Some(text))
+        .map_err(|e| format!("could not copy: {e}"))
 }

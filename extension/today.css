@@ -1,0 +1,14 @@
+body { min-height: 100vh; background: var(--raised); }
+.page { max-width: 980px; margin: 0 auto; padding: 48px 24px 64px; }
+.top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 28px; flex-wrap: wrap; }
+.top h1 { font-size: 30px; font-family: Georgia, serif; font-weight: 500; }
+.top input { max-width: 320px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.card { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.big { margin: 0; font-size: 15px; }
+.big span:first-child { font-size: 32px; font-weight: 600; margin-right: 4px; }
+.list, .results { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.list button, .results button { width: 100%; justify-content: flex-start; flex-direction: column; align-items: flex-start; gap: 0; border: 0; padding: 6px 8px; text-align: left; }
+.list .sub, .results .sub { font-size: 11px; color: var(--muted); }
+.results { margin-bottom: 20px; padding: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); }
+.due > button { align-self: flex-start; }
