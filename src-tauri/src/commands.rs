@@ -485,8 +485,11 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 
 /// Save the clipboard's HTML as a page (the UI's answer to a clipboard offer).
 #[tauri::command]
-pub async fn save_clipboard_page(app: tauri::AppHandle) -> CmdResult<String> {
-    crate::capture::save_clipboard(&app)
+pub async fn save_clipboard_page(
+    app: tauri::AppHandle,
+    watchers: State<'_, std::sync::Arc<crate::capture::Watchers>>,
+) -> CmdResult<String> {
+    crate::capture::save_offered_clipboard(&app, &watchers)
 }
 
 /// Save an HTML file the Downloads watcher offered.

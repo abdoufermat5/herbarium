@@ -37,6 +37,9 @@ const POLL: Duration = Duration::from_secs(3);
 pub struct Watchers {
     pub downloads: AtomicBool,
     pub clipboard: AtomicBool,
+    /// The page the clipboard watcher last offered: saving the offer saves
+    /// this, even if something else was copied since.
+    pub offered: std::sync::Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -116,6 +119,23 @@ pub fn save_clipboard<R: Runtime>(app: &AppHandle<R>) -> Result<String, String> 
         .map_err(|_| "the clipboard holds no text".to_string())?;
     let html = page_from_text(&text).ok_or("the clipboard holds no HTML")?;
     save_page(app, &html, None)
+}
+
+/// Save the page the clipboard watcher offered (the UI's "Save" on that
+/// offer), or the clipboard as it is now when there is no offer.
+pub fn save_offered_clipboard<R: Runtime>(
+    app: &AppHandle<R>,
+    watchers: &Watchers,
+) -> Result<String, String> {
+    let offered = watchers
+        .offered
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    match offered.as_deref().and_then(page_from_text) {
+        Some(html) => save_page(app, &html, None),
+        None => save_clipboard(app),
+    }
 }
 
 /// The shortcut and tray action: save, then say what happened.
@@ -271,6 +291,7 @@ pub fn start_watchers<R: Runtime>(app: &AppHandle<R>, watchers: Arc<Watchers>) {
                     &format!("Press the capture shortcut to save “{title}”."),
                 );
             }
+            *watchers.offered.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
             let _ = handle.emit(
                 CLIPBOARD_OFFER,
                 Offer {
