@@ -194,6 +194,18 @@ impl Store {
         )
     }
 
+    /// Pages whose `ext` JSON contains `needle`, ignoring ASCII case: a cheap
+    /// prefilter before looking at one `ext` field properly.
+    pub fn with_ext_containing(&self, needle: &str) -> rusqlite::Result<Vec<PageMeta>> {
+        self.query_metas(
+            &format!(
+                "SELECT {COLUMNS} FROM pages WHERE instr(lower(ext), lower(?1)) > 0
+                 ORDER BY title COLLATE NOCASE"
+            ),
+            params![needle],
+        )
+    }
+
     pub fn search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
         let limit_param = if limit == usize::MAX {
             i64::MAX

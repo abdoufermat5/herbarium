@@ -611,7 +611,13 @@ impl Extension for Pages {
                 if want.is_empty() {
                     return Ok(Vec::new());
                 }
-                let pages = ctx.store.all().map_err(|e| e.to_string())?;
+                // The extension asks on every page load: only parse the pages
+                // whose metadata mentions the address at all.
+                let needle = want.split_once("://").map_or(want.as_str(), |(_, rest)| rest);
+                let pages = ctx
+                    .store
+                    .with_ext_containing(needle)
+                    .map_err(|e| e.to_string())?;
                 Ok(pages
                     .into_iter()
                     .filter(|m| {
