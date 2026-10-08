@@ -6,6 +6,8 @@
   import { t } from "../lib/i18n.svelte";
   import type { LabelColor } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { confirmState } from "../lib/confirm.svelte";
+  import { folderPickerState } from "../lib/folder-picker.svelte";
 
   /** Edit a folder's icon and colour, or a tag's colour. */
   const target = app.lookEdit!;
@@ -34,9 +36,12 @@
     }
   }
 
+  // Capture phase: the window-level shortcuts run first otherwise, and their
+  // Escape would also close the reader or leave Settings.
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && !app.paletteOpen && !confirmState.pending && !folderPickerState.pending) {
       e.preventDefault();
+      e.stopPropagation();
       close();
     }
   }
@@ -44,7 +49,7 @@
   onMount(() => first?.focus());
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydowncapture={onKey} />
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && close()}>
   <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="look-title">

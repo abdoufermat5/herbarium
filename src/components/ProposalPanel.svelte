@@ -3,9 +3,11 @@
   import { api } from "../lib/api";
   import { fmtDateTime, timeAgo } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
-  import { errorMessage } from "../lib/state.svelte";
+  import { app, errorMessage } from "../lib/state.svelte";
   import type { ProposalSummary } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { confirmState } from "../lib/confirm.svelte";
+  import { folderPickerState } from "../lib/folder-picker.svelte";
   import HtmlDiff from "./HtmlDiff.svelte";
 
   let {
@@ -55,9 +57,12 @@
     }
   }
 
+  // Capture phase: the window-level shortcuts run first otherwise, and their
+  // Escape would also close the reader or leave Settings.
   function onKeydown(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && !app.paletteOpen && !confirmState.pending && !folderPickerState.pending) {
       e.preventDefault();
+      e.stopPropagation();
       onClose();
     }
   }
@@ -68,7 +73,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKeydown} />
+<svelte:window onkeydowncapture={onKeydown} />
 
 <div
   class="overlay"

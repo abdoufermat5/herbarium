@@ -7,6 +7,8 @@
   import { t } from "../lib/i18n.svelte";
   import type { AiExportListing } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { confirmState } from "../lib/confirm.svelte";
+  import { folderPickerState } from "../lib/folder-picker.svelte";
 
   type Step = "pick" | "scanning" | "choose" | "importing";
 
@@ -89,9 +91,12 @@
     }
   }
 
+  // Capture phase: the window-level shortcuts run first otherwise, and their
+  // Escape would also close the reader or leave Settings.
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape" && !app.paletteOpen) {
+    if (e.key === "Escape" && !app.paletteOpen && !confirmState.pending && !folderPickerState.pending) {
       e.preventDefault();
+      e.stopPropagation();
       close();
     }
   }
@@ -99,7 +104,7 @@
   onMount(() => closeBtn?.focus());
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydowncapture={onKey} />
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && close()}>
   <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="ai-import-title">

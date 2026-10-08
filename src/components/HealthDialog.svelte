@@ -5,6 +5,8 @@
   import { t } from "../lib/i18n.svelte";
   import type { HealthIssue } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import { confirmState } from "../lib/confirm.svelte";
+  import { folderPickerState } from "../lib/folder-picker.svelte";
 
   /** Every page that may not work, and why. */
   let pages = $state<Array<{ id: string; title: string; folder: string | null; issues: HealthIssue[] }> | null>(null);
@@ -27,9 +29,12 @@
       .join(" · ");
   }
 
+  // Capture phase: the window-level shortcuts run first otherwise, and their
+  // Escape would also close the reader or leave Settings.
   function onKey(e: KeyboardEvent) {
-    if (e.key === "Escape") {
+    if (e.key === "Escape" && !app.paletteOpen && !confirmState.pending && !folderPickerState.pending) {
       e.preventDefault();
+      e.stopPropagation();
       close();
     }
   }
@@ -44,7 +49,7 @@
   });
 </script>
 
-<svelte:window onkeydown={onKey} />
+<svelte:window onkeydowncapture={onKey} />
 
 <div class="overlay" role="presentation" onmousedown={(e) => e.target === e.currentTarget && close()}>
   <div class="dialog card" role="dialog" aria-modal="true" aria-labelledby="health-title">
