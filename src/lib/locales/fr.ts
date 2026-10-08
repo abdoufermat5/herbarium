@@ -1100,7 +1100,7 @@ export const fr: Record<MessageKey, string> = {
   "share.unpublished": "Retirée",
   "share.working": "Publication…",
   "share.failed": "Publication impossible",
-  "share.connectFirst": "Connectez d’abord votre compte GitHub dans Réglages → Publication.",
+  "share.connectFirst": "Connectez d’abord votre compte GitHub dans Réglages → IA et partage.",
   "proposal.titleRemix": "Remanié par l’IA",
   "proposal.summaryRemix": "Remanié {when}.",
   "proposal.bannerTitleRemix": "Un remaniement de cette page attend",

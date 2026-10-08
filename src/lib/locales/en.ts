@@ -1090,7 +1090,7 @@ export const en = {
   "share.unpublished": "Taken down",
   "share.working": "Publishing…",
   "share.failed": "Could not publish",
-  "share.connectFirst": "Connect your GitHub account in Settings → Publishing first.",
+  "share.connectFirst": "Connect your GitHub account in Settings → AI & sharing first.",
   "proposal.titleRemix": "Remixed with AI",
   "proposal.summaryRemix": "Remixed {when}.",
   "proposal.bannerTitleRemix": "A remix of this page is waiting",

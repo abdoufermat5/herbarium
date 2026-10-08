@@ -38,6 +38,12 @@
     return null;
   }
 
+  /** Where the site is served: a `<login>.github.io` repository is the user's own site. */
+  function siteAddress(login: string, repo: string): string {
+    const origin = `https://${login.toLowerCase()}.github.io`;
+    return repo.toLowerCase() === `${login.toLowerCase()}.github.io` ? `${origin}/` : `${origin}/${repo}/`;
+  }
+
   async function publish(target: PublishTarget) {
     if (busy) return;
     const login = await ensureConnected().catch((e) => (toast(errorMessage(e), "error"), null));
@@ -49,7 +55,7 @@
           ? { title: t("share.gistConfirmTitle"), message: t("share.gistConfirm"), confirmLabel: t("share.gistAction") }
           : {
               title: t("share.siteConfirmTitle"),
-              message: t("share.siteConfirm", { url: `https://${login.toLowerCase()}.github.io/${gh.repo}/` }),
+              message: t("share.siteConfirm", { url: siteAddress(login, gh.repo) }),
               confirmLabel: t("share.siteAction"),
             },
       );

@@ -54,7 +54,7 @@ function hostOf(url: string): string {
 export function shareCard(input: CardInput): { html: string; text: string } {
   const title = input.title.trim() || "Untitled page";
   const blurb = excerpt(input.html);
-  const link = input.url ? escape(input.url) : null;
+  const link = input.url && /^https?:\/\//i.test(input.url) ? escape(input.url) : null;
   const wrap = (inner: string, style: string) =>
     link ? `<a href="${link}" style="${style}">${inner}</a>` : `<span style="${style}">${inner}</span>`;
   const picture = input.image
@@ -119,15 +119,20 @@ export async function digestPng(digest: PreviewDigest, width = 880, aspect = 0.5
       }
     }
     if (digest.image) {
-      const img = new Image();
-      img.src = digest.image.src;
-      await img.decode();
-      const { x, y, w, h: ih } = digest.image;
-      // Cover the box, as the miniature's `slice` does.
-      const s = Math.max(w / img.naturalWidth, ih / img.naturalHeight);
-      const sw = w / s;
-      const sh = ih / s;
-      ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, x, y, w, ih);
+      // A picture that will not decode still leaves the rest of the card.
+      try {
+        const img = new Image();
+        img.src = digest.image.src;
+        await img.decode();
+        const { x, y, w, h: ih } = digest.image;
+        // Cover the box, as the miniature's `slice` does.
+        const s = Math.max(w / img.naturalWidth, ih / img.naturalHeight);
+        const sw = w / s;
+        const sh = ih / s;
+        ctx.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, x, y, w, ih);
+      } catch (e) {
+        console.warn("share card picture:", e);
+      }
     }
     return canvas.toDataURL("image/png");
   } catch (e) {
