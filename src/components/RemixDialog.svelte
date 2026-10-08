@@ -32,6 +32,7 @@
   let closeBtn: HTMLButtonElement | undefined = $state();
   let unlisten: UnlistenFn | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
+  let destroyed = false;
 
   const provider = $derived(settings?.providers.find((p) => p.id === settings?.provider) ?? null);
   const needsKey = $derived(!!settings && !!provider?.needsKey && !settings.keys.includes(settings.provider));
@@ -89,9 +90,12 @@
     // Capture phase: the app's own Escape would otherwise close the reader.
     window.addEventListener("keydown", onKey, true);
     closeBtn?.focus();
-    unlisten = await listen<{ id: string; chars: number }>("remix-progress", (e) => {
+    const stop = await listen<{ id: string; chars: number }>("remix-progress", (e) => {
       if (e.payload.id === pageId && e.payload.chars > 0) chars = e.payload.chars;
     });
+    // Closed while the listener was being set up.
+    if (destroyed) stop();
+    else unlisten = stop;
     try {
       settings = await api.aiSettings();
     } catch (e) {
@@ -100,6 +104,9 @@
   });
 
   onDestroy(() => {
+    destroyed = true;
+    // Leaving the page (not just this dialog) must not leave a remix running.
+    if (busy) void api.cancelRemix();
     window.removeEventListener("keydown", onKey, true);
     unlisten?.();
     if (timer) clearInterval(timer);
