@@ -25,7 +25,7 @@
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
-  import HtmlEditor from "./HtmlEditor.svelte";
+  import { loadHtmlEditor } from "../lib/lazy";
   import HistoryPanel from "./HistoryPanel.svelte";
   import { exportPageFile } from "../lib/exports";
   import { ICON_CHOICES, tagColor } from "../lib/appearance";
@@ -1659,21 +1659,23 @@
                   {t("edit.close")}
                 </button>
               </div>
-              <HtmlEditor
-                bind:value={source}
-                onsave={saveSource}
-                wrap={prefs.editorWrap}
-                fontSize={prefs.editorFontSize}
-                lineHeight={prefs.editorLineHeight}
-                tabSize={prefs.editorTabSize}
-                tabIndents={prefs.editorTabIndents}
-                spellcheck={prefs.editorSpellcheck}
-                fontFamily={prefs.editorFont === "system"
-                  ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-                  : "var(--mono)"}
-                ariaLabel={t("edit.source")}
-                readonly={pageGone}
-              />
+              {#await loadHtmlEditor() then HtmlEditor}
+                <HtmlEditor
+                  bind:value={source}
+                  onsave={saveSource}
+                  wrap={prefs.editorWrap}
+                  fontSize={prefs.editorFontSize}
+                  lineHeight={prefs.editorLineHeight}
+                  tabSize={prefs.editorTabSize}
+                  tabIndents={prefs.editorTabIndents}
+                  spellcheck={prefs.editorSpellcheck}
+                  fontFamily={prefs.editorFont === "system"
+                    ? "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+                    : "var(--mono)"}
+                  ariaLabel={t("edit.source")}
+                  readonly={pageGone}
+                />
+              {/await}
             </div>
             {#if prefs.editorPreview !== "off"}
               <div class="frame-holder">

@@ -8,7 +8,7 @@
   import type { HistoryEntry } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
-  import HtmlDiff from "./HtmlDiff.svelte";
+  import { loadHtmlDiff } from "../lib/lazy";
 
   let {
     pageId,
@@ -164,7 +164,7 @@
               <span>{t("history.version")} · {selected ? fmtDateTime(selected.at) : ""}</span>
               <span>{t("history.current")}</span>
             </div>
-            {#if selectedHtml}<HtmlDiff before={selectedHtml} after={currentHtml} label={t("history.diffLabel")} />{/if}
+            {#if selectedHtml}{#await loadHtmlDiff() then HtmlDiff}<HtmlDiff before={selectedHtml} after={currentHtml} label={t("history.diffLabel")} />{/await}{/if}
           {/if}
           <div class="actions">
             <button

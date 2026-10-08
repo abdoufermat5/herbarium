@@ -8,7 +8,7 @@
   import Icon from "../lib/Icon.svelte";
   import { confirmState } from "../lib/confirm.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
-  import HtmlDiff from "./HtmlDiff.svelte";
+  import { loadHtmlDiff } from "../lib/lazy";
 
   let {
     pageId,
@@ -109,7 +109,7 @@
         <span>{t("history.current")}</span>
         <span>{t("proposal.proposed")}</span>
       </div>
-      <HtmlDiff before={currentHtml} after={proposedHtml} label={t("proposal.diffLabel")} />
+      {#await loadHtmlDiff() then HtmlDiff}<HtmlDiff before={currentHtml} after={proposedHtml} label={t("proposal.diffLabel")} />{/await}
       <div class="actions">
         <span class="hint">{t("proposal.historyHint")}</span>
         <button class="btn btn-sm" onclick={() => run(onReject)} disabled={working}>
