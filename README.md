@@ -10,7 +10,7 @@ A desktop reader for the HTML pages AI tools generate. Save a page, find it late
 
 Your pages stay plain `.html` files in a folder you own.
 
-![Herbarium: search a page, use it in the reader, then run a review session](docs/demo.gif)
+![Herbarium: filter the library, highlight a passage, remix a page into a quiz with AI, explore the link graph, then run a review session](docs/demo.gif)
 
 ## Install
 
