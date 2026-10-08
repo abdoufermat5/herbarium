@@ -142,7 +142,9 @@ static UPDATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Load the config, apply `change` and save it, as one step. `change` must
 /// not wait on anything slow (the network): do that before calling.
-pub fn update<T>(change: impl FnOnce(&mut Config) -> Result<T, String>) -> Result<(Config, T), String> {
+pub fn update<T>(
+    change: impl FnOnce(&mut Config) -> Result<T, String>,
+) -> Result<(Config, T), String> {
     let _guard = UPDATE.lock().unwrap_or_else(|e| e.into_inner());
     let mut cfg = load().unwrap_or_default();
     let out = change(&mut cfg)?;

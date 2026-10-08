@@ -6,9 +6,9 @@
 // (streamed, so long pages don't time out), or the Claude Code command line
 // with the user's own sign-in.
 
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
-use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -52,7 +52,10 @@ impl Drop for Running {
     fn drop(&mut self) {
         let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
         // Only forget our own entry.
-        if running.get(&self.page).is_some_and(|s| Arc::ptr_eq(s, &self.stop)) {
+        if running
+            .get(&self.page)
+            .is_some_and(|s| Arc::ptr_eq(s, &self.stop))
+        {
             running.remove(&self.page);
         }
     }
@@ -488,7 +491,10 @@ mod tests {
     fn remixes_run_and_stop_per_page() {
         let a = start("remix-test-a").unwrap();
         let b = start("remix-test-b").unwrap();
-        assert!(start("remix-test-a").is_err(), "one remix per page at a time");
+        assert!(
+            start("remix-test-a").is_err(),
+            "one remix per page at a time"
+        );
         cancel("remix-test-a");
         let stopped = |r: &Running| r.flag().load(Ordering::Relaxed);
         assert!(stopped(&a) && !stopped(&b), "stopping one leaves the other");

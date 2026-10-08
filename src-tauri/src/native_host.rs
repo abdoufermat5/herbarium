@@ -198,8 +198,13 @@ fn import(host: &Host, req: &Value) -> Result<Value, String> {
     let scan = herbarium_core::importer::scan(json)?;
     let folder = str_arg(req, "folder").unwrap_or(INBOX);
     // Conversations come from the web: their pages never get network access.
-    let report =
-        crate::ai_import::import(host, &scan.candidates, Some(&keys), Some(folder), Some(false))?;
+    let report = crate::ai_import::import(
+        host,
+        &scan.candidates,
+        Some(&keys),
+        Some(folder),
+        Some(false),
+    )?;
     let by_key: std::collections::HashMap<String, Value> = host
         .store()
         .ok_or("no vault open")?

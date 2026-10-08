@@ -477,7 +477,8 @@ pub fn run_import(args: &[String]) -> i32 {
             }
             return Ok(0);
         }
-        let report = crate::ai_import::import(&host, &scan.candidates, None, folder.as_deref(), None)?;
+        let report =
+            crate::ai_import::import(&host, &scan.candidates, None, folder.as_deref(), None)?;
         println!("imported {}, skipped {}", report.imported, report.skipped);
         for e in &report.errors {
             eprintln!("herbarium import: {e}");

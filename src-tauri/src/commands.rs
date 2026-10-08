@@ -435,7 +435,13 @@ pub async fn import_ai_export(
         .ok_or("scan the export again before importing")?;
     let keys: std::collections::HashSet<String> = keys.into_iter().collect();
     let host = state.host.lock().map_err(|e| e.to_string())?;
-    crate::ai_import::import(&host, &scan.candidates, Some(&keys), folder.as_deref(), None)
+    crate::ai_import::import(
+        &host,
+        &scan.candidates,
+        Some(&keys),
+        folder.as_deref(),
+        None,
+    )
 }
 
 /// Copy the browser extension bundled with the app to a stable folder and
