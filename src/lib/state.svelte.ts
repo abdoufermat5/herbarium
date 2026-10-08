@@ -1,3 +1,4 @@
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
@@ -243,13 +244,34 @@ export function setLayout(layout: Layout) {
   localStorage.setItem("herbarium.layout", layout);
 }
 
+/**
+ * Tell the window which theme to use, so pages in the reader (which only see
+ * `prefers-color-scheme`) follow the app's choice instead of the OS's.
+ * `null` hands it back to the OS.
+ */
+async function applyNativeTheme(choice: ThemeChoice): Promise<void> {
+  try {
+    await getCurrentWindow().setTheme(choice === "system" ? null : choice);
+  } catch (e) {
+    console.warn("window theme:", e);
+  }
+}
+
 /** Pick a theme; `system` follows the OS and keeps following it. */
 export function setTheme(choice: ThemeChoice) {
+  const fromForced = app.themeChoice !== "system";
   app.themeChoice = choice;
-  app.theme = resolveTheme(choice);
+  // While a theme was forced on the window, the media query reports that one,
+  // not the OS's: keep the current look until the window reports again.
+  app.theme = choice === "system" && fromForced ? app.theme : resolveTheme(choice);
   document.documentElement.dataset.theme = app.theme;
   if (choice === "system") localStorage.removeItem("herbarium.theme");
   else localStorage.setItem("herbarium.theme", choice);
+  void applyNativeTheme(choice).then(() => {
+    if (app.themeChoice !== "system") return;
+    app.theme = systemTheme();
+    document.documentElement.dataset.theme = app.theme;
+  });
 }
 
 /** Flip the theme in effect to its opposite as an explicit choice. */
@@ -260,6 +282,7 @@ export function toggleTheme() {
 /** Apply the theme on boot and follow OS changes while `system` is selected. */
 export function initTheme() {
   document.documentElement.dataset.theme = app.theme;
+  if (app.themeChoice !== "system") void applyNativeTheme(app.themeChoice);
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
     if (app.themeChoice !== "system") return;
     app.theme = systemTheme();
