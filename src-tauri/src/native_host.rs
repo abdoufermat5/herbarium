@@ -197,19 +197,25 @@ fn import(host: &Host, req: &Value) -> Result<Value, String> {
         .collect();
     let scan = herbarium_core::importer::scan(json)?;
     let folder = str_arg(req, "folder").unwrap_or(INBOX);
-    let report = crate::ai_import::import(host, &scan.candidates, Some(&keys), Some(folder))?;
+    // Conversations come from the web: their pages never get network access.
+    let report =
+        crate::ai_import::import(host, &scan.candidates, Some(&keys), Some(folder), Some(false))?;
+    let by_key: std::collections::HashMap<String, Value> = host
+        .store()
+        .ok_or("no vault open")?
+        .all()
+        .map_err(|e| e.to_string())?
+        .into_iter()
+        .filter_map(|m| {
+            let key = herbarium_core::import_key(&m)?.to_string();
+            keys.contains(&key)
+                .then(|| (key, brief(&serde_json::to_value(&m).unwrap_or(Value::Null))))
+        })
+        .collect();
     let saved: Vec<Value> = scan
         .candidates
         .iter()
-        .filter(|c| keys.contains(&c.key))
-        .filter_map(|c| {
-            host.store()?
-                .all()
-                .ok()?
-                .into_iter()
-                .find(|m| herbarium_core::import_key(m) == Some(c.key.as_str()))
-                .map(|m| brief(&serde_json::to_value(m).unwrap_or(Value::Null)))
-        })
+        .filter_map(|c| by_key.get(&c.key).cloned())
         .collect();
     Ok(
         json!({ "imported": report.imported, "skipped": report.skipped, "errors": report.errors, "pages": saved }),

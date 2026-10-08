@@ -432,7 +432,7 @@ pub async fn import_ai_export(
         .ok_or("scan the export again before importing")?;
     let keys: std::collections::HashSet<String> = keys.into_iter().collect();
     let host = state.host.lock().map_err(|e| e.to_string())?;
-    crate::ai_import::import(&host, &scan.candidates, Some(&keys), folder.as_deref())
+    crate::ai_import::import(&host, &scan.candidates, Some(&keys), folder.as_deref(), None)
 }
 
 /// Copy the browser extension bundled with the app to a stable folder and
@@ -934,7 +934,7 @@ pub async fn publish_page(
     use tauri::Manager;
     let token = crate::secrets::load()
         .github_token
-        .ok_or("connect your GitHub account in Settings → Publishing first")?;
+        .ok_or("connect your GitHub account in Settings → AI & sharing first")?;
     let repo = config::load().unwrap_or_default().publish_repo;
     // Network calls run off the async runtime, and the vault is locked only
     // while a step reads or records.

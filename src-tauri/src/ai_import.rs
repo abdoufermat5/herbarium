@@ -52,7 +52,8 @@ pub fn read_conversations(path: &Path) -> Result<String, String> {
         return Err("conversations.json is larger than 2 GiB".into());
     }
     let mut entry = archive.by_index(index).map_err(|e| e.to_string())?;
-    let mut text = String::with_capacity(size as usize);
+    // The declared size comes from the archive; don't trust it for the allocation.
+    let mut text = String::with_capacity(size.min(64 * 1024 * 1024) as usize);
     entry
         .by_ref()
         .take(MAX_EXPORT)
@@ -107,12 +108,14 @@ pub struct ImportReport {
 }
 
 /// Save `candidates` (those in `only`, or all when it is None) into `folder`,
-/// skipping any already imported.
+/// skipping any already imported. `allow_cdn` overrides the vault's network
+/// default (None follows it).
 pub fn import(
     host: &Host,
     candidates: &[Candidate],
     only: Option<&HashSet<String>>,
     folder: Option<&str>,
+    allow_cdn: Option<bool>,
 ) -> Result<ImportReport, String> {
     let store = host.store().ok_or("no vault open")?;
     let mut have = importer::imported_keys(store)?;
@@ -139,6 +142,9 @@ pub fn import(
         });
         if let Some(folder) = folder.filter(|f| !f.trim().is_empty()) {
             args["folder"] = json!(folder);
+        }
+        if let Some(allow) = allow_cdn {
+            args["allowCdn"] = json!(allow);
         }
         match host.call(Caller::Ui, "pages.create", args) {
             Ok(_) => {
@@ -191,7 +197,7 @@ mod tests {
         let (scan, listing) = scan_file(&host, &zip_path).unwrap();
         assert_eq!(listing.candidates.len(), 1);
         assert!(!listing.candidates[0].already_imported);
-        let report = import(&host, &scan.candidates, None, Some("Imported")).unwrap();
+        let report = import(&host, &scan.candidates, None, Some("Imported"), None).unwrap();
         assert_eq!((report.imported, report.skipped), (1, 0));
 
         let pages = host.call(Caller::Ui, "pages.list", json!({})).unwrap();
@@ -202,7 +208,7 @@ mod tests {
 
         let (scan, listing) = scan_file(&host, &zip_path).unwrap();
         assert!(listing.candidates[0].already_imported);
-        let report = import(&host, &scan.candidates, None, None).unwrap();
+        let report = import(&host, &scan.candidates, None, None, None).unwrap();
         assert_eq!((report.imported, report.skipped), (0, 1));
 
         std::fs::write(dir.join("conversations.json"), export_json()).unwrap();
