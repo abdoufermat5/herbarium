@@ -20,6 +20,7 @@
   import { folderPickerState } from "../lib/folder-picker.svelte";
   import { fmtDate, fmtDateTime, timeAgo, fmtDuration, fmtDurationShort, dueInfo, modKey } from "../lib/format";
   import { shortcutHint } from "../lib/shortcuts";
+  import { offerWebLink, pageLinkId } from "../lib/links";
   import type { HealthIssue, Highlight, HighlightColor, Page, PageLinks, PageMeta, PageStorage, ReviewGrade, ReviewPreview, StorageChange } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
@@ -264,6 +265,11 @@
       if (typeof id === "string") focusHighlight(id);
       return;
     }
+    if (data?.type === "herbarium:link") {
+      const href = (data as { href?: unknown }).href;
+      if (typeof href === "string") void followLink(href);
+      return;
+    }
     if (data?.type === "herbarium:highlights-applied") {
       const found = (data as { found?: unknown }).found;
       anchored = new Set(Array.isArray(found) ? found.filter((x): x is string => typeof x === "string") : []);
@@ -272,6 +278,26 @@
     if (!data || data.type !== "herbarium:storage") return;
     const changes = sanitizeChanges(data.changes);
     if (changes.length > 0) enqueueStorage(p.meta.id, changes);
+  }
+
+  // A page's script can post the same message as a click: follow at most one
+  // link a second, so pages cannot bounce the reader between each other.
+  let lastLinkAt = 0;
+
+  /** Follow a link clicked in the page: another page opens here, a web link is offered. */
+  async function followLink(href: string) {
+    const now = Date.now();
+    if (now - lastLinkAt < 1000 || href.length > 4096 || editing) return;
+    lastLinkAt = now;
+    const id = pageLinkId(href);
+    if (id !== null) {
+      const known = () => app.library.some((p) => p.id === id) || app.pages.some((p) => p.id === id);
+      if (!known()) await reloadPages(true);
+      if (known()) await openPage(id);
+      else toast(t("deepLink.notFound"), "error");
+    } else if (/^https?:\/\//i.test(href)) {
+      offerWebLink(href);
+    }
   }
 
   /** Discard a page's saved state and reload its frame with an empty shim. */

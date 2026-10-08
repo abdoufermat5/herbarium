@@ -10,10 +10,19 @@
 
 use tauri::{Emitter, Runtime, Url, Webview};
 
-use crate::cli::{DEEP_LINK_EVENT, DeepLink, parse_deep_link};
+use std::sync::atomic::{AtomicI64, Ordering};
+
+use crate::cli::{DeepLink, parse_deep_link};
 
 /// Event sent to the UI with a blocked `http(s)` URL.
 pub const BLOCKED_EVENT: &str = "navigation-blocked";
+/// Event sent to the UI with a link a page followed to another page. Apart
+/// from the OS's deep links: only the page open in the reader may use it.
+pub const PAGE_LINK_EVENT: &str = "page-link";
+/// Pages followed from pages at most this often, so two pages that redirect
+/// to each other on load cannot bounce the reader between them.
+const PAGE_LINK_MIN_MS: i64 = 1000;
+static LAST_PAGE_LINK: AtomicI64 = AtomicI64::new(i64::MIN / 2);
 
 /// Whether `url` may load in any frame of the app.
 pub fn allowed(url: &Url) -> bool {
@@ -34,7 +43,12 @@ pub fn allowed(url: &Url) -> bool {
 /// (`herbarium-app://open/<id>`) opens that page in the app.
 pub fn offer<R: Runtime>(emitter: &impl Emitter<R>, url: &Url) {
     if let Some(link @ DeepLink::Open { .. }) = page_link(url) {
-        let _ = emitter.emit(DEEP_LINK_EVENT, link);
+        let now = herbarium_core::time::now_ms();
+        let last = LAST_PAGE_LINK.load(Ordering::Relaxed);
+        if now - last >= PAGE_LINK_MIN_MS {
+            LAST_PAGE_LINK.store(now, Ordering::Relaxed);
+            let _ = emitter.emit(PAGE_LINK_EVENT, link);
+        }
         return;
     }
     if matches!(url.scheme(), "http" | "https") {

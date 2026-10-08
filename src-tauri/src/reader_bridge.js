@@ -277,6 +277,20 @@
     window.parent.postMessage({ type: "herbarium:highlight-click", id: mark.getAttribute("data-hl") }, "*");
   });
 
+  // Links to other pages and to the web. Some engines block a frame's own
+  // navigation before the app can see it, so a plain click would do nothing:
+  // the reader follows them instead (opening the page, or offering the web
+  // link). Clicks the page handles itself are left alone.
+  window.addEventListener("click", function (e) {
+    if (e.defaultPrevented || e.button !== 0) return;
+    var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    if (!a) return;
+    var href = String(a.href || "");
+    if (!/^(herbarium-app:|https?:)/i.test(href) || href.length > 4096) return;
+    e.preventDefault();
+    window.parent.postMessage({ type: "herbarium:link", href: href }, "*");
+  });
+
   var lastReport = "";
   function report() {
     var items = headings();

@@ -325,6 +325,14 @@
     // Deep links from the backend, and any the app was launched with (the
     // matching event fired before this listener existed, so ask for them).
     keep(listen<DeepLinkPayload>("deep-link", (event) => queueDeepLink(event.payload)));
+    // A page following a link to another page. Only the page open in the
+    // reader may: the hidden frame that draws previews runs pages too, and
+    // one that redirects on load would otherwise switch pages out of nowhere.
+    keep(
+      listen<DeepLinkPayload>("page-link", (event) => {
+        if (app.readId) queueDeepLink(event.payload);
+      }),
+    );
     void invoke<DeepLinkPayload[]>("take_deep_links")
       .then((links) => {
         if (disposed) return;
