@@ -23,7 +23,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Today: a home screen with what is due, the reading path in progress, recent pages, a page to rediscover, what you saved on this day, and the review streak. It is the default start view.
 - Icons and colours: give a page an emoji icon and a folder or tag a colour and icon; they show in the sidebar, lists and chips.
 - Page previews: the library grid shows a miniature of each page's first screen, measured in the page and redrawn by the app.
-- Graph: the links between pages as an interactive map, grouped by folder.
+- Graph: the links between pages as an interactive map. Each folder settles into its own named island; zoomed out on a busy vault, the links between folders become one ribbon per pair. Hover lights a page's neighbourhood, a click lists its links both ways, a double click opens it; pages can be dragged, the map zoomed and searched, and a folder shown on its own. Drawn on a canvas, it stays smooth with thousands of pages.
 - Highlights and margin notes: select text in a page to highlight it in one of four colours and attach a note. Highlights survive edits elsewhere in the page, are searchable, are listed in the details panel and during review, and agents can read them (`highlights.list`).
 - Page health: `health.check` and the details panel say why a page may not work — missing local files, remote resources with network access off, hosts outside the CDN allowlist, broken links, very large or untitled pages — and a page can be made self-contained by inlining its local files. Settings → Vault checks every page.
 - Remix with AI: rework a page — simplify it, explain it deeper, add quiz questions, translate it, turn it into a cheat sheet, fix and modernize it, or follow your own instructions. Your highlights and notes go with it. The result waits as a proposal you compare with the page and accept or reject. Works with Anthropic's Claude (your API key, streamed, with server-side fallbacks enabled so a declined request is retried on Anthropic's recommended fallback model), the Claude Code command line, OpenAI, Google Gemini, DeepSeek, Mistral, OpenRouter, a local Ollama, or any OpenAI-compatible service at an address you give; each keeps its own key. Nobody has to type a model name: Settings → AI & sharing is pick a service, paste a key (checked on the spot: "Ready — connected, 23 models available"), done. The model stays on Automatic, which asks the service for its models and uses its best current one (the newest Opus, GPT or Gemini Pro, DeepSeek's chat model…); a dropdown with readable names lists the others, and any name can still be typed. `herbarium remix` does the same from the terminal (`--provider`, `--model`, `--base-url`).
@@ -35,9 +35,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - A lighter interface: a borderless reader toolbar that shows icons only in narrow windows, one preview area on every library card, sentence-case chips, one heading size across views, a single review statistics strip, and a narrower sidebar in small windows.
 - Large libraries stay fast: the library draws the cards near the viewport only, so showing all pages, searching, filtering and switching layouts take milliseconds with thousands of pages (measured on 3,000: All pages 4.2 s → 80 ms, grid/list 6.6 s → 5 ms). Typing a search fetches only the search, and page previews are made only while you are idle, never for pages over 1.5 MB.
 - Pasting a very large page (over 100 KB) into the import dialog no longer freezes the window: it is held aside and shown as a summary.
+- A much smaller download: the release binary is optimised for size (34 MB down to 14 MB on Linux), the source editor loads on first use and only the Latin font subsets ship.
 
 ### Fixed
 - The library sort setting showed no value until changed.
+- Pages in the reader follow the app's theme: with the app set to dark on a light desktop, they stayed light. System remains the default.
+- Settings changed at the same moment (or while GitHub checked a token) no longer undo each other.
+- Escape closes only the dialog it is pressed in, never the reader or Settings behind it, and single-key shortcuts do nothing behind an open dialog.
 
 ### Security
 - API keys and the GitHub token are kept apart from the settings in `secrets.json` in the app's configuration folder, readable only by the user, and are never sent to the window: the interface only learns whether one is set.
