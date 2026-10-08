@@ -66,7 +66,7 @@
   }
 
   function close() {
-    if (busy) void api.cancelRemix();
+    if (busy) void api.cancelRemix(pageId);
     onClose();
   }
 
@@ -106,7 +106,7 @@
   onDestroy(() => {
     destroyed = true;
     // Leaving the page (not just this dialog) must not leave a remix running.
-    if (busy) void api.cancelRemix();
+    if (busy) void api.cancelRemix(pageId);
     window.removeEventListener("keydown", onKey, true);
     unlisten?.();
     if (timer) clearInterval(timer);

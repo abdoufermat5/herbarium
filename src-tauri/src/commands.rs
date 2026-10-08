@@ -831,17 +831,18 @@ pub async fn remix_page(
     preset: String,
     instructions: String,
 ) -> CmdResult<Value> {
-    use std::sync::atomic::Ordering;
     use tauri::Emitter;
 
+    let running = crate::remix::start(&id)?;
     let (prompt, base_updated_at) =
         crate::remix::prompt_for(&state.host, &id, &preset, &instructions)?;
 
     let cfg = config::load().unwrap_or_default();
     let key = crate::secrets::load().ai_key(&cfg.ai_provider);
-    crate::remix::CANCEL.store(false, Ordering::Relaxed);
     let page_id = id.clone();
     let emitter = app.clone();
+    // `running` stays held until the proposal is saved.
+    let stop = running.flag();
     let remixed = tauri::async_runtime::spawn_blocking(move || {
         // No model saved: the service's recommended one.
         let model = if cfg.ai_model.trim().is_empty() {
@@ -860,18 +861,20 @@ pub async fn remix_page(
         };
         crate::remix::run(job, |chars| {
             let _ = emitter.emit("remix-progress", json!({ "id": page_id, "chars": chars }));
-            !crate::remix::CANCEL.load(Ordering::Relaxed)
+            !stop.load(std::sync::atomic::Ordering::Relaxed)
         })
     })
     .await
     .map_err(|e| e.to_string())??;
 
-    crate::remix::propose(&state.host, &id, &remixed, base_updated_at)
+    let proposal = crate::remix::propose(&state.host, &id, &remixed, base_updated_at);
+    drop(running);
+    proposal
 }
 
 #[tauri::command]
-pub async fn cancel_remix() {
-    crate::remix::cancel();
+pub async fn cancel_remix(id: String) {
+    crate::remix::cancel(&id);
 }
 
 #[derive(serde::Serialize)]

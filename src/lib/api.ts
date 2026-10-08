@@ -504,8 +504,9 @@ export const api = {
     return invoke("remix_page", { id, preset, instructions });
   },
 
-  cancelRemix(): Promise<void> {
-    return invoke("cancel_remix");
+  /** Stop the remix of page `id`; other remixes keep running. */
+  cancelRemix(id: string): Promise<void> {
+    return invoke("cancel_remix", { id });
   },
 
   /** The GitHub account used to publish and the site's repository. */

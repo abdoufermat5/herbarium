@@ -8,7 +8,9 @@
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Command, Stdio};
+use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::{Value, json};
@@ -29,8 +31,47 @@ fn claude_bin() -> String {
 const MAX_INPUT: usize = 400 * 1024;
 const MAX_TOKENS: u32 = 64_000;
 
-/// Set to stop the remix in progress.
-pub static CANCEL: AtomicBool = AtomicBool::new(false);
+/// Remixes running in the app, by page id, each with its own stop flag:
+/// several pages can be remixed at once, and stopping one leaves the others.
+static RUNNING: Mutex<BTreeMap<String, Arc<AtomicBool>>> = Mutex::new(BTreeMap::new());
+
+/// A running remix of one page; it stops counting as running when dropped.
+pub struct Running {
+    page: String,
+    stop: Arc<AtomicBool>,
+}
+
+impl Running {
+    /// The stop flag, for the thread doing the work.
+    pub fn flag(&self) -> Arc<AtomicBool> {
+        self.stop.clone()
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        // Only forget our own entry.
+        if running.get(&self.page).is_some_and(|s| Arc::ptr_eq(s, &self.stop)) {
+            running.remove(&self.page);
+        }
+    }
+}
+
+/// Register a remix of `page`; refused while one of that page is running,
+/// since the later answer would silently replace the earlier proposal.
+pub fn start(page: &str) -> Result<Running, String> {
+    let mut running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+    if running.contains_key(page) {
+        return Err("this page is already being remixed".into());
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    running.insert(page.to_string(), stop.clone());
+    Ok(Running {
+        page: page.to_string(),
+        stop,
+    })
+}
 
 /// The ready-made instructions.
 pub fn preset(name: &str) -> Option<&'static str> {
@@ -431,13 +472,30 @@ pub fn check_size(html: &str) -> Result<(), String> {
     }
 }
 
-pub fn cancel() {
-    CANCEL.store(true, Ordering::Relaxed);
+/// Stop the remix of `page`, if one is running.
+pub fn cancel(page: &str) {
+    let running = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(stop) = running.get(page) {
+        stop.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn remixes_run_and_stop_per_page() {
+        let a = start("remix-test-a").unwrap();
+        let b = start("remix-test-b").unwrap();
+        assert!(start("remix-test-a").is_err(), "one remix per page at a time");
+        cancel("remix-test-a");
+        let stopped = |r: &Running| r.flag().load(Ordering::Relaxed);
+        assert!(stopped(&a) && !stopped(&b), "stopping one leaves the other");
+        drop(a);
+        let again = start("remix-test-a").unwrap();
+        assert!(!stopped(&again), "a new remix starts fresh");
+    }
 
     #[test]
     fn html_is_taken_from_the_answer() {
