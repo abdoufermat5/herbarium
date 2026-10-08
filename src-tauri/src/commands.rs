@@ -51,12 +51,13 @@ fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
         report.removed,
         report.total
     );
-    let mut cfg = config::load().unwrap_or_default();
-    cfg.vault_path = canonical.clone();
-    if let Some(p) = &canonical {
-        config::add_recent(&mut cfg, p);
-    }
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.vault_path = canonical.clone();
+        if let Some(p) = &canonical {
+            config::add_recent(cfg, p);
+        }
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
@@ -86,17 +87,19 @@ pub async fn create_vault(
 
 #[tauri::command]
 pub async fn remove_recent_vault(path: String) -> CmdResult<Config> {
-    let mut cfg = config::load().unwrap_or_default();
-    config::remove_recent(&mut cfg, &path);
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        config::remove_recent(cfg, &path);
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
 #[tauri::command]
 pub async fn set_close_to_tray(enabled: bool) -> CmdResult<Config> {
-    let mut cfg = config::load().unwrap_or_default();
-    cfg.close_to_tray = enabled;
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.close_to_tray = enabled;
+        Ok(())
+    })?;
     Ok(cfg)
 }
 
@@ -509,26 +512,27 @@ pub async fn set_capture(
     settings: CaptureSettings,
 ) -> CmdResult<Config> {
     use std::sync::atomic::Ordering;
-    let mut cfg = config::load().unwrap_or_default();
     let shortcut = settings
         .capture_shortcut
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
-    if let Err(e) = crate::capture::set_shortcut(&app, shortcut.as_deref()) {
-        // Put the previous shortcut back before reporting the bad one.
-        let _ = crate::capture::set_shortcut(&app, cfg.capture_shortcut.as_deref());
-        return Err(e);
-    }
-    cfg.capture_shortcut = shortcut;
-    cfg.watch_downloads = settings.watch_downloads;
-    cfg.watch_clipboard = settings.watch_clipboard;
+    let (cfg, ()) = config::update(|cfg| {
+        if let Err(e) = crate::capture::set_shortcut(&app, shortcut.as_deref()) {
+            // Put the previous shortcut back before reporting the bad one.
+            let _ = crate::capture::set_shortcut(&app, cfg.capture_shortcut.as_deref());
+            return Err(e);
+        }
+        cfg.capture_shortcut = shortcut;
+        cfg.watch_downloads = settings.watch_downloads;
+        cfg.watch_clipboard = settings.watch_clipboard;
+        Ok(())
+    })?;
     watchers
         .downloads
         .store(cfg.watch_downloads, Ordering::Relaxed);
     watchers
         .clipboard
         .store(cfg.watch_clipboard, Ordering::Relaxed);
-    config::save(&cfg)?;
     Ok(cfg)
 }
 
@@ -756,12 +760,13 @@ pub async fn set_ai_settings(
     if key.is_some() {
         crate::secrets::set_ai_key(&provider, key)?;
     }
-    let mut cfg = config::load().unwrap_or_default();
-    cfg.ai_provider = provider;
-    // Empty means automatic: the service's recommended model at each remix.
-    cfg.ai_model = model.to_string();
-    cfg.ai_base_url = base_url;
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        cfg.ai_provider = provider;
+        // Empty means automatic: the service's recommended model at each remix.
+        cfg.ai_model = model.to_string();
+        cfg.ai_base_url = base_url;
+        Ok(())
+    })?;
     Ok(ai_settings_of(&cfg))
 }
 
@@ -904,24 +909,35 @@ pub async fn github_settings() -> GithubSettings {
 pub async fn set_github(token: Option<String>, repo: String) -> CmdResult<GithubSettings> {
     let repo = repo.trim().to_string();
     crate::publish::check_repo_name(&repo)?;
-    let mut cfg = config::load().unwrap_or_default();
-    if let Some(token) = token.map(|t| t.trim().to_string()) {
-        if token.is_empty() {
-            crate::secrets::set(|s, v| s.github_token = v, None)?;
-            cfg.github_login = None;
-        } else {
-            let check = token.clone();
-            let login = tauri::async_runtime::spawn_blocking(move || {
-                crate::publish::GitHub::new(&check)?.login()
-            })
-            .await
-            .map_err(|e| e.to_string())??;
-            crate::secrets::set(|s, v| s.github_token = v, Some(token))?;
-            cfg.github_login = Some(login);
+    // Check a new token with GitHub first: the config is not held meanwhile,
+    // so other settings changed during the check are kept.
+    let token = token.map(|t| t.trim().to_string());
+    let login = match token.as_deref() {
+        Some(t) if !t.is_empty() => {
+            let check = t.to_string();
+            Some(
+                tauri::async_runtime::spawn_blocking(move || {
+                    crate::publish::GitHub::new(&check)?.login()
+                })
+                .await
+                .map_err(|e| e.to_string())??,
+            )
         }
+        _ => None,
+    };
+    if let Some(token) = &token {
+        crate::secrets::set(
+            |s, v| s.github_token = v,
+            (!token.is_empty()).then(|| token.clone()),
+        )?;
     }
-    cfg.publish_repo = repo;
-    config::save(&cfg)?;
+    let (cfg, ()) = config::update(|cfg| {
+        if token.is_some() {
+            cfg.github_login = login;
+        }
+        cfg.publish_repo = repo;
+        Ok(())
+    })?;
     Ok(github_settings_of(&cfg))
 }
 

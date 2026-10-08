@@ -104,11 +104,15 @@ fn write_private(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+/// Serialises changes, so two keys saved at once are both kept.
+static UPDATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Store or clear (`None` or blank) one secret.
 pub fn set(
     update: impl FnOnce(&mut Secrets, Option<String>),
     value: Option<String>,
 ) -> Result<(), String> {
+    let _guard = UPDATE.lock().unwrap_or_else(|e| e.into_inner());
     let mut secrets = try_load()?;
     update(
         &mut secrets,

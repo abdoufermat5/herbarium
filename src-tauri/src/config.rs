@@ -136,6 +136,20 @@ pub fn load() -> Result<Config, String> {
     }
 }
 
+/// Serialises changes to the config: commands run concurrently, and two that
+/// each load, change and save it would otherwise lose one of the changes.
+static UPDATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Load the config, apply `change` and save it, as one step. `change` must
+/// not wait on anything slow (the network): do that before calling.
+pub fn update<T>(change: impl FnOnce(&mut Config) -> Result<T, String>) -> Result<(Config, T), String> {
+    let _guard = UPDATE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cfg = load().unwrap_or_default();
+    let out = change(&mut cfg)?;
+    save(&cfg)?;
+    Ok((cfg, out))
+}
+
 pub fn save(cfg: &Config) -> Result<(), String> {
     let config_path = path()?;
     let json = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
