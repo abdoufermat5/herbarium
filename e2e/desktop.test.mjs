@@ -190,7 +190,12 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
 
   await step("graph", async () => {
     await app.click("Graph", "nav button, aside button, button");
-    await app.waitFor(() => app.exec(() => document.querySelectorAll("circle.dot-mark").length === 3), "three nodes");
+    await app.waitText("3 pages · 3 links");
+    // The map is drawn on a canvas; finding a page selects it and lists its links.
+    await app.type(".search input", "flexbox");
+    await app.click("Flexbox playground", ".matches button");
+    await app.find("Open page", ".side button");
+    await app.find("Why reviewing works", ".side .lists button");
     await shot("graph");
   });
 
