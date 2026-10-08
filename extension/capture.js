@@ -175,6 +175,26 @@ globalThis.HerbariumCapture = {
         `<footer>Saved from <a href="${escapeHtml(location.href)}">${escapeHtml(location.href)}</a></footer></body></html>`;
     } else {
       const clone = document.documentElement.cloneNode(true);
+      // Form values and checked state as the user sees them (a clone keeps
+      // only the markup's defaults). Both trees still match element for element.
+      const liveFields = document.documentElement.querySelectorAll("input, textarea, select");
+      const cloneFields = clone.querySelectorAll("input, textarea, select");
+      for (let i = 0; i < liveFields.length && i < cloneFields.length; i++) {
+        const from = liveFields[i];
+        const to = cloneFields[i];
+        if (from.tagName === "TEXTAREA") to.textContent = from.value;
+        else if (from.tagName === "SELECT") {
+          for (let j = 0; j < from.options.length && j < to.options.length; j++) {
+            if (from.options[j].selected) to.options[j].setAttribute("selected", "");
+            else to.options[j].removeAttribute("selected");
+          }
+        } else if (from.type === "checkbox" || from.type === "radio") {
+          if (from.checked) to.setAttribute("checked", "");
+          else to.removeAttribute("checked");
+        } else if (from.type !== "password" && from.type !== "file" && from.type !== "hidden") {
+          to.setAttribute("value", from.value);
+        }
+      }
       // Same-origin stylesheets become inline CSS now; others are fetched later.
       const links = clone.querySelectorAll('link[rel~="stylesheet"]');
       const live = [...document.styleSheets];
@@ -188,13 +208,21 @@ globalThis.HerbariumCapture = {
           rules = null;
         }
         if (rules !== null) {
+          // url(...) in a sheet is relative to the sheet, not to the page.
+          rules = rules.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => {
+            if (/^(data:|#)/i.test(u)) return m;
+            try {
+              return `url("${new URL(u, href).href}")`;
+            } catch {
+              return m;
+            }
+          });
           const style = document.createElement("style");
           style.textContent = rules;
           link.replaceWith(style);
         }
       }
       clean(clone);
-      // Form values and checked state as the user sees them.
       const head = clone.querySelector("head");
       if (head && !head.querySelector("meta[charset]")) {
         const meta = document.createElement("meta");

@@ -313,6 +313,8 @@ ext.omnibox.onInputEntered.addListener(async (text) => {
 /* ------------------------------------------------- popup and Today page */
 
 ext.runtime.onMessage.addListener((msg, sender, reply) => {
+  // Only the extension's own pages (popup, Today) drive the vault.
+  if (!sender || sender.id !== ext.runtime.id) return false;
   const run = async () => {
     switch (msg && msg.type) {
       case "status":
