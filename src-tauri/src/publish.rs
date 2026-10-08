@@ -188,7 +188,7 @@ impl GitHub {
 fn github_error(status: u16, body: &Value) -> String {
     let message = body["message"].as_str().unwrap_or("unknown error");
     match status {
-        401 => "GitHub refused the token; check it in Settings → Publishing".into(),
+        401 => "GitHub refused the token; check it in Settings → AI & sharing".into(),
         403 if message.to_lowercase().contains("rate limit") => {
             "GitHub's rate limit was reached; try again later".into()
         }
@@ -237,7 +237,7 @@ pub fn gist(gh: &GitHub, item: &Item, existing: Option<&str>) -> Result<Value, S
         "files": { format!("{}.html", item.id): { "content": item.html } },
     });
     let mut answer = None;
-    if let Some(id) = existing {
+    if let Some(id) = existing.filter(|id| is_gist_id(id)) {
         let (status, gist) = gh.expect(
             Method::PATCH,
             &format!("/gists/{id}"),
@@ -261,7 +261,15 @@ pub fn gist(gh: &GitHub, item: &Item, existing: Option<&str>) -> Result<Value, S
     Ok(json!({ "id": id, "url": url, "title": item.title, "at": now_ms() }))
 }
 
+/// Gist ids are hexadecimal; anything else in a record is not sent to GitHub.
+fn is_gist_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 64 && id.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 pub fn delete_gist(gh: &GitHub, id: &str) -> Result<(), String> {
+    if !is_gist_id(id) {
+        return Err("this page's gist record is not valid".into());
+    }
     gh.expect(Method::DELETE, &format!("/gists/{id}"), None, &[404])?;
     Ok(())
 }
@@ -299,7 +307,7 @@ fn ensure_repo(gh: &GitHub, login: &str, repo: &str) -> Result<String, String> {
     }
     if gh.file_sha(&full, MARKER)?.is_none() {
         return Err(format!(
-            "github.com/{full} already exists and was not made by Herbarium; choose another repository name in Settings → Publishing"
+            "github.com/{full} already exists and was not made by Herbarium; choose another repository name in Settings → AI & sharing"
         ));
     }
     Ok(info["default_branch"]
@@ -393,6 +401,25 @@ pub fn delete_site_page(
 ) -> Result<(), String> {
     let full = record["repo"].as_str().ok_or("no site recorded")?;
     let path = record["path"].as_str().ok_or("no site recorded")?;
+    // The record comes from the vault, which may have been copied from
+    // someone else: only delete a page file from a site Herbarium made.
+    let simple_file = path.ends_with(".html")
+        && path != "index.html"
+        && !path.starts_with('.')
+        && path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    let repo_ok = full
+        .split_once('/')
+        .is_some_and(|(owner, name)| !owner.is_empty() && check_repo_name(name).is_ok());
+    if !simple_file || !repo_ok {
+        return Err("this page's site record is not valid".into());
+    }
+    if gh.file_sha(full, MARKER)?.is_none() {
+        return Err(format!(
+            "github.com/{full} was not made by Herbarium; nothing was deleted"
+        ));
+    }
     gh.delete_file(full, path, &format!("Unpublish {path}"))?;
     host.op("published.forget", json!({ "id": id, "target": "site" }))?;
     write_index(gh, host, full)

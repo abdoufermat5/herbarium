@@ -52,7 +52,7 @@ async function fakeGitHub(token) {
     let m;
     if (req.method === "GET" && path === "/user") return send(200, { login: "octo" });
     if (req.method === "POST" && path === "/gists") {
-      const id = `g${state.nextGist++}`;
+      const id = `a${state.nextGist++}`; // hexadecimal, like real gist ids
       state.gists.set(id, body);
       return send(201, { id, html_url: `https://gist.github.com/octo/${id}` });
     }
@@ -134,13 +134,13 @@ test("herbarium publish shares a page as a gist and on a GitHub Pages site", asy
     // Gist: created secret, then updated in place, then deleted.
     r = await run(["publish", "--vault", vault, "--gist", id], env);
     assert.equal(r.code, 0, r.stderr);
-    assert.equal(r.stdout.trim(), "https://gist.github.com/octo/g1");
-    const gist = gh.state.gists.get("g1");
+    assert.equal(r.stdout.trim(), "https://gist.github.com/octo/a1");
+    const gist = gh.state.gists.get("a1");
     assert.equal(gist.public, false);
     assert.match(gist.description, /^Rust notes/);
     assert.match(gist.files[`${id}.html`].content, /<p>hi<\/p>/);
     r = await run(["publish", "--vault", vault, id], env);
-    assert.equal(r.stdout.trim(), "https://gist.github.com/octo/g1", "publishing again updates the same gist");
+    assert.equal(r.stdout.trim(), "https://gist.github.com/octo/a1", "publishing again updates the same gist");
     assert.equal(gh.state.gists.size, 1);
     r = await run(["publish", "--vault", vault, "--unpublish", id], env);
     assert.equal(r.code, 0, r.stderr);

@@ -176,12 +176,12 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     await app.click("Share as a secret gist", "[role=menuitem]");
     await app.click("Share as a secret gist", "[role=alertdialog] button");
     await app.waitFor(() => github.gists.size === 1, "the gist");
-    const gist = github.gists.get("g1");
+    const gist = github.gists.get("a1");
     assert.equal(gist.public, false);
     assert.match(gist.files["herbarium-welcome.html"].content, /Welcome, simply/);
     await app.waitText("Shared as a secret gist");
     const published = JSON.parse(readFileSync(join(vault, ".herbarium", "published.json"), "utf8"));
-    assert.equal(published["herbarium-welcome"].gist.url, "https://gist.github.com/octo/g1");
+    assert.equal(published["herbarium-welcome"].gist.url, "https://gist.github.com/octo/a1");
     await app.click("Share", ".actions button");
     await app.find("Update the gist", "[role=menuitem]");
     await shot("share-menu");
