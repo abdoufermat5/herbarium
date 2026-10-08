@@ -249,6 +249,9 @@ fn ask_api_at(
     read_stream(resp, progress)
 }
 
+/// Claude Code's tools, none of which a remix needs.
+const NO_TOOLS: &str = "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,NotebookEdit,NotebookRead,WebFetch,WebSearch,Task,Agent,TodoWrite";
+
 /// Ask Claude Code (`claude -p`), with the prompt on stdin.
 pub fn ask_claude_code(
     model: &str,
@@ -264,9 +267,18 @@ fn ask_claude_code_with(
     prompt: &str,
     mut progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
+    if model.starts_with('-') {
+        return Err(format!("“{model}” is not a model name"));
+    }
     let full = format!("{SYSTEM}\n\n{prompt}");
+    // The page may come from anywhere and could carry instructions of its
+    // own: Claude Code gets no tools, and runs in an empty folder.
+    let workdir = std::env::temp_dir().join(format!("herbarium-remix-{}", std::process::id()));
+    std::fs::create_dir_all(&workdir).map_err(|e| format!("could not prepare Claude Code: {e}"))?;
     let mut child = Command::new(bin)
         .args(["-p", "--output-format", "text", "--model", model])
+        .args(["--disallowedTools", NO_TOOLS])
+        .current_dir(&workdir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -593,8 +605,9 @@ mod tests {
         let args = std::fs::read_to_string(format!("{bin}.args")).unwrap();
         assert_eq!(
             args.trim(),
-            "-p --output-format text --model claude-opus-5-5"
+            format!("-p --output-format text --model claude-opus-5-5 --disallowedTools {NO_TOOLS}")
         );
+        assert!(ask_claude_code_with(bin, "--help", "p", |_| true).is_err());
         let stdin = std::fs::read_to_string(format!("{bin}.stdin")).unwrap();
         assert!(stdin.starts_with(SYSTEM) && stdin.ends_with("remix me"));
 

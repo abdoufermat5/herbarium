@@ -151,7 +151,7 @@ test("herbarium remix leaves the model's page as a proposal", async () => {
         HERBARIUM_CLAUDE_BIN: fake,
       });
       assert.equal(r.code, 0, r.stderr);
-      assert.equal(readFileSync(join(work, "claude.args"), "utf8").trim(), "-p --output-format text --model opus");
+      assert.equal(readFileSync(join(work, "claude.args"), "utf8").trim(), "-p --output-format text --model opus --disallowedTools Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,NotebookEdit,NotebookRead,WebFetch,WebSearch,Task,Agent,TodoWrite");
       assert.match(readFileSync(join(work, "claude.stdin"), "utf8"), /Translate this page[\s\S]*French[\s\S]*Original text/);
       assert.equal(readFileSync(proposal, "utf8"), remixed("Lesson in French"), "a newer remix replaces the proposal");
     }
