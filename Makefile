@@ -1,7 +1,7 @@
 MANIFEST := --manifest-path desktop/Cargo.toml
 VAULT ?=
 
-.PHONY: help install dev build check lint test ci e2e demo mcp release clean
+.PHONY: help install dev build check lint test ci e2e demo mcp icons release clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -35,6 +35,9 @@ demo: ## Record docs/demo.gif (needs Xvfb, tauri-driver, WebKitWebDriver, xdotoo
 
 mcp: ## Run the MCP server on stdio (VAULT=path to override the app's vault)
 	cargo run $(MANIFEST) --quiet -- mcp $(if $(VAULT),--vault $(VAULT))
+
+icons: ## Render the app, tray and extension icons from docs/brand/*.svg
+	pnpm icons
 
 release: ## Cut a release: make release BUMP=patch|minor|major|x.y.z
 	pnpm release $(BUMP)

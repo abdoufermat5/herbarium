@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Herbarium app icon, light (simplified for 32 px and below). Source of the PNG icons: scripts/icons.mjs -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fbf7ee"/>
+      <stop offset="1" stop-color="#ebe2cc"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3f7d44"/>
+      <stop offset="1" stop-color="#28572d"/>
+    </linearGradient>
+    <clipPath id="blade"><path d="M512 150C690 250 770 450 712 630C668 770 584 832 512 842C440 832 356 770 312 630C254 450 334 250 512 150Z"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <g transform="translate(500 532) rotate(45) scale(1.06) translate(-512 -512)">
+    <path d="M512 150C690 250 770 450 712 630C668 770 584 832 512 842C440 832 356 770 312 630C254 450 334 250 512 150Z" fill="url(#leaf)"/>
+    <g clip-path="url(#blade)" fill="none" stroke="#fbf7ee" stroke-width="34" stroke-linecap="round">
+      <path d="M512 420Q582 410 687 325"/>
+      <path d="M512 420Q442 410 337 325"/>
+      <path d="M512 630Q582 620 687 535"/>
+      <path d="M512 630Q442 620 337 535"/>
+    </g>
+    <path d="M512 240V905" stroke="#fbf7ee" stroke-width="44" stroke-linecap="round"/>
+  </g>
+</svg>
