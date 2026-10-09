@@ -6,12 +6,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ## [Unreleased]
 
 ### Added
-- Organize with AI (the Organize button in the library, or the command palette): the AI reads the titles and the start of your pages and proposes where they belong — existing folders first, new ones where none fit, with a few tags. You choose the pages to look at (the new and unsorted ones, or the whole library), can say what you have in mind, review the plan grouped by folder and untick anything, and apply it; Undo puts everything back. Works with every AI service Remix works with.
+- Ask AI: one button in the title bar (or `Ctrl/⌘ J`, or "Ask AI…" in the command palette) opens a single panel for everything AI, instead of a button per feature. It offers what fits what is on screen — the page you are reading first (simplify, explain deeper, add a quiz, cheat sheet, fix & modernize, translate with one-click common languages), then your library (organize, import an AI chat export). Type what you want and press Enter to remix the page with your own words, or pick an action and your words go along as a note. The panel shows which AI service and model it uses, and when none is set up, one button leads to the setup.
+- Organize with AI (in the Ask AI panel, or the command palette): the AI reads the titles and the start of your pages and proposes where they belong — existing folders first, new ones where none fit, with a few tags. You choose the pages to look at (the new and unsorted ones, or the whole library), can say what you have in mind, review the plan grouped by folder and untick anything, and apply it; Undo puts everything back. Works with every AI service Remix works with.
 
 ### Fixed
 - The diff in the remix and agent proposals and in History scrolls when it is long; before, it showed a fixed screen and clipped the rest.
 
 ### Changed
+- The reader's toolbar keeps its labels on smaller windows: page history, network access and resetting page data moved to a "More" menu (⋯), and a page allowed to load from CDNs says so next to its tags.
 - The app's folder is `desktop/` instead of `src-tauri/` (the Rust code, `tauri.conf.json`, icons and packaging files moved with it); the Tauri command line finds it by itself, and scripts, CI and docs follow.
 
 ## [0.3.1] - 2026-10-09
