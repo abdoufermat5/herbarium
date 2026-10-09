@@ -5,6 +5,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- The browser extension works in Helium.
+
+### Fixed
+- The browser extension stopped reaching the app after Herbarium was moved, reinstalled or rebuilt somewhere else: browsers kept starting an executable that no longer existed and the popup only said "Native host has exited". The app now repairs that at start, and also connects browsers installed after the first setup. Settings → Browser no longer says "connected" in that case; it says the connection needs repair and offers a button.
+- The extension's popup and Today page used Chrome's tiny default text size for extension pages.
+- The browser extension's version was stuck at 0.3.0. It now matches the app, and releases bump it along with the app.
+
+### Changed
+- The extension's popup is clearer: a status pill with the vault, numbered steps and "Try again" when the app can't be reached, with the reason in plain words, and icons on the save buttons.
+- Settings → Browser marks each browser as connected, needing repair or not set up, and highlights the current step.
+
 ## [0.3.2] - 2026-10-09
 
 ### Added
