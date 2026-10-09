@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- AI & sharing starts from three plain choices — your Claude subscription (Claude Code), free on this computer (Ollama), or an API key — and each shows whether it works right now and, when it does not, numbered steps with commands to copy, a button to the service's key page and "Check again". Choosing where Claude Code is by hand is possible, and the Remix dialog says when it is missing.
+- Adding the browser extension is a guided checklist: one click prepares everything (helper registered with every browser, extension copied to a stable folder), a button opens the browser on its extensions page, the folder to load has a Copy button, and the screen says "connected" by itself once the extension reaches the app.
+
+### Fixed
+- Claude Code is found when Herbarium is started from the desktop menu: on Linux Mint and wherever node comes from nvm, `~/.local/bin` or npm's own folder, `claude` was reported as not installed because the app does not get the shell's PATH. Herbarium now asks the login shell, looks in the usual install folders, and runs Claude Code with that PATH.
+- A Claude Code that is not signed in is explained ("run claude in a terminal and sign in") instead of showing its raw output.
+
 ## [0.3.0] - 2026-10-08
 
 ### Added
