@@ -28,7 +28,6 @@
 
   const diffTheme = EditorView.theme({
     "&": {
-      height: "100%",
       backgroundColor: "var(--surface)",
       color: "var(--text)",
       fontSize: "12.5px",
@@ -36,7 +35,6 @@
     ".cm-scroller": {
       fontFamily: "var(--mono)",
       lineHeight: "1.6",
-      overflow: "auto",
     },
     ".cm-content": { padding: "8px 0" },
     ".cm-gutters": {
@@ -94,12 +92,16 @@
   .merge {
     flex: 1;
     min-height: 0;
+    position: relative;
     overflow: hidden;
   }
+  /* The merge view scrolls as a whole (both sides inside it, kept aligned),
+     so it needs a box with a definite height. A percentage of the flex item
+     does not give one in every webview and the view just grew to its full
+     length, clipped, so it is pinned to the box instead. */
   .merge :global(.cm-mergeView) {
-    height: 100%;
-  }
-  .merge :global(.cm-mergeViewEditors) {
-    height: 100%;
+    position: absolute;
+    inset: 0;
+    overflow-y: auto;
   }
 </style>
