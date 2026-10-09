@@ -30,6 +30,7 @@
   import ShortcutsDialog from "./components/ShortcutsDialog.svelte";
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
+  import Logo from "./lib/Logo.svelte";
   import type { ShortcutContext } from "./lib/shortcuts";
   import type { CaptureOffer } from "./lib/types";
   import { t } from "./lib/i18n.svelte";
@@ -376,13 +377,13 @@
 <div class="content">
 {#if !app.initialized}
   <div class="boot">
-    <div class="boot-mark"><Icon name="leaf" size={22} /></div>
+    <div class="boot-mark"><Logo size={56} /></div>
     <span class="spinner"></span>
     <p>{t("boot.opening")}</p>
   </div>
 {:else if app.initError}
   <div class="boot boot-error">
-    <div class="boot-mark"><Icon name="leaf" size={22} /></div>
+    <div class="boot-mark"><Logo size={56} /></div>
     <h1 class="display">{t("boot.failed")}</h1>
     <p class="error-text">{app.initError}</p>
     <button class="btn btn-primary" onclick={retry} disabled={retrying}>
@@ -502,13 +503,6 @@
     font-size: var(--fs-sm);
   }
   .boot-mark {
-    width: 44px;
-    height: 44px;
-    display: grid;
-    place-items: center;
-    border-radius: var(--radius);
-    background: var(--leaf-soft);
-    color: var(--leaf);
     margin-bottom: 4px;
   }
   .boot-error h1 {

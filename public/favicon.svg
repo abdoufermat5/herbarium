@@ -1,8 +1,36 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <rect width="1024" height="1024" rx="220" fill="#1e1b2e"/>
-  <path d="M300 240h300l124 120v424a40 40 0 0 1-40 40H300a40 40 0 0 1-40-40V280a40 40 0 0 1 40-40z" fill="#8b7bff"/>
-  <path d="M600 240v110a40 40 0 0 0 40 40h84z" fill="#6a5af5"/>
-  <line x1="330" y1="470" x2="694" y2="470" stroke="#e9e6ff" stroke-width="42" stroke-linecap="round"/>
-  <line x1="330" y1="570" x2="640" y2="570" stroke="#e9e6ff" stroke-width="42" stroke-linecap="round"/>
-  <line x1="330" y1="670" x2="560" y2="670" stroke="#c9c2ff" stroke-width="42" stroke-linecap="round"/>
+  <!-- docs/brand/icon-{light,dark}-small.svg in one file, following the system mode. -->
+  <style>
+    .bg-top { stop-color: #fbf7ee } .bg-bottom { stop-color: #ebe2cc }
+    .leaf-light { stop-color: #3f7d44 } .leaf-deep { stop-color: #28572d }
+    .vein { stroke: #fbf7ee } .edge { stroke: rgba(52, 101, 56, 0.16) }
+    @media (prefers-color-scheme: dark) {
+      .bg-top { stop-color: #2a4d33 } .bg-bottom { stop-color: #11201a }
+      .leaf-light { stop-color: #43984d } .leaf-deep { stop-color: #2a6b34 }
+      .vein { stroke: #f4edd8 } .edge { stroke: transparent }
+    }
+  </style>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" class="bg-top"/>
+      <stop offset="1" class="bg-bottom"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" class="leaf-light"/>
+      <stop offset="1" class="leaf-deep"/>
+    </linearGradient>
+    <clipPath id="blade"><path d="M512 150C690 250 770 450 712 630C668 770 584 832 512 842C440 832 356 770 312 630C254 450 334 250 512 150Z"/></clipPath>
+  </defs>
+  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
+  <rect x="18" y="18" width="988" height="988" rx="212" fill="none" class="edge" stroke-width="36"/>
+  <g transform="translate(500 532) rotate(45) scale(1.06) translate(-512 -512)">
+    <path d="M512 150C690 250 770 450 712 630C668 770 584 832 512 842C440 832 356 770 312 630C254 450 334 250 512 150Z" fill="url(#leaf)"/>
+    <g clip-path="url(#blade)" fill="none" class="vein" stroke-width="34" stroke-linecap="round">
+      <path d="M512 420Q582 410 687 325"/>
+      <path d="M512 420Q442 410 337 325"/>
+      <path d="M512 630Q582 620 687 535"/>
+      <path d="M512 630Q442 620 337 535"/>
+    </g>
+    <path d="M512 240V905" class="vein" stroke-width="44" stroke-linecap="round"/>
+  </g>
 </svg>

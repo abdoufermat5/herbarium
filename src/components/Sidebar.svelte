@@ -32,6 +32,7 @@
   } from "../lib/state.svelte";
   import { api } from "../lib/api";
   import Icon from "../lib/Icon.svelte";
+  import Logo from "../lib/Logo.svelte";
   import { modKey, vaultLabels, vaultName as nameOf } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
@@ -924,7 +925,7 @@
           title={`${t("sidebar.switchVault")} — ${app.config?.vaultPath ?? ""}`}
           onclick={toggle}
         >
-          <div class="brand-mark"><Icon name="leaf" size={16} /></div>
+          <Logo size={30} />
           <div class="brand-text">
             <strong>Herbarium</strong>
             <span class="brand-vault ellipsis">{labels[0]}</span>
@@ -935,7 +936,7 @@
     </DropdownMenu>
   {:else}
     <div class="brand">
-      <div class="brand-mark"><Icon name="leaf" size={16} /></div>
+      <Logo size={30} />
       <div class="brand-text">
         <strong>Herbarium</strong>
         {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
@@ -1241,16 +1242,6 @@
   .brand-button .spinner.small {
     width: 12px;
     height: 12px;
-  }
-  .brand-mark {
-    flex: none;
-    width: 28px;
-    height: 28px;
-    display: grid;
-    place-items: center;
-    border-radius: var(--radius-sm);
-    background: var(--leaf-soft);
-    color: var(--leaf);
   }
   .brand-text {
     display: flex;

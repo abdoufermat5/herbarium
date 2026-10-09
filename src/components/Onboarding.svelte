@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { app, reloadPages, toast } from "../lib/state.svelte";
   import Icon from "../lib/Icon.svelte";
+  import Logo from "../lib/Logo.svelte";
   import { reveal } from "../lib/reveal";
   import { t } from "../lib/i18n.svelte";
 
@@ -63,7 +64,7 @@
 
 <div class="onboard">
   <div class="hero" use:reveal>
-    <span class="hero-mark"><Icon name="leaf" size={22} /></span>
+    <span class="hero-mark"><Logo size={64} /></span>
     <h1 class="display">{t("onboard.welcome")}</h1>
     <p>
       {t("onboard.intro")}
@@ -149,14 +150,8 @@
   }
 
   .hero-mark {
-    display: grid;
-    place-items: center;
-    width: 48px;
-    height: 48px;
+    display: block;
     margin-bottom: 8px;
-    border-radius: var(--radius);
-    background: var(--leaf-soft);
-    color: var(--leaf);
   }
 
   h1 {

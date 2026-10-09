@@ -58,6 +58,14 @@
   /* Botanical spot color — page thumbnails and the brand mark only */
   --leaf: #346538;
   --leaf-soft: #edf3ec;
+  /* The logo (src/lib/Logo.svelte), as docs/brand/icon-light.svg */
+  --logo-bg-top: #fbf7ee;
+  --logo-bg-bottom: #ebe2cc;
+  --logo-leaf-light: #3f7d44;
+  --logo-leaf-deep: #28572d;
+  --logo-vein: #fbf7ee;
+  --logo-chevron: #28572d;
+  --logo-edge: rgba(52, 101, 56, 0.16);
 
   /* Saved pages bring their own styles and expect a white canvas in both themes */
   --page-canvas: #ffffff;
@@ -172,6 +180,14 @@
 
   --leaf: #8cbf91;
   --leaf-soft: #233025;
+  /* As docs/brand/icon-dark.svg */
+  --logo-bg-top: #2a4d33;
+  --logo-bg-bottom: #11201a;
+  --logo-leaf-light: #43984d;
+  --logo-leaf-deep: #2a6b34;
+  --logo-vein: #f4edd8;
+  --logo-chevron: #f4edd8;
+  --logo-edge: transparent;
 
   --danger: #e8837b;
   --danger-fill: #b5443c;
