@@ -105,7 +105,8 @@ interface AppState {
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
   aiImportOpen: boolean;
-  organizeOpen: boolean;
+  /** The AI panel, and the part it opened on; null when closed. */
+  ai: AiStart | null;
   /** The vault-wide page health report is open. */
   healthOpen: boolean;
   /** The folder or tag whose icon and colour are being edited. */
@@ -199,7 +200,7 @@ export const app: AppState = $state({
   pathId: null,
   focusMode: false,
   aiImportOpen: false,
-  organizeOpen: false,
+  ai: null,
   lookEdit: null,
   settingsTab: "general",
   healthOpen: false,
@@ -664,6 +665,16 @@ export function openPage(id: string): Promise<boolean> {
 
 /** Show a top-level view (leaves the reader). */
 /** Open Settings on one tab. */
+/** Where the AI panel opens: its list of actions, or straight on organizing. */
+export type AiStart = "home" | "organize";
+
+/** Open the one AI panel; what it offers follows the page or view shown. */
+export function openAi(start: AiStart = "home") {
+  if (!app.config?.vaultPath) return;
+  app.paletteOpen = false;
+  app.ai = start;
+}
+
 export function openSettings(tab: SettingsTab): Promise<boolean> {
   app.settingsTab = tab;
   return goView("settings");

@@ -3,7 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage } from "./lib/state.svelte";
+  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi } from "./lib/state.svelte";
   import { navigate } from "./lib/navigation.svelte";
   import { folderPickerState } from "./lib/folder-picker.svelte";
   import { api } from "./lib/api";
@@ -20,7 +20,7 @@
   import AiImportDialog from "./components/AiImportDialog.svelte";
   import LookDialog from "./components/LookDialog.svelte";
   import HealthDialog from "./components/HealthDialog.svelte";
-  import OrganizeDialog from "./components/OrganizeDialog.svelte";
+  import AiPanel from "./components/ai/AiPanel.svelte";
   import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -107,6 +107,12 @@
       void goView("settings");
       return;
     }
+    // Everything AI lives in one panel; it closes itself on the same keys.
+    if (mod && e.key.toLowerCase() === "j" && app.config?.vaultPath && !document.querySelector('[aria-modal="true"]')) {
+      e.preventDefault();
+      openAi();
+      return;
+    }
 
 
     if (e.key === "Escape") {
@@ -174,13 +180,14 @@
     app.view;
     app.importOpen;
     app.paletteOpen;
+    app.ai;
     shortcutsOpen;
     if (!focusSeen) {
       focusSeen = true;
       return;
     }
     void tick().then(() => {
-      if (app.importOpen || app.paletteOpen || shortcutsOpen) return;
+      if (app.importOpen || app.paletteOpen || app.ai || shortcutsOpen) return;
       const a = document.activeElement;
       if (a && a !== document.body && a.isConnected && !a.closest("[inert]")) return;
       // Stay in the view that was opened: falling back to the sidebar put the
@@ -363,7 +370,7 @@
 
 <div
   class="window"
-  inert={app.importOpen || app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}
+  inert={app.importOpen || app.paletteOpen || !!app.ai || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}
 >
 <TitleBar />
 <div class="content">
@@ -423,9 +430,9 @@
     <LookDialog />
   {/key}
 {/if}
-{#if app.organizeOpen}
+{#if app.ai}
   <div inert={app.paletteOpen || !!confirmState.pending}>
-    <OrganizeDialog />
+    <AiPanel start={app.ai} />
   </div>
 {/if}
 {#if app.aiImportOpen}

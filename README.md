@@ -39,7 +39,7 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 - **Review** pages with adaptive scheduling (FSRS): grade each review Again, Hard, Good or Easy and pick the retention you want, with reminders and a keyboard-driven review session.
 - **Quiz** yourself: answers a page marks with `data-herbarium-recall` stay hidden until you reveal them.
 - **Highlight** passages in a page and write notes in the margin; they are searchable and come back during review.
-- **Remix with AI**: simplify a page, explain it deeper, add quiz questions, translate it or turn it into a cheat sheet, then compare the result and accept it. Works with Claude (API key or Claude Code), OpenAI, Gemini, DeepSeek, Mistral, OpenRouter, a local Ollama or any OpenAI-compatible service (`herbarium remix`).
+- **Ask AI** (`Ctrl/⌘ J`), one panel for everything AI: remix the page you are reading (simplify it, explain it deeper, add quiz questions, translate it, turn it into a cheat sheet, or say what you want), then compare the result and accept it; or let it sort your library into folders and tags, which you review before anything moves. Works with Claude (API key or Claude Code), OpenAI, Gemini, DeepSeek, Mistral, OpenRouter, a local Ollama or any OpenAI-compatible service (`herbarium remix`).
 - **Share** a page as a secret gist or on your own GitHub Pages site, or copy a share card to paste anywhere (`herbarium publish`).
 - **See** your library as a graph of links, with page previews, icons and colours for pages, folders and tags, and a health check that explains why a page does not work.
 - **Remember the source**: the page, tool and prompt each page came from.

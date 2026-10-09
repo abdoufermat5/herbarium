@@ -184,6 +184,12 @@ export class Session {
     await this.cmd("POST", `/element/${el[ELEMENT]}/value`, { text: value });
   }
 
+  /** Send keys to the element as they are (WebDriver key codes such as "\uE007" for Enter). */
+  async press(selector, keys) {
+    const el = await this.waitFor(() => this.exec((s) => document.querySelector(s), selector), selector);
+    await this.cmd("POST", `/element/${el[ELEMENT]}/value`, { text: keys });
+  }
+
   text() {
     return this.exec(() => document.body.innerText);
   }

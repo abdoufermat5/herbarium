@@ -2,8 +2,9 @@
   import { onMount } from "svelte";
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { t } from "../lib/i18n.svelte";
-  import { app, toggleSidebar } from "../lib/state.svelte";
+  import { app, openAi, toggleSidebar } from "../lib/state.svelte";
   import { modKey } from "../lib/format";
+  import Icon from "../lib/Icon.svelte";
 
   const win = getCurrentWindow();
   let maximized = $state(false);
@@ -36,6 +37,21 @@
     </button>
   {/if}
   <div class="spacer" data-tauri-drag-region></div>
+  {#if app.config?.vaultPath && app.initialized && !app.initError}
+    <!-- The one way into every AI feature, whatever the view. -->
+    <button
+      class="ask-ai"
+      class:on={!!app.ai}
+      aria-haspopup="dialog"
+      aria-keyshortcuts={modKey("J").startsWith("⌘") ? "Meta+J" : "Control+J"}
+      title={t("ai.panelHint")}
+      onclick={() => openAi()}
+    >
+      <Icon name="sparkle" size={13} />
+      <span>{t("ai.panel")}</span>
+      <kbd>{modKey("J")}</kbd>
+    </button>
+  {/if}
   <div class="controls">
     <button class="ctl" aria-label={t("window.minimize")} onclick={() => win.minimize()}>
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1 5h8" /></svg>
@@ -82,6 +98,41 @@
   .controls {
     display: flex;
     height: 100%;
+  }
+
+  .ask-ai {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 22px;
+    margin-right: 8px;
+    padding: 0 4px 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-soft);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    transition:
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+  .ask-ai :global(svg) {
+    color: var(--leaf);
+  }
+  .ask-ai:hover,
+  .ask-ai.on {
+    border-color: var(--border-hover);
+    color: var(--text);
+  }
+  .ask-ai kbd {
+    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+    background: var(--sunken);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    line-height: 1.4;
   }
 
   .ctl {

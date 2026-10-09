@@ -20,12 +20,13 @@
     movePages,
     deletePages,
     duplicatePage,
+    openAi,
   } from "../lib/state.svelte";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { api } from "../lib/api";
   import { confirmAction } from "../lib/confirm.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
-  import { fmtDuration } from "../lib/format";
+  import { fmtDuration, modKey } from "../lib/format";
   import Icon from "../lib/Icon.svelte";
   import type { IconName } from "../lib/icons";
   import type { PageMeta, ReviewGrade, SearchHit } from "../lib/types";
@@ -187,14 +188,20 @@
         },
       },
       {
+        key: "ai",
+        group,
+        label: t("ai.palette"),
+        hint: modKey("J"),
+        icon: "sparkle",
+        run: () => openAi(),
+      },
+      {
         key: "organize",
         group,
         label: t("organize.palette"),
         hint: t("organize.paletteHint"),
-        icon: "sparkle",
-        run: () => {
-          app.organizeOpen = true;
-        },
+        icon: "folders",
+        run: () => openAi("organize"),
       },
       {
         key: "import-ai",

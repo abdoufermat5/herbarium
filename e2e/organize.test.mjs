@@ -110,13 +110,13 @@ const where = (rel) => existsSync(join(vault, rel));
 test("organize with AI: review, apply and undo", { skip: unavailable ?? false }, async () => {
   await app.waitText("Today");
   await app.click("All pages", "aside button, nav button");
-  await app.click("Organize", ".btn");
-  await app.waitText("New and unsorted pages");
+  // The one AI panel: what you type goes along with the action you pick.
+  await app.click("Ask AI", ".titlebar button");
   // Unsorted pages: the three at the top level or in the Inbox, not the filed one.
   await app.waitText("Pages in no folder or in the Inbox (4)");
+  await app.type(".ask textarea", "keep Rust together");
   await shot("options");
-  await app.type("textarea", "keep Rust together");
-  await app.click("Suggest a plan", ".btn-primary");
+  await app.click("Organize new and unsorted pages", "[role=option]");
 
   // Only the sound part of the plan is shown: three pages, two destinations.
   await app.waitText("Grouped the Rust pages and the biology pages.", 30000);
@@ -135,6 +135,7 @@ test("organize with AI: review, apply and undo", { skip: unavailable ?? false },
   await app.waitText("Apply 2 changes");
   await app.click("Apply 2 changes", ".btn-primary");
   await app.waitText("2 pages organized");
+  await app.waitFor(() => app.exec(() => !document.querySelector("[role=dialog][aria-modal=true]")), "the panel closed");
   assert.ok(where("Programming/Rust/ownership.html"));
   assert.ok(where("Programming/Rust/lifetimes.html"));
   assert.ok(where("Inbox/cells.html"), "the page left out stayed");

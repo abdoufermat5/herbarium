@@ -86,6 +86,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   // Application — App.svelte window handler
   { id: "help", section: "application", context: "global", action: "shortcuts.action.help", keys: ["?"] },
   { id: "palette", section: "application", context: "global", action: "shortcuts.action.palette", keys: [{ mod: "K" }] },
+  { id: "ai", section: "application", context: "global", action: "shortcuts.action.ai", keys: [{ mod: "J" }] },
   { id: "sidebar", section: "application", context: "global", action: "shortcuts.action.sidebar", keys: [{ mod: "B" }] },
   { id: "settings", section: "application", context: "global", action: "shortcuts.action.settings", keys: [{ mod: "," }] },
   { id: "import", section: "application", context: "list", action: "shortcuts.action.import", keys: ["I"] },

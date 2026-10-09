@@ -153,12 +153,14 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
   });
 
   await step("remix", async () => {
-    await app.click("Remix", ".actions button");
-    await app.waitText("Remix this page");
-    await app.click("Simplify", "[role=radio]");
+    // Every AI feature sits behind the one button; the page's own come first.
+    await app.click("Ask AI", ".titlebar button");
     await app.waitText("Claude Code · claude-opus-5-5");
+    // A note typed first goes along with the action picked from the keyboard.
+    await app.type(".ask textarea", "Keep the greeting");
+    await app.waitText("Remix with your instructions");
     await shot("remix-dialog");
-    await app.click("Remix", "[role=dialog] .btn-primary");
+    await app.press(".ask textarea", "\uE015\uE007");
     // The comparison panel opens on the proposal; the page waits for approval.
     await app.waitFor(() => app.exec(() => !!document.querySelector(".panel[role=dialog]")), "the proposal panel", 30000);
     await app.find("Remixed with AI", ".panel .eyebrow");
@@ -166,6 +168,7 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     assert.match(welcome().html, /Welcome to your herbarium/);
     const prompt = readFileSync(join(work, "claude.stdin"), "utf8");
     assert.match(prompt, /plainer words/);
+    assert.match(prompt, /Keep the greeting/);
     assert.match(prompt, /- "Welcome to your herbarium"/, "highlights go with the page");
     await app.click("Accept", ".panel[role=dialog] button");
     await app.waitFor(() => /Welcome, simply/.test(welcome().html), "the remix accepted");

@@ -465,10 +465,6 @@
           </button>
         </div>
 
-        <button type="button" class="btn" onclick={() => (app.organizeOpen = true)} title={t("organize.paletteHint")}>
-          <Icon name="sparkle" size={13} />
-          <span>{t("organize.button")}</span>
-        </button>
         <button type="button" class="btn btn-primary" onclick={() => (app.importOpen = true)}>
           <Icon name="plus" size={13} />
           <span>{t("list.import")}</span>

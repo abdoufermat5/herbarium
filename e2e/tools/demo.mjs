@@ -214,11 +214,9 @@ try {
 
   mark("remix");
   // Remix it with AI: the result waits as a proposal to compare and accept.
-  await click("Remix", ".actions button");
-  await sleep(700);
-  await click("Add a quiz", ".dialog button");
-  await sleep(400);
-  await click("Remix", ".dialog .btn-primary");
+  await click("Ask AI", ".titlebar button");
+  await sleep(900);
+  await click("Add a quiz", "[role=option]");
   await sleep(2700);
   await click("Accept", ".panel button, button", { pause: 600 });
   await sleep(1000);
