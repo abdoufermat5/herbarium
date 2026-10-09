@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-09
+
 ### Added
 - The browser extension works in Helium.
 - Vault switcher: with more than one vault, the Herbarium name at the top of the sidebar opens a menu of your recent vaults (the open one checked, same-named vaults told apart by their parent folder) to switch in one click; "Switch to …" in the command palette does the same.
@@ -162,7 +164,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/abdoufermat5/herbarium/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/abdoufermat5/herbarium/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/abdoufermat5/herbarium/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/abdoufermat5/herbarium/compare/v0.2.1...v0.3.0
