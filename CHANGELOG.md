@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-09
+
 ### Added
 - Ask AI: one button in the title bar (or `Ctrl/⌘ J`, or "Ask AI…" in the command palette) opens a single panel for everything AI, instead of a button per feature. It offers what fits what is on screen — the page you are reading first (simplify, explain deeper, add a quiz, cheat sheet, fix & modernize, translate with one-click common languages), then your library (organize, import an AI chat export). Type what you want and press Enter to remix the page with your own words, or pick an action and your words go along as a note. The panel shows which AI service and model it uses, and when none is set up, one button leads to the setup.
 - Organize with AI (in the Ask AI panel, or the command palette): the AI reads the titles and the start of your pages and proposes where they belong — existing folders first, new ones where none fit, with a few tags. You choose the pages to look at (the new and unsorted ones, or the whole library), can say what you have in mind, review the plan grouped by folder and untick anything, and apply it; Undo puts everything back. Works with every AI service Remix works with.
@@ -145,7 +147,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/abdoufermat5/herbarium/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/abdoufermat5/herbarium/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/abdoufermat5/herbarium/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/abdoufermat5/herbarium/compare/v0.2.0...v0.2.1
