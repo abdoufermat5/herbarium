@@ -80,7 +80,7 @@ to WinGet.
 
 The `snap` job calls the reusable `.github/workflows/snap.yml`, which downloads
 the amd64 `.deb` from the release for the tag being built, renders the
-`__VERSION__` token in `src-tauri/packaging/snap/snapcraft.yaml` (a `dump` part
+`__VERSION__` token in `desktop/packaging/snap/snapcraft.yaml` (a `dump` part
 whose source is that `.deb`), builds the snap with `snapcore/action-build@v1`,
 and keeps it as a workflow artifact. When `SNAPCRAFT_STORE_CREDENTIALS` is set
 it then publishes with `snapcore/action-publish@v1` — plain versions to
@@ -152,7 +152,7 @@ Flatpak is the one channel with no automation secret: Flathub builds from a
 manifest in its own repository, so each release is a pull request.
 
 The manifest lives at
-`src-tauri/packaging/flatpak/io.github.abdoufermat5.Herbarium.yml`, with the
+`desktop/packaging/flatpak/io.github.abdoufermat5.Herbarium.yml`, with the
 AppStream metadata in `io.github.abdoufermat5.Herbarium.metainfo.xml`. It targets
 `org.gnome.Platform`/`org.gnome.Sdk` 47 (which ships webkit2gtk-4.1) and installs
 the release `.deb` for the architecture being built, the desktop entry from the
@@ -196,7 +196,7 @@ git push --follow-tags
 
 The tag runs the gate checks, builds every platform, publishes the GitHub
 release, and then runs whichever optional channels are configured. The
-`src-tauri/packaging/` manifests carry `__PLACEHOLDER__` tokens and are **not**
+`desktop/packaging/` manifests carry `__PLACEHOLDER__` tokens and are **not**
 meant to be edited by hand: `snap/snapcraft.yaml`'s `__VERSION__` is rendered by
 `.github/workflows/snap.yml`, and the Flatpak manifest's version-pinned URLs and
 checksums are updated per release as described above.

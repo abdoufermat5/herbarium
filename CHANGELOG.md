@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- The app's folder is `desktop/` instead of `src-tauri/` (the Rust code, `tauri.conf.json`, icons and packaging files moved with it); the Tauri command line finds it by itself, and scripts, CI and docs follow.
+
 ## [0.3.1] - 2026-10-09
 
 ### Changed

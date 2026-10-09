@@ -1,4 +1,4 @@
-MANIFEST := --manifest-path src-tauri/Cargo.toml
+MANIFEST := --manifest-path desktop/Cargo.toml
 VAULT ?=
 
 .PHONY: help install dev build check lint test ci e2e demo mcp release clean

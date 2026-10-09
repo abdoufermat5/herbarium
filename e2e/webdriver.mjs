@@ -25,13 +25,13 @@ export function desktopUnavailable() {
 /** The app with its interface embedded (not the dev server), built once. */
 export function desktopBin() {
   if (process.env.HERBARIUM_DESKTOP_BIN) return process.env.HERBARIUM_DESKTOP_BIN;
-  const target = join(ROOT, "src-tauri", "target", "desktop-e2e");
+  const target = join(ROOT, "desktop", "target", "desktop-e2e");
   const bin = join(target, "debug", "herbarium");
   if (!existsSync(bin) || process.env.HERBARIUM_REBUILD) {
     execFileSync("pnpm", ["build"], { cwd: ROOT, stdio: "inherit" });
     execFileSync(
       "cargo",
-      ["build", "--manifest-path", join(ROOT, "src-tauri", "Cargo.toml"), "-p", "herbarium", "--features", "tauri/custom-protocol"],
+      ["build", "--manifest-path", join(ROOT, "desktop", "Cargo.toml"), "-p", "herbarium", "--features", "tauri/custom-protocol"],
       { stdio: "inherit", env: { ...process.env, CARGO_TARGET_DIR: target } },
     );
   }

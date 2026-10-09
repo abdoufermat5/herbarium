@@ -81,7 +81,9 @@ describe("graph layout", () => {
     const start = performance.now();
     settle(sim);
     const ms = performance.now() - start;
-    // The view spreads this over frames; a single tick must stay cheap.
-    expect(ms / 260).toBeLessThan(8);
+    // The view spreads this over frames. Wall-clock time varies between
+    // machines (3-10 ms a tick here); comparing every pair of pages would
+    // cost hundreds, which is what this guards against.
+    expect(ms / 260).toBeLessThan(20);
   });
 });

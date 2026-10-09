@@ -52,22 +52,22 @@ jobs:
           TAG: ${{ inputs.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
-          mkdir -p src-tauri/packaging/snap
+          mkdir -p desktop/packaging/snap
           gh release download "$TAG" \
-            --dir src-tauri/packaging/snap \
+            --dir desktop/packaging/snap \
             --pattern "herbarium_*_${ARCH}.deb"
           shopt -s nullglob
-          debs=(src-tauri/packaging/snap/herbarium_*_"${ARCH}".deb)
+          debs=(desktop/packaging/snap/herbarium_*_"${ARCH}".deb)
           if [ "${#debs[@]}" -ne 1 ]; then
             echo "::error::expected exactly one ${ARCH} .deb in release $TAG, found ${#debs[@]}"
             exit 1
           fi
           # The part's source is a fixed name so snapcraft.yaml stays static.
-          mv "${debs[0]}" src-tauri/packaging/snap/herbarium.deb
-          ls -l src-tauri/packaging/snap/herbarium.deb
+          mv "${debs[0]}" desktop/packaging/snap/herbarium.deb
+          ls -l desktop/packaging/snap/herbarium.deb
           # The store listing icon (snapcraft.yaml `icon:`) must sit inside the
           # snap project directory.
-          cp src-tauri/icons/icon.png src-tauri/packaging/snap/herbarium.png
+          cp desktop/icons/icon.png desktop/packaging/snap/herbarium.png
 
       # The packaging manifest carries a __VERSION__ token because snapcraft has
       # no CLI override for the project version. The tag is validated before it
@@ -84,17 +84,17 @@ jobs:
               exit 1
               ;;
           esac
-          sed -i "s|__VERSION__|${version}|g" src-tauri/packaging/snap/snapcraft.yaml
-          if grep -q '__VERSION__' src-tauri/packaging/snap/snapcraft.yaml; then
+          sed -i "s|__VERSION__|${version}|g" desktop/packaging/snap/snapcraft.yaml
+          if grep -q '__VERSION__' desktop/packaging/snap/snapcraft.yaml; then
             echo "::error::the __VERSION__ token was not replaced"
             exit 1
           fi
-          grep '^version:' src-tauri/packaging/snap/snapcraft.yaml
+          grep '^version:' desktop/packaging/snap/snapcraft.yaml
 
       - uses: snapcore/action-build@v1
         id: snapcraft
         with:
-          path: src-tauri/packaging/snap
+          path: desktop/packaging/snap
 
       - uses: actions/upload-artifact@v4
         with:

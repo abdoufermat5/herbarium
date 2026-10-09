@@ -145,8 +145,10 @@ mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR"
 download_verified "herbarium_${VERSION}_${APPIMAGE_ARCH}.AppImage" "$TMP/herbarium.AppImage"
 chmod +x "$TMP/herbarium.AppImage"
 mv "$TMP/herbarium.AppImage" "$BIN_DIR/herbarium"
-download "https://raw.githubusercontent.com/$REPO/v$VERSION/src-tauri/icons/128x128.png" \
-  "$ICON_DIR/herbarium.png" || say "warning: could not fetch the icon"
+# Older releases keep the app in src-tauri/ instead of desktop/.
+download "https://raw.githubusercontent.com/$REPO/v$VERSION/desktop/icons/128x128.png" "$ICON_DIR/herbarium.png" \
+  || download "https://raw.githubusercontent.com/$REPO/v$VERSION/src-tauri/icons/128x128.png" "$ICON_DIR/herbarium.png" \
+  || say "warning: could not fetch the icon"
 
 cat > "$APP_DIR/herbarium.desktop" <<DESKTOP
 [Desktop Entry]

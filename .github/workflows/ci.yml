@@ -31,7 +31,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop
 
       - name: Install Linux dependencies
         run: |
@@ -42,9 +42,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+      - run: cargo fmt --manifest-path desktop/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path desktop/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path desktop/Cargo.toml --workspace
       - name: Build Linux deb bundle
         # Checks that bundling works; the size-optimised release profile
         # (one codegen unit, LTO) is left to releases, it takes much longer.
@@ -72,7 +72,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop
           key: e2e
 
       - name: Install Linux dependencies and drivers
@@ -123,11 +123,11 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - name: Compile Tauri app
         run: |
-          cargo check --manifest-path src-tauri/Cargo.toml --workspace --all-targets
-          cargo build --manifest-path src-tauri/Cargo.toml --workspace
+          cargo check --manifest-path desktop/Cargo.toml --workspace --all-targets
+          cargo build --manifest-path desktop/Cargo.toml --workspace

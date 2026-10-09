@@ -26,7 +26,7 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME#v}"
           pkg="$(node -p "require('./package.json').version")"
-          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -1)"
+          crate="$(sed -n 's/^version = "\(.*\)"/\1/p' desktop/Cargo.toml | head -1)"
           if [ "$tag" != "$pkg" ] || [ "$tag" != "$crate" ]; then
             echo "Version mismatch: tag=$tag package.json=$pkg Cargo.toml=$crate" >&2
             exit 1
@@ -117,7 +117,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop
 
       - name: Install Linux dependencies
         run: |
@@ -128,9 +128,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
-      - run: cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
-      - run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
-      - run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+      - run: cargo fmt --manifest-path desktop/Cargo.toml --all -- --check
+      - run: cargo clippy --manifest-path desktop/Cargo.toml --workspace --all-targets -- -D warnings
+      - run: cargo test --manifest-path desktop/Cargo.toml --workspace
 
       - name: Create or update draft release
         run: |
@@ -193,7 +193,7 @@ jobs:
 
       - uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: desktop
 
       - name: Install Linux dependencies
         if: startsWith(matrix.os, 'ubuntu')

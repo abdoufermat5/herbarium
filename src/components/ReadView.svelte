@@ -36,8 +36,8 @@
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
   import { loadEditors, currentEditor } from "../lib/editors.svelte";
   // Single source of truth for the page storage shim, shared with the Rust
-  // reader via `include_str!` in `src-tauri/src/protocol.rs`.
-  import storageShimJs from "../../src-tauri/src/storage_shim.js?raw";
+  // reader via `include_str!` in `desktop/src/protocol.rs`.
+  import storageShimJs from "../../desktop/src/storage_shim.js?raw";
 
   let { id }: { id: string } = $props();
 

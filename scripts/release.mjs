@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Usage: pnpm release <patch|minor|major|x.y.z[-pre]>
-// Bumps package.json + src-tauri/Cargo.toml (tauri.conf.json follows package.json),
+// Bumps package.json + desktop/Cargo.toml (tauri.conf.json follows package.json),
 // rolls CHANGELOG.md [Unreleased] into the new version,
 // refreshes Cargo.lock, then commits and tags. Push with: git push --follow-tags
 import { readFileSync, writeFileSync } from "node:fs";
@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 const REPO = "https://github.com/abdoufermat5/herbarium";
-const FILES = ["package.json", "src-tauri/Cargo.toml", "src-tauri/Cargo.lock", "CHANGELOG.md"];
+const FILES = ["package.json", "desktop/Cargo.toml", "desktop/Cargo.lock", "CHANGELOG.md"];
 
 const fail = (msg) => {
   console.error(msg);
@@ -115,15 +115,15 @@ const prevTag =
 pkg.version = next;
 writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
 
-const cargo = readFileSync("src-tauri/Cargo.toml", "utf8");
+const cargo = readFileSync("desktop/Cargo.toml", "utf8");
 writeFileSync(
-  "src-tauri/Cargo.toml",
+  "desktop/Cargo.toml",
   cargo.replace(/^version = ".*"$/m, `version = "${next}"`),
 );
 
 // Refresh Cargo.lock for the new crate version. Prefer the network (the offline index may
 // lack entries), fall back to --offline, and roll the bump back if both fail.
-const cargoUpdate = ["update", "--manifest-path", "src-tauri/Cargo.toml", "--workspace"];
+const cargoUpdate = ["update", "--manifest-path", "desktop/Cargo.toml", "--workspace"];
 try {
   run("cargo", cargoUpdate);
 } catch {
@@ -132,7 +132,7 @@ try {
     run("cargo", [...cargoUpdate, "--offline"]);
   } catch {
     run("git", ["checkout", "--", ...FILES]);
-    fail("Could not refresh src-tauri/Cargo.lock (online or offline); version bump reverted.");
+    fail("Could not refresh desktop/Cargo.lock (online or offline); version bump reverted.");
   }
 }
 

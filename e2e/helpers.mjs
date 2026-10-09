@@ -16,9 +16,9 @@ export const EXTENSION_ID = "fimfpdpamppfkhnbgodhgegfaefenmml";
 export function herbariumBin() {
   if (process.env.HERBARIUM_BIN) return process.env.HERBARIUM_BIN;
   const exe = process.platform === "win32" ? "herbarium.exe" : "herbarium";
-  const bin = join(ROOT, "src-tauri", "target", "debug", exe);
+  const bin = join(ROOT, "desktop", "target", "debug", exe);
   if (!existsSync(bin) || process.env.HERBARIUM_REBUILD) {
-    execFileSync("cargo", ["build", "--manifest-path", join(ROOT, "src-tauri", "Cargo.toml"), "-p", "herbarium"], {
+    execFileSync("cargo", ["build", "--manifest-path", join(ROOT, "desktop", "Cargo.toml"), "-p", "herbarium"], {
       stdio: "inherit",
     });
   }
