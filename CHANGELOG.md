@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- The snap did not start: it aborted with "libEGL fatal: did not find extension DRI_Mesa version 1" because it shipped its own copy of Mesa that did not match the graphics drivers of the GNOME platform snap. The snap now uses the platform's Mesa.
+
 ## [0.4.0] - 2026-10-09
 
 ### Added

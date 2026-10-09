@@ -74,6 +74,19 @@ parts:
       - libwebkit2gtk-4.1-0
       - libgtk-3-0
       - libayatana-appindicator3-1
+    # stage-packages pull jammy's Mesa and libglvnd in as webkit2gtk deps. The
+    # snap's lib dirs come first on LD_LIBRARY_PATH, so that libEGL_mesa would
+    # load the gnome-42-2204 DRI drivers (LIBGL_DRIVERS_PATH), a different
+    # Mesa build, and abort with "libEGL fatal: did not find extension
+    # DRI_Mesa version 1". Drop them so the platform snap's matching set loads.
+    prime:
+      - -usr/lib/*/dri
+      - -usr/lib/*/libEGL*
+      - -usr/lib/*/libGL*
+      - -usr/lib/*/libgbm*
+      - -usr/lib/*/libglapi*
+      - -usr/lib/*/libdrm*
+      - -usr/share/drirc.d
     override-build: |
       craftctl default
       # The .deb ships Icon=herbarium, which is not on the snap's icon path;
