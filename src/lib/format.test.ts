@@ -6,6 +6,7 @@ import {
   plural,
   fmtDate,
   modKey,
+  vaultLabels,
   UNIT_MINUTES,
   DURATION_UNITS,
 } from "./format";
@@ -96,5 +97,13 @@ describe("modKey", () => {
   it("formats keyboard modifier key", () => {
     expect(modKey("K")).toMatch(/^(⌘K|Ctrl K)$/);
     expect(modKey()).toMatch(/^(⌘K|Ctrl K)$/);
+  });
+});
+
+describe("vaultLabels", () => {
+  it("names vaults by folder, adding the parent only where names collide", () => {
+    expect(
+      vaultLabels(["/home/me/work/Herbarium", "/home/me/Herbarium/", "C:\\Notes\\Plants", "/data/Herbarium"]),
+    ).toEqual(["Herbarium (work)", "Herbarium (me)", "Plants", "Herbarium (data)"]);
   });
 });

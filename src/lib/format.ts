@@ -10,6 +10,24 @@ export function modKey(key = "K"): string {
   return isMac ? `⌘${key}` : `Ctrl ${key}`;
 }
 
+/** The folder name of a vault path ("" for an empty path). */
+export function vaultName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? "";
+}
+
+/**
+ * Names to show for these vault paths: the folder name, followed by its
+ * parent folder when another vault in the list has the same name.
+ */
+export function vaultLabels(paths: string[]): string[] {
+  const names = paths.map(vaultName);
+  return paths.map((path, i) => {
+    if (names.filter((n) => n === names[i]).length < 2) return names[i];
+    const parent = path.split(/[\\/]/).filter(Boolean).slice(-2, -1)[0];
+    return parent ? `${names[i]} (${parent})` : names[i];
+  });
+}
+
 export function fmtDate(ms: number | null | undefined): string {
   if (!ms) return "";
   return new Date(ms).toLocaleDateString(LOCALES[i18n.locale].bcp47, {

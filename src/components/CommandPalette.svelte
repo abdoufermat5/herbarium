@@ -21,12 +21,13 @@
     deletePages,
     duplicatePage,
     openAi,
+    switchVault,
   } from "../lib/state.svelte";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { api } from "../lib/api";
   import { confirmAction } from "../lib/confirm.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
-  import { fmtDuration, modKey } from "../lib/format";
+  import { fmtDuration, modKey, vaultLabels, vaultName } from "../lib/format";
   import Icon from "../lib/Icon.svelte";
   import type { IconName } from "../lib/icons";
   import type { PageMeta, ReviewGrade, SearchHit } from "../lib/types";
@@ -436,10 +437,29 @@
       }));
   });
 
+  /** The other recent vaults, to switch to. */
+  const vaultItems = $derived.by<Item[]>(() => {
+    const query = needle.toLowerCase();
+    const others = (app.config?.recentVaults ?? []).filter((p) => p !== app.config?.vaultPath);
+    const labels = vaultLabels(others);
+    return others
+      .map((path, i) => ({
+        key: `vault-${path}`,
+        group: t("sidebar.vaults"),
+        label: t("palette.switchVault", { name: labels[i] }),
+        hint: path,
+        icon: "folder-open" as IconName,
+        run: async () => {
+          if (await switchVault(path)) toast(t("toast.vaultOpenedNamed", { name: vaultName(path) }), "success");
+        },
+      }))
+      .filter((item) => !query || item.label.toLowerCase().includes(query));
+  });
+
   const items = $derived.by<Item[]>(() => {
     const query = needle.toLowerCase();
     const acts = query ? actions.filter((a) => a.label.toLowerCase().includes(query)) : actions;
-    return [...acts, ...pageItems, ...folderItems, ...tagItems];
+    return [...acts, ...pageItems, ...folderItems, ...tagItems, ...vaultItems];
   });
 
   $effect(() => {

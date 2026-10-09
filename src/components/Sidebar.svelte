@@ -27,11 +27,12 @@
     refreshAll,
     reloadPages,
     showFolder,
+    switchVault,
     toast,
   } from "../lib/state.svelte";
   import { api } from "../lib/api";
   import Icon from "../lib/Icon.svelte";
-  import { modKey } from "../lib/format";
+  import { modKey, vaultLabels, vaultName as nameOf } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { confirmAction } from "../lib/confirm.svelte";
@@ -39,7 +40,7 @@
   import { shortcutHint } from "../lib/shortcuts";
   import type { PageMeta } from "../lib/types";
   import ContextMenu from "./ContextMenu.svelte";
-  import type { DropdownMenuItem } from "./DropdownMenu.svelte";
+  import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
 
   interface Branch {
     name: string;
@@ -114,9 +115,46 @@
     return () => motionQuery.removeEventListener("change", onChange);
   });
 
-  const vaultName = $derived(
-    app.config?.vaultPath?.split(/[\\/]/).filter(Boolean).pop() ?? "",
-  );
+  const vaultName = $derived(nameOf(app.config?.vaultPath ?? ""));
+
+  /** The open vault first, then the other recent ones. */
+  const vaults = $derived.by(() => {
+    const current = app.config?.vaultPath;
+    const recent = app.config?.recentVaults ?? [];
+    return current ? [current, ...recent.filter((p) => p !== current)] : recent;
+  });
+  /** Labels for `vaults`, told apart when two share a folder name; the first is the open one. */
+  const labels = $derived(vaultLabels(vaults));
+
+  let switching = $state(false);
+  const vaultItems = $derived.by((): DropdownMenuItem[] => {
+    return [
+      { header: true, label: t("sidebar.vaults") },
+      ...vaults.map((path, i) => ({
+        id: path,
+        label: labels[i],
+        icon: "folder" as const,
+        checked: path === app.config?.vaultPath,
+        disabled: switching,
+        onclick: () => void openVault(path),
+      })),
+      { divider: true },
+      { id: "manage", label: t("sidebar.manageVaults"), icon: "settings", onclick: () => void goView("settings") },
+    ];
+  });
+
+  async function openVault(path: string) {
+    if (switching) return;
+    switching = true;
+    try {
+      if (await switchVault(path)) toast(t("toast.vaultOpenedNamed", { name: nameOf(path) }), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.vaultOpenFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      switching = false;
+    }
+  }
 
   /** Nested folders (including empty intermediate ones) with their pages. */
   const tree = $derived.by(() => {
@@ -875,15 +913,37 @@
 {/snippet}
 
 <aside class="sidebar">
-  <div class="brand">
-    <div class="brand-mark"><Icon name="leaf" size={16} /></div>
-    <div class="brand-text">
-      <strong>Herbarium</strong>
-      {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
-        <span class="brand-vault ellipsis" title={app.config?.vaultPath ?? ""}>{vaultName}</span>
-      {/if}
+  {#if vaults.length > 1}
+    <DropdownMenu items={vaultItems} ariaLabel={t("sidebar.switchVault")} class="brand-switch">
+      {#snippet trigger({ open, toggle })}
+        <button
+          class="brand brand-button"
+          class:open
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={`${t("sidebar.switchVault")} — ${app.config?.vaultPath ?? ""}`}
+          onclick={toggle}
+        >
+          <div class="brand-mark"><Icon name="leaf" size={16} /></div>
+          <div class="brand-text">
+            <strong>Herbarium</strong>
+            <span class="brand-vault ellipsis">{labels[0]}</span>
+          </div>
+          {#if switching}<span class="spinner small"></span>{:else}<Icon name="arrow-up-down" size={13} />{/if}
+        </button>
+      {/snippet}
+    </DropdownMenu>
+  {:else}
+    <div class="brand">
+      <div class="brand-mark"><Icon name="leaf" size={16} /></div>
+      <div class="brand-text">
+        <strong>Herbarium</strong>
+        {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
+          <span class="brand-vault ellipsis" title={app.config?.vaultPath ?? ""}>{vaultName}</span>
+        {/if}
+      </div>
     </div>
-  </div>
+  {/if}
 
   <div class="body">
     <nav class="nav" aria-label={t("sidebar.library")}>
@@ -1140,6 +1200,47 @@
     align-items: center;
     gap: 10px;
     padding: 20px 18px 18px;
+  }
+  /* With several vaults the brand opens the vault switcher. */
+  .sidebar :global(.brand-switch) {
+    display: flex;
+    margin: 12px 8px 10px;
+  }
+  .sidebar :global(.brand-switch .dropdown-menu) {
+    left: 0;
+    right: 0;
+    max-width: none;
+  }
+  .brand-button {
+    flex: 1;
+    min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: none;
+    color: var(--muted);
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--t-fast, 0.12s),
+      border-color var(--t-fast, 0.12s);
+  }
+  .brand-button:hover,
+  .brand-button.open {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .brand-button:focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 1px;
+  }
+  .brand-button .brand-text {
+    flex: 1;
+  }
+  .brand-button .spinner.small {
+    width: 12px;
+    height: 12px;
   }
   .brand-mark {
     flex: none;

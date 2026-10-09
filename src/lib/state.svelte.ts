@@ -567,6 +567,18 @@ export async function adoptVault(config: Config) {
   await reloadPages();
 }
 
+/**
+ * Switch to the vault at `path` once the leave guards allow it. Resolves to
+ * whether it switched; a failure leaves the current vault open and throws.
+ */
+export async function switchVault(path: string): Promise<boolean> {
+  if (path === app.config?.vaultPath) return false;
+  return navigate(async () => {
+    const config = await api.setVault(path);
+    await adoptVault(config);
+  });
+}
+
 let backgroundStarted = false;
 
 export async function initApp() {

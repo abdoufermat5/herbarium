@@ -2,7 +2,7 @@
   import { onMount } from "svelte";
   import { open, save } from "@tauri-apps/plugin-dialog";
   import { api } from "../../lib/api";
-  import { app, adoptVault, rescanVault, reloadPages, toast, errorMessage } from "../../lib/state.svelte";
+  import { app, adoptVault, rescanVault, reloadPages, switchVault, toast, errorMessage } from "../../lib/state.svelte";
   import { navigate } from "../../lib/navigation.svelte";
   import { t } from "../../lib/i18n.svelte";
   import { prefs, setPref } from "../../lib/prefs.svelte";
@@ -118,10 +118,7 @@
     if (busy || path === current) return;
     busy = "open";
     try {
-      const changed = await navigate(async () => {
-        const config = await api.setVault(path);
-        await adoptVault(config);
-      });
+      const changed = await switchVault(path);
       if (changed) toast(t("toast.vaultOpened"), "success");
     } catch (e) {
       console.error(e);
