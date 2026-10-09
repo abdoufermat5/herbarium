@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Herbarium",
   "short_name": "Herbarium",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Save AI-made pages and anything on the web into your Herbarium vault, with one click.",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAmd9lNxgIyshjID3p2CnCdmifwjGv1Lr6UAA+BPvIzpHVbaBavMa4JNtiq0jC2hUKO4ww6t7AeHYiLZwsiXxnMbtlJW+2vCvBNWD+SphtfXyI74pnA6eD9Kq0l1ck/euqi5DOYr+fOLMmkH23FcRMh6hJjWE2nmRQfXe2fiVrZONGtC+ZGye95vWFY8N5YaaYz6T/uf+m4e0Y0RRaVcQbhEVmqIEGQVzbLy3MdycLY3hezn++W7KHxtg6fwkWddXOQ/d4TZO2SScQLn5EAEc3Lx54M4pkGu6IvE/PrCHOZheTkgU2suVKF/Suhllk7H1N86RsTTo8HKh4j9hJ8xZKaQIDAQAB",
   "icons": { "16": "icons/dark-16.png", "32": "icons/dark-32.png", "48": "icons/dark-48.png", "128": "icons/dark-128.png" },
