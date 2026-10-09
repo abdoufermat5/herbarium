@@ -7,13 +7,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 - The browser extension works in Helium.
+- Vault switcher: with more than one vault, the Herbarium name at the top of the sidebar opens a menu of your recent vaults (the open one checked, same-named vaults told apart by their parent folder) to switch in one click; "Switch to …" in the command palette does the same.
 
 ### Fixed
 - The browser extension stopped reaching the app after Herbarium was moved, reinstalled or rebuilt somewhere else: browsers kept starting an executable that no longer existed and the popup only said "Native host has exited". The app now repairs that at start, and also connects browsers installed after the first setup. Settings → Browser no longer says "connected" in that case; it says the connection needs repair and offers a button.
 - The extension's popup and Today page used Chrome's tiny default text size for extension pages.
 - The browser extension's version was stuck at 0.3.0. It now matches the app, and releases bump it along with the app.
+- Loading the extension in Chrome and other Chromium browsers warned "'background.scripts' requires manifest version of 2 or lower". The extension now only declares its service worker; Firefox, which needs background scripts, gets its own copy (`browser-extension-firefox`), and Settings → Browser points Firefox at it.
 
 ### Changed
+- New icon and branding: a pressed green leaf, in a dark version and a light one. The app, the tray, the installers and the snap use the dark icon; the logo in the app, the browser extension's toolbar icon (Chrome, Chromium browsers and Firefox) and the web favicon follow the light or dark mode. The snap's desktop entry uses the 128 px icon instead of a blurred 32 px one, and the Flathub listing gets screenshots and brand colours.
 - The extension's popup is clearer: a status pill with the vault, numbered steps and "Try again" when the app can't be reached, with the reason in plain words, and icons on the save buttons.
 - Settings → Browser marks each browser as connected, needing repair or not set up, and highlights the current step.
 
