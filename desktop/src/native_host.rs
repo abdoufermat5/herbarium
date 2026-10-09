@@ -390,8 +390,8 @@ pub const NATIVE_HOST_USAGE: &str =
 
 Connects the Herbarium browser extension to the vault. `install` registers
 the host with every supported browser found (Chrome, Chromium, Brave, Edge,
-Vivaldi, Firefox); `uninstall` removes it. Browsers start the host on their
-own; run without arguments only to test it by hand.";
+Vivaldi, Helium, Firefox); `uninstall` removes it. Browsers start the host on
+their own; run without arguments only to test it by hand.";
 
 /// Extension IDs to allow: the built-in one plus any `--extension-id`.
 fn extension_ids(args: &[String]) -> Vec<String> {
@@ -439,20 +439,22 @@ fn manifest_dirs() -> Vec<(&'static str, PathBuf, PathBuf, bool)> {
     #[cfg(not(target_os = "macos"))]
     let (base, firefox_base) = (home.join(".config"), home.join(".mozilla"));
     #[cfg(target_os = "macos")]
-    let chromium: [(&str, &str); 5] = [
+    let chromium: [(&str, &str); 6] = [
         ("Chrome", "Google/Chrome"),
         ("Chromium", "Chromium"),
         ("Brave", "BraveSoftware/Brave-Browser"),
         ("Edge", "Microsoft Edge"),
         ("Vivaldi", "Vivaldi"),
+        ("Helium", "net.imput.helium"),
     ];
     #[cfg(not(target_os = "macos"))]
-    let chromium: [(&str, &str); 5] = [
+    let chromium: [(&str, &str); 6] = [
         ("Chrome", "google-chrome"),
         ("Chromium", "chromium"),
         ("Brave", "BraveSoftware/Brave-Browser"),
         ("Edge", "microsoft-edge"),
         ("Vivaldi", "vivaldi"),
+        ("Helium", "net.imput.helium"),
     ];
     let mut out: Vec<(&'static str, PathBuf, PathBuf, bool)> = chromium
         .iter()
@@ -474,6 +476,27 @@ fn manifest_dirs() -> Vec<(&'static str, PathBuf, PathBuf, bool)> {
     out
 }
 
+/// The executable a registered manifest starts, when the file is readable.
+#[cfg(not(windows))]
+fn registered_exe(manifest: &Path) -> Option<PathBuf> {
+    let raw = std::fs::read(manifest).ok()?;
+    let value: Value = serde_json::from_slice(&raw).ok()?;
+    value.get("path")?.as_str().map(PathBuf::from)
+}
+
+/// Whether the manifest at `path` starts an executable that still exists.
+/// A manifest left by an older install or a moved build does not: the
+/// browser then fails with "native host has exited" and nothing tells why.
+#[cfg(not(windows))]
+fn registration_works(path: &Path) -> bool {
+    registered_exe(path).is_some_and(|exe| exe.is_file())
+}
+
+fn write_manifest(path: &Path, manifest: &Value) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?;
+    herbarium_core::vault::write_atomic(path, &bytes)
+}
+
 #[cfg(not(windows))]
 fn install(extension_ids: &[String]) -> Result<Vec<String>, String> {
     let exe = app_executable()?;
@@ -485,17 +508,70 @@ fn install(extension_ids: &[String]) -> Result<Vec<String>, String> {
         std::fs::create_dir_all(&dir)
             .map_err(|e| format!("{browser}: cannot create {}: {e}", dir.display()))?;
         let path = dir.join(format!("{HOST_NAME}.json"));
-        let bytes = serde_json::to_vec_pretty(&manifest(&exe, extension_ids, firefox))
-            .map_err(|e| e.to_string())?;
-        herbarium_core::vault::write_atomic(&path, &bytes)?;
+        write_manifest(&path, &manifest(&exe, extension_ids, firefox))?;
         done.push(format!("{browser}: {}", path.display()));
     }
     if done.is_empty() {
         return Err(
-            "no supported browser found (Chrome, Chromium, Brave, Edge, Vivaldi or Firefox)".into(),
+            "no supported browser found (Chrome, Chromium, Brave, Edge, Vivaldi, Helium or Firefox)"
+                .into(),
         );
     }
     Ok(done)
+}
+
+/// Keep browsers connected across updates, moves and newly installed
+/// browsers. Once the host is registered with any browser, register it with
+/// every browser in `targets` whose manifest is missing or starts an
+/// executable that no longer exists. Working manifests are left alone (they
+/// may belong to another install the user chose); a stale one keeps its
+/// allowed extensions and only gets the new `exe`.
+#[cfg(not(windows))]
+fn refresh_in(targets: &[(&str, PathBuf, PathBuf, bool)], exe: &Path) -> Vec<String> {
+    let file = |dir: &Path| dir.join(format!("{HOST_NAME}.json"));
+    let found: Vec<_> = targets
+        .iter()
+        .filter(|(_, root, _, _)| root.exists())
+        .collect();
+    if !found.iter().any(|(_, _, dir, _)| file(dir).exists()) {
+        return Vec::new();
+    }
+    let mut done = Vec::new();
+    for (browser, _, dir, firefox) in found {
+        let path = file(dir);
+        if registration_works(&path) {
+            continue;
+        }
+        let existing = std::fs::read(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_slice::<Value>(&raw).ok())
+            .filter(|v| v.get("name").and_then(Value::as_str) == Some(HOST_NAME));
+        let next = match existing {
+            Some(mut m) => {
+                m["path"] = json!(exe.to_string_lossy());
+                m
+            }
+            None => manifest(exe, &extension_ids(&[]), *firefox),
+        };
+        if std::fs::create_dir_all(dir).is_ok() && write_manifest(&path, &next).is_ok() {
+            done.push(format!("{browser}: {}", path.display()));
+        }
+    }
+    done
+}
+
+/// [`refresh_in`] for the browsers on this computer, at app start.
+#[cfg(not(windows))]
+pub fn refresh() -> Vec<String> {
+    match app_executable() {
+        Ok(exe) => refresh_in(&manifest_dirs(), &exe),
+        Err(_) => Vec::new(),
+    }
+}
+
+#[cfg(windows)]
+pub fn refresh() -> Vec<String> {
+    Vec::new()
 }
 
 #[cfg(not(windows))]
@@ -550,9 +626,7 @@ fn install(extension_ids: &[String]) -> Result<Vec<String>, String> {
         } else {
             "chromium.json"
         });
-        let bytes = serde_json::to_vec_pretty(&manifest(&exe, extension_ids, firefox))
-            .map_err(|e| e.to_string())?;
-        herbarium_core::vault::write_atomic(&path, &bytes)?;
+        write_manifest(&path, &manifest(&exe, extension_ids, firefox))?;
         for (browser, key, for_firefox) in REGISTRY_KEYS {
             if for_firefox != firefox {
                 continue;
@@ -594,7 +668,8 @@ fn uninstall() -> Result<Vec<String>, String> {
 }
 
 /// Browsers found on this computer and whether the host is registered with
-/// each, for the desktop app's settings.
+/// each, for the desktop app's settings. A manifest naming a missing
+/// executable does not count.
 #[cfg(not(windows))]
 pub fn status() -> Vec<(String, bool)> {
     manifest_dirs()
@@ -603,7 +678,7 @@ pub fn status() -> Vec<(String, bool)> {
         .map(|(browser, _, dir, _)| {
             (
                 browser.to_string(),
-                dir.join(format!("{HOST_NAME}.json")).exists(),
+                registration_works(&dir.join(format!("{HOST_NAME}.json"))),
             )
         })
         .collect()
@@ -791,5 +866,83 @@ mod tests {
             FIREFOX_EXTENSION_ID.into()
         ]));
         assert!(!is_browser_launch(&["herbarium-app://open/x".into()]));
+    }
+}
+
+#[cfg(all(test, not(windows)))]
+mod refresh_tests {
+    use super::*;
+
+    #[test]
+    fn refresh_repairs_stale_and_missing_manifests_once_connected() {
+        let root = std::env::temp_dir().join(format!("herbarium-refresh-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let exe = root.join("new/herbarium");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, b"").unwrap();
+        let other = root.join("other/herbarium");
+        std::fs::create_dir_all(other.parent().unwrap()).unwrap();
+        std::fs::write(&other, b"").unwrap();
+        let target = |name: &'static str, firefox: bool| {
+            let base = root.join(name);
+            (name, base.clone(), base.join("hosts"), firefox)
+        };
+        let targets = vec![
+            target("Stale", false),
+            target("Missing", false),
+            target("Working", false),
+            target("Gone", false),
+            target("Fox", true),
+        ];
+        for (_, base, _, _) in &targets[..4] {
+            std::fs::create_dir_all(base).unwrap();
+        }
+        std::fs::create_dir_all(&targets[4].1).unwrap();
+        std::fs::remove_dir_all(&targets[3].1).unwrap();
+        let file = |i: usize| targets[i].2.join(format!("{HOST_NAME}.json"));
+
+        // Nothing registered yet: the user never connected a browser.
+        assert!(refresh_in(&targets, &exe).is_empty());
+        assert!(!file(1).exists());
+
+        std::fs::create_dir_all(&targets[0].2).unwrap();
+        let ids = vec![CHROME_EXTENSION_ID.to_string(), "custom".to_string()];
+        write_manifest(
+            &file(0),
+            &manifest(Path::new("/gone/herbarium"), &ids, false),
+        )
+        .unwrap();
+        std::fs::create_dir_all(&targets[2].2).unwrap();
+        write_manifest(&file(2), &manifest(&other, &ids, false)).unwrap();
+
+        let done = refresh_in(&targets, &exe);
+        assert_eq!(done.len(), 3, "{done:?}");
+        let read = |i: usize| -> Value {
+            serde_json::from_slice(&std::fs::read(file(i)).unwrap()).unwrap()
+        };
+        assert_eq!(read(0)["path"], exe.to_string_lossy().as_ref());
+        assert_eq!(
+            read(0)["allowed_origins"][1],
+            "chrome-extension://custom/",
+            "keeps its extensions"
+        );
+        assert_eq!(
+            read(1)["path"],
+            exe.to_string_lossy().as_ref(),
+            "a newly found browser is registered"
+        );
+        assert_eq!(
+            read(2)["path"],
+            other.to_string_lossy().as_ref(),
+            "a working install is left alone"
+        );
+        assert!(
+            !file(3).exists(),
+            "a browser that is not installed is skipped"
+        );
+        assert_eq!(read(4)["allowed_extensions"], json!([FIREFOX_EXTENSION_ID]));
+        assert!(registration_works(&file(0)));
+        assert!(refresh_in(&targets, &exe).is_empty(), "nothing left to do");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

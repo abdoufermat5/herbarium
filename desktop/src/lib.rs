@@ -128,6 +128,14 @@ pub fn run() {
                 }
             }
 
+            // An update, a move or a newly installed browser leaves the
+            // extension's host missing or pointing at a gone executable.
+            std::thread::spawn(|| {
+                for line in native_host::refresh() {
+                    eprintln!("herbarium: browser connection updated: {line}");
+                }
+            });
+
             // Quick capture: the global shortcut and the watchers, as configured.
             let cfg = config::load().unwrap_or_default();
             let watchers = app

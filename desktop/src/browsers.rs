@@ -74,6 +74,7 @@ fn parent_browser() -> Option<String> {
 fn browser_of(exe: &str) -> Option<&'static str> {
     let exe = exe.to_lowercase();
     [
+        ("helium", "Helium"),
         ("brave", "Brave"),
         ("vivaldi", "Vivaldi"),
         ("edge", "Edge"),
@@ -106,6 +107,7 @@ fn launchers(browser: &str) -> &'static [&'static str] {
         "Brave" => &["brave-browser", "brave"],
         "Edge" => &["microsoft-edge", "microsoft-edge-stable"],
         "Vivaldi" => &["vivaldi", "vivaldi-stable"],
+        "Helium" => &["helium", "helium-browser"],
         "Firefox" => &["firefox", "firefox-esr"],
         _ => &[],
     }
@@ -188,6 +190,7 @@ mod tests {
         assert_eq!(browser_of("/usr/lib/chromium/chromium"), Some("Chromium"));
         assert_eq!(browser_of("/opt/microsoft/msedge/msedge"), Some("Edge"));
         assert_eq!(browser_of("/usr/lib/firefox/firefox"), Some("Firefox"));
+        assert_eq!(browser_of("/opt/helium/helium"), Some("Helium"));
         assert_eq!(browser_of("/usr/bin/bash"), None);
         assert_eq!(
             extensions_page("Firefox"),
