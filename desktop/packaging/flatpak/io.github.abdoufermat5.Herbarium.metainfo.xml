@@ -32,6 +32,36 @@
   <url type="homepage">https://github.com/abdoufermat5/herbarium</url>
   <url type="bugtracker">https://github.com/abdoufermat5/herbarium/issues</url>
 
+  <!-- The icon's two backgrounds (docs/brand/icon-*.svg). -->
+  <branding>
+    <color type="primary" scheme_preference="light">#ebe2cc</color>
+    <color type="primary" scheme_preference="dark">#1f3a26</color>
+  </branding>
+
+  <!-- Rendered by e2e/tools/screenshots.mjs. -->
+  <screenshots>
+    <screenshot type="default">
+      <caption>Today: what is due, the reading path and recent pages</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-today.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The library, with page previews, folders and tags</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-library.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Reading a saved page, scripts included, in a sandbox</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-reader.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A review session</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-review.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>The dark theme</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/dark-library.png</image>
+    </screenshot>
+  </screenshots>
+
   <developer id="io.github.abdoufermat5">
     <name>abdoufermat5</name>
   </developer>

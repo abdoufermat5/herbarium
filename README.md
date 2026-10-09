@@ -1,3 +1,8 @@
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/brand/icon-dark.svg">
+  <img src="docs/brand/icon-light.svg" alt="" width="96" height="96">
+</picture>
+
 # Herbarium
 
 [![CI](https://github.com/abdoufermat5/herbarium/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/abdoufermat5/herbarium/actions/workflows/ci.yml)
@@ -11,6 +16,12 @@ A desktop reader for the HTML pages AI tools generate. Save a page, find it late
 Your pages stay plain `.html` files in a folder you own.
 
 ![Herbarium: filter the library, highlight a passage, remix a page into a quiz with AI, explore the link graph, then run a review session](docs/demo.gif)
+
+| Today | Library | Reading a page |
+| --- | --- | --- |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-today.png"><img src="docs/screenshots/light-today.png" alt="Today: pages due, the reading path and recent pages"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-library.png"><img src="docs/screenshots/light-library.png" alt="The library with page previews"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-reader.png"><img src="docs/screenshots/light-reader.png" alt="A saved page open in the reader"></picture> |
+| **Review** | **Graph** | **Command palette** |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-review.png"><img src="docs/screenshots/light-review.png" alt="Pages due for review"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-graph.png"><img src="docs/screenshots/light-graph.png" alt="The link graph between pages"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dark-palette.png"><img src="docs/screenshots/light-palette.png" alt="The command palette searching pages"></picture> |
 
 ## Install
 
@@ -88,6 +99,8 @@ pnpm test:e2e     # end-to-end suites (see e2e/)
 ```
 
 The end-to-end suites run the `herbarium` binary, the browser extension in Playwright's Chromium, and the desktop app through [tauri-driver](https://v2.tauri.app/develop/tests/webdriver/) on a virtual display. The desktop suite needs Linux with `webkit2gtk-driver`, `xvfb` and `cargo install tauri-driver`, and is skipped without them. `E2E_SCREENSHOTS=<folder>` keeps screenshots of the key moments.
+
+The logo lives in [`docs/brand/`](docs/brand) as SVG, in a light and a dark version. `pnpm icons` renders every app, tray and extension icon from it; `node e2e/tools/screenshots.mjs` retakes the screenshots in `docs/screenshots/` (same requirements as the desktop suite).
 
 Built with Tauri 2, Rust, SQLite and Svelte 5.
 
