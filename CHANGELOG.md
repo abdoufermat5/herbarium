@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-09
+
 ### Changed
 - AI & sharing starts from three plain choices — your Claude subscription (Claude Code), free on this computer (Ollama), or an API key — and each shows whether it works right now and, when it does not, numbered steps with commands to copy, a button to the service's key page and "Check again". Choosing where Claude Code is by hand is possible, and the Remix dialog says when it is missing.
 - Adding the browser extension is a guided checklist: one click prepares everything (helper registered with every browser, extension copied to a stable folder), a button opens the browser on its extensions page, the folder to load has a Copy button, and the screen says "connected" by itself once the extension reaches the app.
@@ -132,7 +134,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/abdoufermat5/herbarium/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/abdoufermat5/herbarium/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/abdoufermat5/herbarium/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/abdoufermat5/herbarium/compare/v0.1.0...v0.2.0
