@@ -224,19 +224,18 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
   await step("settings", async () => {
     await app.click("Settings", "aside button, nav button, button");
     await app.click("AI & sharing", "[role=tab]");
-    await app.waitText("AI service");
-    // Another AI service: asks for its key, then picks the model itself.
-    await app.click("AI service", "button[aria-haspopup]");
-    await app.click("DeepSeek", "[role=option]");
-    await app.waitText("DeepSeek API key");
+    await app.waitText("How would you like to use AI?");
+    // The three ways, and a service reached with a key: it asks for the key.
+    await app.click("With an API key", "[role=radio]");
+    await app.click("DeepSeek", ".service");
+    await app.waitText("Create a key on platform.deepseek.com");
     await app.waitText("Paste your DeepSeek key above");
     await app.waitFor(() => {
       const cfg = JSON.parse(readFileSync(join(work, "config", "io.herbarium.desktop", "config.json"), "utf8"));
       return cfg.aiProvider === "deepseek" && cfg.aiModel === "";
     }, "the provider saved, on Automatic");
     // A service at an address of your own: connected, models listed.
-    await app.click("AI service", "button[aria-haspopup]");
-    await app.click("Other (OpenAI-compatible)", "[role=option]");
+    await app.click("Other service", ".service");
     await app.waitText("Enter the service's address");
     await app.type("input[type=url]", `${models.base}\n`);
     await app.exec(() => document.querySelector("input[type=url]").dispatchEvent(new Event("change", { bubbles: true })));

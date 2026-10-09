@@ -4,7 +4,7 @@
   import { api } from "../lib/api";
   import { app, errorMessage, openSettings, toast } from "../lib/state.svelte";
   import { t } from "../lib/i18n.svelte";
-  import type { AiSettings, RemixPreset } from "../lib/types";
+  import type { AiSettings, ClaudeCodeStatus, RemixPreset } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
 
   let {
@@ -35,10 +35,14 @@
   let destroyed = false;
 
   const provider = $derived(settings?.providers.find((p) => p.id === settings?.provider) ?? null);
+  /** Claude Code is looked for when it is the chosen service. */
+  let claude = $state<ClaudeCodeStatus | null>(null);
+  const claudeMissing = $derived(settings?.provider === "claude-code" && !!claude && !claude.version);
   const needsKey = $derived(!!settings && !!provider?.needsKey && !settings.keys.includes(settings.provider));
+  const needsSetup = $derived(needsKey || claudeMissing);
   const extra = $derived(preset === "translate" ? language.trim() : instructions.trim());
   const ready = $derived(
-    !!settings && !needsKey && !busy && (preset === "translate" || preset === "custom" ? extra.length > 0 : true),
+    !!settings && !needsSetup && !busy && (preset === "translate" || preset === "custom" ? extra.length > 0 : true),
   );
   const elapsed = $derived(busy ? Math.max(0, Math.round((now - started) / 1000)) : 0);
 
@@ -98,6 +102,7 @@
     else unlisten = stop;
     try {
       settings = await api.aiSettings();
+      if (settings.provider === "claude-code") claude = await api.claudeCodeStatus();
     } catch (e) {
       error = errorMessage(e);
     }
@@ -123,9 +128,9 @@
     </header>
     <p class="muted">{t("remix.intro")}</p>
 
-    {#if needsKey}
+    {#if needsSetup}
       <div class="notice">
-        <span>{t("remix.needsKey", { provider: provider?.label ?? "" })}</span>
+        <span>{claudeMissing ? t("remix.needsClaude") : t("remix.needsKey", { provider: provider?.label ?? "" })}</span>
         <button class="btn btn-sm" onclick={toSettings}>{t("remix.openSettings")}</button>
       </div>
     {/if}

@@ -405,6 +405,37 @@ export interface AiSettings {
   providers: AiProviderInfo[];
 }
 
+/** What Herbarium found when it looked for Claude Code. */
+export interface ClaudeCodeStatus {
+  path: string | null;
+  /** What `claude --version` said. */
+  version: string | null;
+  /** Why it cannot be used. */
+  error: string | null;
+  /** The user pointed at it themselves. */
+  chosen: boolean;
+}
+
+/** A browser on this computer, as the extension setup sees it. */
+export interface BrowserStatus {
+  browser: string;
+  /** The native host is registered with it. */
+  connected: boolean;
+  firefox: boolean;
+  /** When its extension last reached the app (unix ms). */
+  seen: number | null;
+  /** The app can open it on its extensions page. */
+  canOpen: boolean;
+}
+
+export interface BrowserSetup {
+  browsers: BrowserStatus[];
+  /** The folder to choose in "Load unpacked". */
+  extensionDir: string;
+  /** A signed Firefox package, when this build ships one. */
+  firefoxPackage: string | null;
+}
+
 export type RemixPreset = "simplify" | "deeper" | "quiz" | "translate" | "cheatsheet" | "modernize" | "custom";
 
 export interface GithubSettings {

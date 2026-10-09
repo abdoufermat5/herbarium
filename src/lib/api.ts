@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { i18n } from "./i18n.svelte";
 import type {
+  BrowserSetup,
+  BrowserStatus,
+  ClaudeCodeStatus,
   BulkDeleteResult,
   BulkPatch,
   BulkUpdateResult,
@@ -469,8 +472,28 @@ export const api = {
   },
 
   /** Browsers found and whether the extension's native host is registered with each. */
-  browserStatus(): Promise<Array<{ browser: string; connected: boolean }>> {
+  browserStatus(): Promise<BrowserStatus[]> {
     return invoke("browser_status");
+  },
+
+  /** Register the extension's helper with every browser and copy the extension where browsers can load it. */
+  browserSetup(): Promise<BrowserSetup> {
+    return invoke("browser_setup");
+  },
+
+  /** Open a browser on its extensions page, or Firefox on the signed package. */
+  openBrowser(browser: string, page: "extensions" | "package"): Promise<void> {
+    return invoke("open_browser", { browser, page });
+  },
+
+  /** Look for Claude Code and ask its version. */
+  claudeCodeStatus(): Promise<ClaudeCodeStatus> {
+    return invoke("claude_code_status");
+  },
+
+  /** Point at Claude Code by hand; null goes back to finding it. */
+  setClaudeCodePath(path: string | null): Promise<ClaudeCodeStatus> {
+    return invoke("set_claude_code_path", { path });
   },
 
   /** Register the native messaging host with every browser found; lines describe what was done. */
