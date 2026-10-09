@@ -9,47 +9,71 @@
 <body>
 <header class="head">
   <img src="icons/icon-32.png" alt="" width="20" height="20">
-  <strong>Herbarium</strong>
-  <span id="status" class="status muted">Connecting…</span>
+  <strong class="brand">Herbarium</strong>
+  <span id="status-pill" class="pill" data-state="pending">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="status" class="ellipsis">Connecting…</span>
+  </span>
 </header>
 
 <section id="setup" class="setup" hidden>
-  <p><strong>Connect the Herbarium app</strong></p>
-  <p class="muted">Install Herbarium, then open <em>Settings → Browser</em> and click <em>Connect browsers</em>. Reopen this popup afterwards.</p>
-  <p class="error" id="setup-error"></p>
+  <div class="setup-head">
+    <svg class="icon warn" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+    <div>
+      <strong>Connect the Herbarium app</strong>
+      <p class="muted" id="setup-error"></p>
+    </div>
+  </div>
+  <ol class="steps">
+    <li>Open the Herbarium app (install it first if needed).</li>
+    <li>Go to <em>Settings → Browser</em> and pick this browser.</li>
+    <li>Click <em>Get ready</em>, or <em>Repair the connection</em> if it asks.</li>
+  </ol>
+  <button id="setup-retry" class="primary block">Try again</button>
 </section>
 
 <main id="main" hidden>
   <section id="saved" class="saved" hidden>
-    <span>✓ Saved as <button class="link" id="saved-open"></button></span>
+    <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+    <span class="ellipsis">Saved as <strong id="saved-title"></strong></span>
+    <button class="link" id="saved-open">Open</button>
   </section>
 
-  <section id="artifacts" class="artifacts" hidden>
+  <section id="artifacts" class="card artifacts" hidden>
     <div class="row">
       <h2 class="eyebrow" id="artifacts-title">Pages in this chat</h2>
       <button class="link" id="artifacts-all">Select all</button>
     </div>
-    <p id="artifacts-empty" class="muted" hidden>No HTML pages in this chat yet.</p>
+    <p id="artifacts-empty" class="muted empty" hidden>No HTML pages in this chat yet.</p>
     <ul id="artifact-list" class="list"></ul>
-    <button id="artifacts-save" class="primary" disabled>Save selected</button>
+    <button id="artifacts-save" class="primary block" disabled>Save selected</button>
   </section>
 
   <section class="actions">
-    <button id="save-page">Save page</button>
-    <button id="save-selection" disabled>Save selection</button>
+    <button id="save-page" class="primary">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+      Save page
+    </button>
+    <button id="save-selection" disabled>
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7V4h3M17 4h3v3M20 17v3h-3M7 20H4v-3M9 12h6"/></svg>
+      Save selection
+    </button>
   </section>
 
   <p id="message" class="message" role="status"></p>
 
   <section class="find">
-    <input type="search" id="search" placeholder="Search your Herbarium…" aria-label="Search your Herbarium">
-    <ul id="results" class="list"></ul>
+    <label class="search">
+      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <input type="search" id="search" placeholder="Search your Herbarium…" aria-label="Search your Herbarium">
+    </label>
+    <ul id="results" class="list results"></ul>
   </section>
 
   <footer class="foot">
     <button class="link" id="open-today">Today</button>
     <button class="link" id="open-review">Review</button>
-    <span class="muted">Tip: type <kbd>h</kbd> + space in the address bar</span>
+    <span class="muted tip">Type <kbd>h</kbd> + space in the address bar</span>
   </footer>
 </main>
 <script src="popup.js"></script>

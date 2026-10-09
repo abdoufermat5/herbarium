@@ -78,9 +78,8 @@ async function showSaved(url) {
     const found = await bg({ type: "lookup", url });
     if (found.pages.length > 0) {
       $("saved").hidden = false;
-      const btn = $("saved-open");
-      btn.textContent = `“${found.pages[0].title}”`;
-      btn.onclick = () => openPage(found.pages[0].id);
+      $("saved-title").textContent = `“${found.pages[0].title}”`;
+      $("saved-open").onclick = () => openPage(found.pages[0].id);
     }
   } catch {
     /* ignore */
@@ -162,17 +161,42 @@ function onSearch() {
   }, 150);
 }
 
-async function init() {
-  [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+function setStatus(state, text) {
+  $("status-pill").dataset.state = state;
+  $("status").textContent = text;
+}
+
+/** Reach the app; shows the setup steps when it can't. */
+async function connectApp() {
+  setStatus("pending", "Connecting…");
   try {
     const status = await bg({ type: "status" });
-    $("status").textContent = `${status.vault} · ${status.pages} pages`;
+    setStatus("ok", `${status.vault} · ${status.pages} ${status.pages === 1 ? "page" : "pages"}`);
+    $("status").title = `Vault “${status.vault}”, Herbarium ${status.version}`;
+    $("setup").hidden = true;
+    return true;
   } catch (e) {
-    $("status").textContent = "Not connected";
+    setStatus("off", "Not connected");
     $("setup").hidden = false;
     $("setup-error").textContent = e.message;
-    return;
+    return false;
   }
+}
+
+async function init() {
+  [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+  $("setup-retry").addEventListener("click", async () => {
+    $("setup-retry").disabled = true;
+    try {
+      if (await connectApp()) await start();
+    } finally {
+      $("setup-retry").disabled = false;
+    }
+  });
+  if (await connectApp()) await start();
+}
+
+async function start() {
   $("main").hidden = false;
   $("save-page").addEventListener("click", () => savePage("page"));
   $("save-selection").addEventListener("click", () => savePage("selection"));

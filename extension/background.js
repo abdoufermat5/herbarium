@@ -18,23 +18,39 @@ let port = null;
 let nextId = 1;
 const pending = new Map();
 
+/** What a failed native connection means for the user, from the browser's terse message. */
+function explain(raw) {
+  const text = String(raw || "");
+  if (/not found|no such native application/i.test(text)) {
+    return "Herbarium isn't connected to this browser yet.";
+  }
+  if (/forbidden/i.test(text)) {
+    return "Herbarium is connected to this browser, but not to this copy of the extension.";
+  }
+  if (/exited|failed to start|communicating/i.test(text)) {
+    return "Herbarium couldn't start. It may have been moved or reinstalled.";
+  }
+  return text || "Herbarium is not connected";
+}
+
 function connect() {
   if (port) return port;
-  port = ext.runtime.connectNative(HOST);
-  port.onMessage.addListener((msg) => {
+  const current = ext.runtime.connectNative(HOST);
+  port = current;
+  current.onMessage.addListener((msg) => {
     const waiter = pending.get(msg && msg.id);
     if (!waiter) return;
     pending.delete(msg.id);
     if (msg.ok) waiter.resolve(msg);
     else waiter.reject(new Error(msg.error || "Herbarium refused the request"));
   });
-  port.onDisconnect.addListener(() => {
-    const reason = (ext.runtime.lastError && ext.runtime.lastError.message) || (port && port.error && port.error.message) || "Herbarium is not connected";
-    port = null;
+  current.onDisconnect.addListener(() => {
+    const reason = explain((ext.runtime.lastError && ext.runtime.lastError.message) || (current.error && current.error.message));
+    if (port === current) port = null;
     for (const waiter of pending.values()) waiter.reject(new Error(reason));
     pending.clear();
   });
-  return port;
+  return current;
 }
 
 /** Send one request to the app; resolves with its reply. */

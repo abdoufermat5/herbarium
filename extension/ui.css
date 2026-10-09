@@ -11,6 +11,7 @@
   --accent: #346538;
   --accent-soft: #edf3ec;
   --danger: #9f2f2d;
+  --danger-soft: #fdebec;
   --radius: 8px;
   font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
 }
@@ -26,11 +27,15 @@
     --accent: #8cbf91;
     --accent-soft: #233025;
     --danger: #e0807d;
+    --danger-soft: #3a2422;
   }
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); }
+[hidden] { display: none !important; }
+/* Chrome gives extension pages `body { font-size: 75% }`: undo it. */
+body { margin: 0; background: var(--bg); color: var(--text); font: inherit; }
 h1, h2, h3 { margin: 0; font-weight: 600; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 button, input { font: inherit; color: inherit; }
 button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
