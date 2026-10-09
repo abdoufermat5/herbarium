@@ -78,6 +78,7 @@ parts:
       craftctl default
       # The .deb ships Icon=herbarium, which is not on the snap's icon path;
       # point the desktop entry at the staged icon (Tauri's Snapcraft guide).
+      # The 128 px one: docks and app grids upscale the 32 px one into a blur.
       sed -i \
-        -e "s|Icon=herbarium|Icon=/usr/share/icons/hicolor/32x32/apps/herbarium.png|g" \
+        -e "s|Icon=herbarium|Icon=/usr/share/icons/hicolor/128x128/apps/herbarium.png|g" \
         "$CRAFT_PART_INSTALL/usr/share/applications/herbarium.desktop"
