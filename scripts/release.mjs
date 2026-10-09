@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Usage: pnpm release <patch|minor|major|x.y.z[-pre]>
-// Bumps package.json + desktop/Cargo.toml (tauri.conf.json follows package.json),
+// Bumps package.json + desktop/Cargo.toml (tauri.conf.json follows package.json)
+// + extension/manifest.json,
 // rolls CHANGELOG.md [Unreleased] into the new version,
 // refreshes Cargo.lock, then commits and tags. Push with: git push --follow-tags
 import { readFileSync, writeFileSync } from "node:fs";
@@ -8,7 +9,7 @@ import { execFileSync } from "node:child_process";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/;
 const REPO = "https://github.com/abdoufermat5/herbarium";
-const FILES = ["package.json", "desktop/Cargo.toml", "desktop/Cargo.lock", "CHANGELOG.md"];
+const FILES = ["package.json", "desktop/Cargo.toml", "desktop/Cargo.lock", "extension/manifest.json", "CHANGELOG.md"];
 
 const fail = (msg) => {
   console.error(msg);
@@ -104,6 +105,10 @@ if (!unreleased || !unreleased[1].trim()) {
   fail("CHANGELOG.md [Unreleased] is empty; document the changes first.");
 }
 if (!/^\[Unreleased\]: .*$/m.test(log)) fail("CHANGELOG.md has no [Unreleased]: link line.");
+const manifestPath = "extension/manifest.json";
+const manifest = readFileSync(manifestPath, "utf8");
+const MANIFEST_VERSION = /^(\s*"version": )"[^"]*"/m;
+if (!MANIFEST_VERSION.test(manifest)) fail(`${manifestPath} has no "version" line.`);
 
 // The previous release is the newest tag strictly before next;
 // with no tag at all this is the first release.
@@ -120,6 +125,9 @@ writeFileSync(
   "desktop/Cargo.toml",
   cargo.replace(/^version = ".*"$/m, `version = "${next}"`),
 );
+
+// Browsers accept only dot-separated numbers as an extension version: drop any pre-release tag.
+writeFileSync(manifestPath, manifest.replace(MANIFEST_VERSION, `$1"${next.split("-")[0]}"`));
 
 // Refresh Cargo.lock for the new crate version. Prefer the network (the offline index may
 // lack entries), fall back to --offline, and roll the bump back if both fail.

@@ -838,6 +838,15 @@ mod tests {
     }
 
     #[test]
+    fn the_bundled_extension_carries_the_app_version() {
+        let manifest: Value =
+            serde_json::from_str(include_str!("../../extension/manifest.json")).unwrap();
+        // Browsers only take numbers: a pre-release ships as its base version.
+        let app = env!("CARGO_PKG_VERSION").split('-').next().unwrap();
+        assert_eq!(manifest["version"], app, "run `pnpm release` to bump both");
+    }
+
+    #[test]
     fn manifests_name_the_extension_and_detect_browser_launches() {
         let exe = Path::new("/opt/herbarium/herbarium");
         let chrome = manifest(
