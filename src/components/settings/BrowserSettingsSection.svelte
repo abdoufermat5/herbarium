@@ -17,9 +17,19 @@
   let picked = $state<string | null>(null);
   let poll: ReturnType<typeof setInterval> | undefined;
 
+  /**
+   * `ok`: the extension reached the app and the helper still works.
+   * `broken`: the extension was added, but the helper is missing or points
+   * at an executable that is gone (Herbarium moved or was reinstalled).
+   * `off`: the extension was never added.
+   */
+  type Health = "ok" | "broken" | "off";
+  const health = (b: BrowserStatus): Health => (b.seen === null ? "off" : b.connected ? "ok" : "broken");
+  const healthLabel = (h: Health) =>
+    t(h === "ok" ? "browser.health.ok" : h === "broken" ? "browser.health.broken" : "browser.health.off");
+
   const active = $derived(browsers.find((b) => b.browser === picked) ?? null);
-  const isConnected = (b: BrowserStatus) => b.seen !== null;
-  const anyConnected = $derived(browsers.some(isConnected));
+  const anyWorking = $derived(browsers.some((b) => health(b) === "ok"));
   const extensionsUrl = (b: BrowserStatus) =>
     b.firefox
       ? "about:debugging#/runtime/this-firefox"
@@ -30,7 +40,7 @@
     try {
       browsers = await api.browserStatus();
       if (picked === null && browsers.length > 0) {
-        picked = (browsers.find((b) => !isConnected(b)) ?? browsers[0]).browser;
+        picked = (browsers.find((b) => health(b) === "broken") ?? browsers.find((b) => health(b) === "off") ?? browsers[0]).browser;
       }
     } catch (e) {
       console.error(e);
@@ -51,6 +61,11 @@
     } finally {
       preparing = false;
     }
+  }
+
+  async function repair() {
+    await prepare();
+    if (active && health(active) === "ok") toast(t("browser.repaired", { browser: active.browser }));
   }
 
   async function openBrowser(b: BrowserStatus, page: "extensions" | "package") {
@@ -83,37 +98,59 @@
     {#if !loaded}
       <p class="muted"><span class="spinner small"></span></p>
     {:else if browsers.length === 0}
-      <p class="state bad"><Icon name="info" size={15} />{t("browser.none")}</p>
-      <p class="small muted">{t("browser.noneHelp")}</p>
+      <div class="banner off">
+        <Icon name="info" size={16} />
+        <div>
+          <strong>{t("browser.none")}</strong>
+          <p class="small muted">{t("browser.noneHelp")}</p>
+        </div>
+      </div>
     {:else}
-      <p class="lead">{anyConnected ? t("browser.leadDone") : t("browser.lead")}</p>
+      <p class="lead">{anyWorking ? t("browser.leadDone") : t("browser.lead")}</p>
       <div class="tabs" role="tablist" aria-label={t("browser.title")}>
         {#each browsers as b (b.browser)}
+          {@const h = health(b)}
           <button
             type="button"
             role="tab"
             aria-selected={picked === b.browser}
             class="tab"
             class:on={picked === b.browser}
+            title={healthLabel(h)}
             onclick={() => (picked = b.browser)}
           >
-            {#if isConnected(b)}<Icon name="circle-check" size={13} />{/if}
+            <span class="dot {h}" aria-hidden="true"></span>
             {b.browser}
+            <span class="sr-only">({healthLabel(h)})</span>
           </button>
         {/each}
       </div>
 
       {#if active}
-        {#if isConnected(active)}
-          <p class="state good">
-            <Icon name="circle-check" size={15} />
-            {t("browser.working", { browser: active.browser })}
-            <span class="muted">· {t("browser.lastSeen", { when: timeAgo(active.seen!) })}</span>
-          </p>
-          <p class="small muted">{t("browser.workingHelp")}</p>
+        {@const h = health(active)}
+        {#if h === "ok"}
+          <div class="banner ok">
+            <Icon name="circle-check" size={16} />
+            <div>
+              <strong>{t("browser.working", { browser: active.browser })}</strong>
+              <span class="muted small">{t("browser.lastSeen", { when: timeAgo(active.seen!) })}</span>
+              <p class="small muted">{t("browser.workingHelp")}</p>
+            </div>
+          </div>
+        {:else if h === "broken"}
+          <div class="banner warn" role="alert">
+            <Icon name="wrench" size={16} />
+            <div>
+              <strong>{t("browser.broken", { browser: active.browser })}</strong>
+              <p class="small">{t("browser.brokenHelp")}</p>
+              <button class="btn btn-sm btn-primary" onclick={repair} disabled={preparing}>
+                <Icon name="refresh-cw" size={12} />{preparing ? t("browser.connecting") : t("browser.repair")}
+              </button>
+            </div>
+          </div>
         {:else}
           <ol class="steps">
-            <li>
+            <li class:done={!!setup} class:current={!setup}>
               <strong>{t("browser.step.get")}</strong>
               <span class="small muted">{t("browser.step.getText")}</span>
               {#if setup}
@@ -124,19 +161,17 @@
                 </button>
               {/if}
             </li>
-            <li class:off={!setup}>
+            <li class:off={!setup} class:current={!!setup}>
               <strong>{t("browser.step.open", { browser: active.browser })}</strong>
-              <div class="actions">
-                {#if active.canOpen}
-                  <button class="btn btn-sm" onclick={() => void openBrowser(active, "extensions")}>
-                    <Icon name="external-link" size={12} />{t("browser.openPage", { browser: active.browser })}
-                  </button>
-                {/if}
-              </div>
+              {#if active.canOpen}
+                <button class="btn btn-sm" onclick={() => void openBrowser(active, "extensions")}>
+                  <Icon name="external-link" size={12} />{t("browser.openPage", { browser: active.browser })}
+                </button>
+              {/if}
               <span class="small muted">{active.canOpen ? t("browser.orType") : t("browser.typeIn")}</span>
               <CopyCommand text={extensionsUrl(active)} />
             </li>
-            <li class:off={!setup}>
+            <li class:off={!setup} class:current={!!setup}>
               {#if active.firefox}
                 <strong>{t("browser.step.ff")}</strong>
                 <span class="small muted">{t("browser.step.ffText")}</span>
@@ -165,11 +200,11 @@
 
 <style>
   .wrap {
-    padding: 20px 28px;
+    padding: 20px 28px 22px;
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    align-items: flex-start;
+    gap: 16px;
+    align-items: stretch;
   }
   .lead {
     margin: 0;
@@ -183,8 +218,8 @@
   .tab {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 6px 12px;
+    gap: 7px;
+    padding: 5px 12px;
     border: 1px solid var(--border-strong);
     border-radius: 999px;
     background: var(--surface);
@@ -192,18 +227,85 @@
     font: inherit;
     font-size: var(--fs-sm);
     cursor: pointer;
+    transition:
+      background 0.12s,
+      border-color 0.12s;
+  }
+  .tab:hover {
+    background: var(--accent-soft);
   }
   .tab.on {
-    border-color: var(--leaf);
-    background: var(--leaf-soft);
+    border-color: var(--text);
+    background: var(--accent-soft);
     color: var(--text);
     font-weight: 500;
+  }
+  .tab:focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: 2px;
+  }
+  .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: none;
+    /* Not set up: a hollow ring; filled once connected. */
+    border: 1.5px solid var(--muted);
+  }
+  .dot.ok,
+  .dot.broken {
+    border: 0;
+  }
+  .dot.ok {
+    background: var(--ok);
+  }
+  .dot.broken {
+    background: var(--warn);
+  }
+  .banner {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius, 8px);
+    background: var(--surface);
+  }
+  .banner > :global(svg) {
+    flex: none;
+    margin-top: 2px;
+  }
+  .banner > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    min-width: 0;
+  }
+  .banner .btn {
+    margin-top: 6px;
+  }
+  .banner.ok {
+    background: var(--ok-soft);
+    border-color: transparent;
+  }
+  .banner.ok > :global(svg) {
+    color: var(--ok);
+  }
+  .banner.warn {
+    background: var(--warn-soft);
+    border-color: var(--warn-border);
+  }
+  .banner.warn > :global(svg) {
+    color: var(--warn);
+  }
+  .banner.off > :global(svg) {
+    color: var(--muted);
   }
   .state {
     display: inline-flex;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
+    gap: 6px;
     margin: 0;
     font-weight: 500;
   }
@@ -214,8 +316,7 @@
     counter-reset: step;
     display: flex;
     flex-direction: column;
-    gap: 16px;
-    width: 100%;
+    gap: 0;
   }
   .steps > li {
     counter-increment: step;
@@ -224,33 +325,54 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
-    padding-left: 34px;
+    padding: 0 0 18px 36px;
+    transition: opacity 0.15s;
+  }
+  .steps > li:last-child {
+    padding-bottom: 0;
+  }
+  /* The rail joining the step numbers. */
+  .steps > li:not(:last-child)::after {
+    content: "";
+    position: absolute;
+    left: 11px;
+    top: 26px;
+    bottom: 4px;
+    width: 1px;
+    background: var(--border);
   }
   .steps > li.off {
-    opacity: 0.55;
+    opacity: 0.5;
   }
   .steps > li::before {
     content: counter(step);
     position: absolute;
     left: 0;
     top: -1px;
-    width: 22px;
-    height: 22px;
+    width: 23px;
+    height: 23px;
     display: grid;
     place-items: center;
+    border: 1px solid var(--border-strong);
     border-radius: 50%;
-    background: var(--accent-soft);
-    color: var(--text);
+    background: var(--surface);
+    color: var(--text-soft);
     font-size: var(--fs-xs);
     font-weight: 600;
   }
+  .steps > li.current::before {
+    border-color: var(--text);
+    background: var(--text);
+    color: var(--surface);
+  }
+  .steps > li.done::before {
+    content: "✓";
+    border-color: transparent;
+    background: var(--ok-soft);
+    color: var(--ok);
+  }
   .steps :global(.cmd) {
     width: min(460px, 100%);
-  }
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
   }
   .btn {
     display: inline-flex;
@@ -279,10 +401,7 @@
     color: var(--muted);
   }
   .good {
-    color: var(--ok, var(--leaf));
-  }
-  .bad {
-    color: var(--danger);
+    color: var(--ok);
   }
   .waiting .small {
     display: inline-flex;
