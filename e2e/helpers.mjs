@@ -30,8 +30,15 @@ export function tempDir(tag) {
 }
 
 export function cleanup(...dirs) {
-  // Retries: a process that just exited may still be finishing its writes.
-  for (const d of dirs) rmSync(d, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+  // Retries: a process that just exited may still be finishing its writes. A
+  // folder that stays busy is only a leftover in /tmp, never a failed test.
+  for (const d of dirs) {
+    try {
+      rmSync(d, { recursive: true, force: true, maxRetries: 15, retryDelay: 200 });
+    } catch (e) {
+      console.warn(`could not remove ${d}: ${e.code ?? e.message}`);
+    }
+  }
 }
 
 /** Every page in a vault: `{ id, folder, meta, html }`, read from the files. */

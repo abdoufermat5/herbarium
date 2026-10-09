@@ -1016,6 +1016,69 @@ pub async fn cancel_remix(id: String) {
     crate::remix::cancel(&id);
 }
 
+/// What `organize_plan` registers itself as, for progress and cancelling.
+pub const ORGANIZE_KEY: &str = "organize:library";
+
+/// Ask the configured model how the library should be organized and return
+/// its plan (nothing is changed). `scope` is `unsorted` or `all`. Emits
+/// `remix-progress` `{ id: "organize:library", chars }` while the answer comes in.
+#[tauri::command]
+pub async fn organize_plan(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    scope: String,
+    instructions: String,
+) -> CmdResult<crate::organize::Plan> {
+    use tauri::Emitter;
+
+    let scope = crate::organize::Scope::parse(&scope)?;
+    let running = crate::remix::start(ORGANIZE_KEY)?;
+    let library = crate::organize::gather(&state.host, scope)?;
+    if library.entries.is_empty() {
+        return Err("there are no pages to organize".into());
+    }
+    let prompt = crate::organize::prompt(&library, &instructions);
+
+    let cfg = config::load().unwrap_or_default();
+    let key = crate::secrets::load().ai_key(&cfg.ai_provider);
+    let emitter = app.clone();
+    let stop = running.flag();
+    let answer = tauri::async_runtime::spawn_blocking(move || {
+        let model = if cfg.ai_model.trim().is_empty() {
+            crate::ai::provider(&cfg.ai_provider)
+                .map(|p| crate::ai::resolve_model(p, key.as_deref(), cfg.ai_base_url.as_deref()))
+                .unwrap_or_default()
+        } else {
+            cfg.ai_model.clone()
+        };
+        let job = crate::remix::Job {
+            provider: &cfg.ai_provider,
+            model: &model,
+            key: key.as_deref(),
+            base_url: cfg.ai_base_url.as_deref(),
+            claude_path: cfg.claude_code_path.as_deref(),
+            prompt,
+        };
+        crate::remix::run_text(job, crate::organize::SYSTEM, |chars| {
+            let _ = emitter.emit(
+                "remix-progress",
+                json!({ "id": ORGANIZE_KEY, "chars": chars }),
+            );
+            !stop.load(std::sync::atomic::Ordering::Relaxed)
+        })
+        .map(|text| (text, library))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    drop(running);
+    crate::organize::parse_plan(&answer.0, &answer.1)
+}
+
+#[tauri::command]
+pub async fn cancel_organize() {
+    crate::remix::cancel(ORGANIZE_KEY);
+}
+
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GithubSettings {

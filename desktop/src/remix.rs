@@ -239,16 +239,18 @@ fn api_error(body: &Value) -> String {
 pub fn ask_api(
     key: &str,
     model: &str,
+    system: &str,
     prompt: &str,
     progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
-    ask_api_at(&api_base(), key, model, prompt, progress)
+    ask_api_at(&api_base(), key, model, system, prompt, progress)
 }
 
 fn ask_api_at(
     base: &str,
     key: &str,
     model: &str,
+    system: &str,
     prompt: &str,
     progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
@@ -266,7 +268,7 @@ fn ask_api_at(
         // If the model declines, the API tries Anthropic's recommended
         // fallback model in the same call.
         "fallbacks": "default",
-        "system": SYSTEM,
+        "system": system,
         "messages": [{ "role": "user", "content": prompt }],
     });
     let resp = client
@@ -299,23 +301,25 @@ const NO_TOOLS: &str = "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,NotebookEdit
 pub fn ask_claude_code(
     chosen: Option<&str>,
     model: &str,
+    system: &str,
     prompt: &str,
     progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
     let bin = crate::locate::claude(chosen)?;
-    ask_claude_code_with(&bin, model, prompt, progress)
+    ask_claude_code_with(&bin, model, system, prompt, progress)
 }
 
 fn ask_claude_code_with(
     bin: &std::path::Path,
     model: &str,
+    system: &str,
     prompt: &str,
     mut progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
     if model.starts_with('-') {
         return Err(format!("“{model}” is not a model name"));
     }
-    let full = format!("{SYSTEM}\n\n{prompt}");
+    let full = format!("{system}\n\n{prompt}");
     // The page may come from anywhere and could carry instructions of its
     // own: Claude Code gets no tools, and runs in an empty folder.
     let workdir = std::env::temp_dir().join(format!("herbarium-remix-{}", std::process::id()));
@@ -461,16 +465,21 @@ pub struct Job<'a> {
     pub prompt: String,
 }
 
-/// Run a remix and return the new page's HTML.
-pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, String> {
-    let answer = match job.provider {
+/// Ask the configured model: `system` says what it is for, `job.prompt` is
+/// the request. Returns the model's text.
+pub fn run_text(
+    job: Job,
+    system: &str,
+    progress: impl FnMut(usize) -> bool,
+) -> Result<String, String> {
+    match job.provider {
         "anthropic" => {
             let key = job
                 .key
                 .ok_or("add your Anthropic API key in Settings → AI & sharing first")?;
-            ask_api(key, job.model, &job.prompt, progress)?
+            ask_api(key, job.model, system, &job.prompt, progress)
         }
-        "claude-code" => ask_claude_code(job.claude_path, job.model, &job.prompt, progress)?,
+        "claude-code" => ask_claude_code(job.claude_path, job.model, system, &job.prompt, progress),
         other => {
             let provider = crate::ai::provider(other)
                 .ok_or_else(|| format!("unknown AI provider `{other}`"))?;
@@ -481,9 +490,14 @@ pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, Stri
                 ));
             }
             let base = crate::ai::base_url(provider, job.base_url)?;
-            crate::ai::ask_chat(&base, job.key, job.model, SYSTEM, &job.prompt, progress)?
+            crate::ai::ask_chat(&base, job.key, job.model, system, &job.prompt, progress)
         }
-    };
+    }
+}
+
+/// Run a remix and return the new page's HTML.
+pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, String> {
+    let answer = run_text(job, SYSTEM, progress)?;
     let html = extract_html(&answer).ok_or("the answer held no HTML page")?;
     if !herbarium_core::content::looks_like_html(&html) {
         return Err("the answer held no HTML page".into());
@@ -658,7 +672,15 @@ mod tests {
             json!({ "type": "message_delta", "delta": { "stop_reason": "end_turn" } }),
         ]);
         let (base, server) = fake_api("200 OK", answer);
-        let text = ask_api_at(&base, "sk-test", "claude-opus-5-5", "remix me", |_| true).unwrap();
+        let text = ask_api_at(
+            &base,
+            "sk-test",
+            "claude-opus-5-5",
+            SYSTEM,
+            "remix me",
+            |_| true,
+        )
+        .unwrap();
         assert_eq!(extract_html(&text).unwrap(), "<p>new</p>");
         let request = server.join().unwrap().to_ascii_lowercase();
         assert!(request.starts_with("post /v1/messages "));
@@ -677,7 +699,7 @@ mod tests {
             "401 Unauthorized",
             json!({ "type": "error", "error": { "type": "authentication_error", "message": "invalid x-api-key" } }).to_string(),
         );
-        let err = ask_api_at(&base, "bad", "m", "p", |_| true).unwrap_err();
+        let err = ask_api_at(&base, "bad", "m", SYSTEM, "p", |_| true).unwrap_err();
         assert!(err.contains("key was refused"), "{err}");
         server.join().unwrap();
     }
@@ -695,14 +717,15 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let out = ask_claude_code_with(&bin, "claude-opus-5-5", "remix me", |_| true).unwrap();
+        let out =
+            ask_claude_code_with(&bin, "claude-opus-5-5", SYSTEM, "remix me", |_| true).unwrap();
         assert_eq!(extract_html(&out).unwrap(), "<p>cli</p>");
         let args = std::fs::read_to_string(dir.join("claude.args")).unwrap();
         assert_eq!(
             args.trim(),
             format!("-p --output-format text --model claude-opus-5-5 --disallowedTools {NO_TOOLS}")
         );
-        assert!(ask_claude_code_with(&bin, "--help", "p", |_| true).is_err());
+        assert!(ask_claude_code_with(&bin, "--help", SYSTEM, "p", |_| true).is_err());
         let stdin = std::fs::read_to_string(dir.join("claude.stdin")).unwrap();
         assert!(stdin.starts_with(SYSTEM) && stdin.ends_with("remix me"));
 
@@ -720,17 +743,19 @@ mod tests {
         for f in ["signed-out", "fail"] {
             std::fs::set_permissions(dir.join(f), std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let err = ask_claude_code_with(&dir.join("signed-out"), "m", "p", |_| true).unwrap_err();
+        let err =
+            ask_claude_code_with(&dir.join("signed-out"), "m", SYSTEM, "p", |_| true).unwrap_err();
         assert!(
             err.contains("not signed in") && err.contains("run `claude`"),
             "{err}"
         );
-        let err = ask_claude_code_with(&dir.join("fail"), "m", "p", |_| true).unwrap_err();
+        let err = ask_claude_code_with(&dir.join("fail"), "m", SYSTEM, "p", |_| true).unwrap_err();
         assert!(err.contains("disk full"), "{err}");
         assert!(
             ask_claude_code_with(
                 std::path::Path::new("/nonexistent/claude"),
                 "m",
+                SYSTEM,
                 "p",
                 |_| true
             )
