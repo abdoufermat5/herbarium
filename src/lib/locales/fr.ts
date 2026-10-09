@@ -451,11 +451,11 @@ export const fr: Record<MessageKey, string> = {
 
   "read.back": "Retour aux pages (Échap)",
   "read.backLabel": "Retour aux pages",
-  "read.netOn": "Réseau : CDN",
-  "read.netOff": "Réseau : désactivé",
+  "read.more": "Plus",
+  "read.netMenu": "Autoriser polices et bibliothèques des CDN",
+  "read.netChip": "Accès CDN",
   "read.netOnHint":
     "Le chargement de polices et de bibliothèques depuis des CDN connus est autorisé pour cette page",
-  "read.netOffHint": "Cette page ne peut rien charger depuis le réseau",
   "read.netEnabled": "Accès réseau activé pour cette page.",
   "read.netDisabled": "Accès réseau désactivé.",
   "read.netFailed": "Impossible de modifier l'accès réseau.",
@@ -477,7 +477,6 @@ export const fr: Record<MessageKey, string> = {
   "read.scheduleFailed": "Impossible de planifier la révision.",
   "read.quiz": "M'interroger",
   "read.quizHint": "Masquer les {count} réponses marquées de cette page jusqu'à ce que vous les affichiez",
-  "read.historyHint": "Versions enregistrées de cette page",
   "history.title": "Historique de la page",
   "history.loading": "Chargement des versions…",
   "history.empty": "Aucune version enregistrée. Une version est enregistrée juste avant l'écrasement du HTML de la page.",

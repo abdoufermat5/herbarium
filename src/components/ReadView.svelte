@@ -599,6 +599,34 @@
     return items;
   });
 
+  /** The page's less frequent actions, so the toolbar keeps room for its labels. */
+  const moreItems = $derived.by((): DropdownMenuItem[] => {
+    if (!page) return [];
+    const items: DropdownMenuItem[] = [
+      {
+        label: t("history.title"),
+        icon: "refresh-cw",
+        checked: app.historyOpen,
+        disabled: pageGone,
+        onclick: () => (app.historyOpen = !app.historyOpen),
+      },
+      {
+        label: t("read.netMenu"),
+        icon: page.meta.allowCdn ? "wifi" : "wifi-off",
+        checked: page.meta.allowCdn,
+        disabled: pageGone,
+        onclick: () => void toggleNetwork(),
+      },
+    ];
+    if (hasStorageData) {
+      items.push(
+        { divider: true },
+        { label: t("read.resetStorage"), icon: "trash-2", danger: true, disabled: pageGone, onclick: () => void resetStorage() },
+      );
+    }
+    return items;
+  });
+
   function onViewKey(e: KeyboardEvent) {
     if (!page || confirmState.pending || folderPickerState.pending || app.paletteOpen || app.importOpen) return;
     if (isTypingTarget(e.target) || e.altKey || e.repeat) return;
@@ -1335,6 +1363,9 @@
           {#each page.meta.tags as tag (tag)}
             <span class="chip chip-muted" data-color={tagColor(tag)}>{tag}</span>
           {/each}
+          {#if page.meta.allowCdn}
+            <span class="loc net-on" title={t("read.netOnHint")}><Icon name="wifi" size={12} />{t("read.netChip")}</span>
+          {/if}
         </div>
       </div>
 
@@ -1366,17 +1397,6 @@
           {t("read.edit")}
         </button>
         <button
-          class="btn btn-sm net"
-          class:on={page.meta.allowCdn}
-          aria-pressed={page.meta.allowCdn}
-          onclick={toggleNetwork}
-          disabled={pageGone}
-          title={page.meta.allowCdn ? t("read.netOnHint") : t("read.netOffHint")}
-        >
-          <Icon name={page.meta.allowCdn ? "wifi" : "wifi-off"} size={14} />
-          {page.meta.allowCdn ? t("read.netOn") : t("read.netOff")}
-        </button>
-        <button
           class="btn btn-sm details-btn"
           class:active={app.inspectorOpen}
           aria-pressed={app.inspectorOpen}
@@ -1386,17 +1406,6 @@
           <Icon name="info" size={14} />
           {t("read.details")}
         </button>
-        {#if hasStorageData}
-          <button
-            class="btn btn-sm"
-            onclick={resetStorage}
-            disabled={pageGone}
-            title={t("read.resetStorageHint")}
-          >
-            <Icon name="trash-2" size={14} />
-            {t("read.resetStorage")}
-          </button>
-        {/if}
         {#if recallCount > 0}
           <button
             class="btn btn-sm details-btn"
@@ -1410,17 +1419,21 @@
           </button>
         {/if}
         <ShareMenu id={page.meta.id} title={page.meta.title} html={source} disabled={pageGone} />
-        <button
-          class="btn btn-sm details-btn"
-          class:active={app.historyOpen}
-          aria-pressed={app.historyOpen}
-          onclick={() => (app.historyOpen = !app.historyOpen)}
-          disabled={pageGone}
-          title={t("read.historyHint")}
-        >
-          <Icon name="refresh-cw" size={14} />
-          {t("history.title")}
-        </button>
+        <DropdownMenu items={moreItems} align="right" ariaLabel={t("read.more")}>
+          {#snippet trigger({ open, toggle })}
+            <button
+              class="btn btn-sm details-btn more"
+              class:active={open || app.historyOpen}
+              aria-expanded={open}
+              aria-haspopup="menu"
+              aria-label={t("read.more")}
+              onclick={toggle}
+              title={t("read.more")}
+            >
+              <Icon name="dots-three" size={16} />
+            </button>
+          {/snippet}
+        </DropdownMenu>
       </div>
     {/if}
   </header>
@@ -2126,17 +2139,17 @@
   }
 
   /* Narrow windows: icons only (every button keeps its tooltip). */
-  @media (max-width: 1240px) {
+  @media (max-width: 980px) {
     .actions :global(.btn.btn-sm) {
       font-size: 0;
       gap: 0;
     }
   }
-
-  .net.on {
+  .more {
+    padding-inline: 6px;
+  }
+  .net-on {
     color: var(--ok);
-    border-color: transparent;
-    background: var(--ok-soft);
   }
 
   .details-btn.active {
