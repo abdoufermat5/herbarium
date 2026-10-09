@@ -74,3 +74,4 @@ main { display: flex; flex-direction: column; gap: 12px; }
 .foot { display: flex; gap: 14px; align-items: center; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
 .foot .tip { margin-left: auto; font-size: 11px; }
 kbd { padding: 0 4px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; font: 10.5px ui-monospace, monospace; }
+.head picture { display: flex; flex: none; }

@@ -8,7 +8,10 @@
 </head>
 <body>
 <header class="head">
-  <img src="icons/icon-32.png" alt="" width="20" height="20">
+  <picture>
+    <source srcset="icons/dark-32.png" media="(prefers-color-scheme: dark)">
+    <img src="icons/light-32.png" alt="" width="22" height="22">
+  </picture>
   <strong class="brand">Herbarium</strong>
   <span id="status-pill" class="pill" data-state="pending">
     <span class="dot" aria-hidden="true"></span>

@@ -326,13 +326,43 @@ ext.omnibox.onInputEntered.addListener(async (text) => {
   }
 });
 
+/* ------------------------------------------ the toolbar icon follows the mode */
+
+// Firefox switches the icon itself (`theme_icons` in its manifest). Chrome has
+// no such key and a service worker cannot watch prefers-color-scheme, so an
+// offscreen page watches it and reports here ("colorScheme").
+async function watchColorScheme() {
+  if (!ext.offscreen) return;
+  try {
+    if (await ext.offscreen.hasDocument()) return;
+    await ext.offscreen.createDocument({
+      url: "offscreen.html",
+      reasons: ["MATCH_MEDIA"],
+      justification: "Show the light or dark toolbar icon to match the system mode",
+    });
+  } catch (e) {
+    console.error(e);
+  }
+}
+// Each start of the worker (the offscreen page may have been closed meanwhile).
+void watchColorScheme();
+
+function showModeIcon(dark) {
+  const mode = dark ? "dark" : "light";
+  return ext.action.setIcon({
+    path: { 16: `icons/${mode}-16.png`, 32: `icons/${mode}-32.png`, 64: `icons/${mode}-64.png` },
+  });
+}
+
 /* ------------------------------------------------- popup and Today page */
 
 ext.runtime.onMessage.addListener((msg, sender, reply) => {
-  // Only the extension's own pages (popup, Today) drive the vault.
+  // Only the extension's own pages (popup, Today, the offscreen page) drive it.
   if (!sender || sender.id !== ext.runtime.id) return false;
   const run = async () => {
     switch (msg && msg.type) {
+      case "colorScheme":
+        return await showModeIcon(!!msg.dark);
       case "status":
         return await ask("ping", {}, 10000);
       case "pageInfo":

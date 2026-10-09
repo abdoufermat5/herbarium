@@ -492,6 +492,12 @@ fn prepare_extension(app: &tauri::AppHandle) -> CmdResult<ExtensionDirs> {
 /// as a service worker and warns about `background.scripts` in Manifest V3;
 /// Firefox has no background service workers and loads the same code as
 /// background scripts, `capture.js` first (`background.js` uses it).
+///
+/// Firefox also follows the browser theme for the toolbar icon itself
+/// (`theme_icons`, unknown to Chrome, where an offscreen page watches the
+/// mode, hence `offscreen`, a permission Firefox does not know).
+/// Its `light` icon is the one shown on dark themes: the dark icon there,
+/// matching the mode, and the light icon on light themes.
 fn firefox_manifest(mut manifest: Value) -> Value {
     if let Some(background) = manifest
         .get_mut("background")
@@ -502,6 +508,25 @@ fn firefox_manifest(mut manifest: Value) -> Value {
             .and_then(|w| w.as_str().map(str::to_owned))
             .unwrap_or_else(|| "background.js".into());
         background.insert("scripts".into(), json!(["capture.js", worker]));
+    }
+    if let Some(permissions) = manifest
+        .get_mut("permissions")
+        .and_then(Value::as_array_mut)
+    {
+        permissions.retain(|p| p != "offscreen");
+    }
+    if let Some(action) = manifest.get_mut("action").and_then(Value::as_object_mut) {
+        let icons: Vec<Value> = [16, 32, 64]
+            .iter()
+            .map(|size| {
+                json!({
+                    "light": format!("icons/dark-{size}.png"),
+                    "dark": format!("icons/light-{size}.png"),
+                    "size": size,
+                })
+            })
+            .collect();
+        action.insert("theme_icons".into(), Value::Array(icons));
     }
     manifest
 }
@@ -741,6 +766,35 @@ mod tests {
             firefox["browser_specific_settings"],
             chrome["browser_specific_settings"]
         );
+        assert!(
+            chrome["permissions"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("offscreen"))
+        );
+        assert!(
+            !firefox["permissions"]
+                .as_array()
+                .unwrap()
+                .contains(&json!("offscreen"))
+        );
+        // Every icon the manifests name is shipped (`pnpm icons` renders them).
+        let ext = Path::new(env!("CARGO_MANIFEST_DIR")).join("../extension");
+        let theme_icons = firefox["action"]["theme_icons"].as_array().unwrap();
+        let named = theme_icons
+            .iter()
+            .flat_map(|i| [&i["light"], &i["dark"]])
+            .chain(chrome["icons"].as_object().unwrap().values())
+            .chain(
+                chrome["action"]["default_icon"]
+                    .as_object()
+                    .unwrap()
+                    .values(),
+            );
+        for icon in named {
+            let icon = icon.as_str().unwrap();
+            assert!(ext.join(icon).is_file(), "{icon} is missing");
+        }
     }
 
     fn temp_dir(tag: &str) -> PathBuf {
