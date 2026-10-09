@@ -1,3 +1,16 @@
+<script lang="ts" module>
+  import type { AiSettings, ClaudeCodeStatus } from "../../lib/types";
+
+  // What the AI service looked like last time: the panel opens on it at
+  // once and checks again in the background.
+  let cached: { settings: AiSettings; claude: ClaudeCodeStatus | null } | null = null;
+
+  /** The AI settings changed: the next panel waits for the new ones. */
+  export function forgetAiStatus() {
+    cached = null;
+  }
+</script>
+
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
   import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -6,7 +19,7 @@
   import { confirmState } from "../../lib/confirm.svelte";
   import { folderPickerState } from "../../lib/folder-picker.svelte";
   import { i18n, t } from "../../lib/i18n.svelte";
-  import type { AiSettings, ClaudeCodeStatus, RemixPreset } from "../../lib/types";
+  import type { RemixPreset } from "../../lib/types";
   import type { IconName } from "../../lib/icons";
   import Icon from "../../lib/Icon.svelte";
   import OrganizeFlow, { type OrganizeStep } from "./OrganizeFlow.svelte";
@@ -44,8 +57,8 @@
   let q = $state("");
   let active = $state(-1);
   let error = $state<string | null>(null);
-  let settings = $state<AiSettings | null>(null);
-  let claude = $state<ClaudeCodeStatus | null>(null);
+  let settings = $state<AiSettings | null>(cached?.settings ?? null);
+  let claude = $state<ClaudeCodeStatus | null>(cached?.claude ?? null);
   let language = $state("");
   let organizeScope = $state<"unsorted" | "all">("unsorted");
   let organizeWishes = $state("");
@@ -311,21 +324,29 @@
     if (remixing && app.readId !== remixing.id) cancelRemix();
   });
 
-  onMount(async () => {
-    window.addEventListener("keydown", onKey, true);
-    askEl?.focus();
-    const stop = await listen<{ id: string; chars: number }>("remix-progress", (e) => {
-      if (remixing && e.payload.id === remixing.id && e.payload.chars > 0) chars = e.payload.chars;
-    });
-    if (destroyed) stop();
-    else unlisten = stop;
+  async function loadSettings() {
     try {
       const s = await api.aiSettings();
-      if (s.provider === "claude-code") claude = await api.claudeCodeStatus();
+      const c = s.provider === "claude-code" ? await api.claudeCodeStatus() : null;
+      cached = { settings: s, claude: c };
+      if (destroyed) return;
       settings = s;
+      claude = c;
     } catch (e) {
-      error = errorMessage(e);
+      if (!destroyed && !settings) error = errorMessage(e);
     }
+  }
+
+  onMount(() => {
+    window.addEventListener("keydown", onKey, true);
+    askEl?.focus();
+    void loadSettings();
+    void listen<{ id: string; chars: number }>("remix-progress", (e) => {
+      if (remixing && e.payload.id === remixing.id && e.payload.chars > 0) chars = e.payload.chars;
+    }).then((stop) => {
+      if (destroyed) stop();
+      else unlisten = stop;
+    });
   });
 
   onDestroy(() => {

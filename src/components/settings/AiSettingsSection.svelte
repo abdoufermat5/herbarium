@@ -8,6 +8,7 @@
   import Icon from "../../lib/Icon.svelte";
   import Select, { type SelectOption } from "../Select.svelte";
   import CopyCommand from "./CopyCommand.svelte";
+  import { forgetAiStatus } from "../ai/AiPanel.svelte";
   import SettingsSection from "./SettingsSection.svelte";
 
   /** The Select value that reveals a field to type a model name. */
@@ -104,6 +105,7 @@
     checkingClaude = true;
     try {
       claude = await api.claudeCodeStatus();
+      forgetAiStatus();
       if (claude.version) await loadModels(false);
     } catch (e) {
       claude = { path: null, version: null, error: errorMessage(e), chosen: false };
@@ -118,6 +120,7 @@
     checkingClaude = true;
     try {
       claude = await api.setClaudeCodePath(picked);
+      forgetAiStatus();
       if (claude.version) {
         toast(t("ai.cc.found", { version: claude.version.replace(/\s*\(Claude Code\)\s*$/i, "") }), "success");
         await loadModels(false);
@@ -133,12 +136,14 @@
     checkingClaude = true;
     try {
       claude = await api.setClaudeCodePath(null);
+      forgetAiStatus();
     } finally {
       checkingClaude = false;
     }
   }
 
   function sync(next: AiSettings) {
+    forgetAiStatus();
     settings = next;
     urlDraft = next.baseUrl ?? "";
   }
