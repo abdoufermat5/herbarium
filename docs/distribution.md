@@ -122,6 +122,14 @@ One-time setup:
    This builds from the existing release assets and publishes them; the snap is
    also kept as a workflow artifact either way.
 
+**Security updates.** The snap's libraries (webkit2gtk, GTK, libxml2…) are
+`stage-packages` taken from the Ubuntu archive when the snap is built, so a
+published revision keeps the versions of its build day and the store emails a
+warning when Ubuntu later ships a fix (a USN). `snap.yml` therefore also runs
+every Monday on the latest release and publishes a fresh revision of the same
+version; a rebuild by hand, `gh workflow run snap.yml -f tag=vX.Y.Z`, clears a
+warning at once. Without the store secret the weekly run only builds.
+
 Users install with `sudo snap install herbarium`.
 
 Confinement notes:

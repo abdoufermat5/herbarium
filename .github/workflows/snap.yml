@@ -8,10 +8,17 @@ name: Snap
 #
 #   gh workflow run snap.yml -f tag=v0.2.0
 #
+# It also runs every Monday on the latest release: the snap's libraries (webkit,
+# GTK, libxml2...) come from the Ubuntu archive at build time, so a snap goes
+# stale as Ubuntu ships security updates and the store warns about it. A rebuild
+# of the same version pulls the fixes in and publishes a new revision.
+#
 # Publishing needs the SNAPCRAFT_STORE_CREDENTIALS secret. Without it the snap
 # is still built and kept as a workflow artifact, and the publish step leaves a
 # ::notice:: in the run summary. See docs/distribution.md.
 on:
+  schedule:
+    - cron: "17 5 * * 1"
   workflow_call:
     inputs:
       tag:
@@ -29,8 +36,38 @@ permissions:
   contents: read
 
 jobs:
+  # The tag to package: the one given, or on the weekly schedule the latest
+  # (non-draft, non-prerelease) release.
+  tag:
+    name: Resolve the release tag
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          tag="$TAG"
+          if [ -z "$tag" ]; then
+            tag="$(gh release view --repo "$REPO" --json tagName --jq .tagName)"
+          fi
+          case "$tag" in
+            v[0-9]*) ;;
+            *)
+              echo "::error::invalid release tag: $tag"
+              exit 1
+              ;;
+          esac
+          echo "Packaging $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
   build:
     name: Build snap (${{ matrix.arch }})
+    needs: [tag]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -49,7 +86,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
           ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p desktop/packaging/snap
@@ -75,7 +112,7 @@ jobs:
       - name: Inject the version
         shell: bash
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           version="${TAG#v}"
           case "$version" in
@@ -104,7 +141,7 @@ jobs:
 
   publish:
     name: Publish to the Snap Store
-    needs: [build]
+    needs: [tag, build]
     runs-on: ubuntu-22.04
     steps:
       # A job-level `if:` cannot read `secrets`, so resolve the boolean here.
@@ -128,7 +165,7 @@ jobs:
         id: channel
         shell: bash
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.tag.outputs.tag }}
         run: |
           case "${TAG#v}" in
             *-*) echo "channel=candidate" >> "$GITHUB_OUTPUT" ;;
