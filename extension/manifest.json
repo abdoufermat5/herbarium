@@ -12,8 +12,7 @@
     "default_icon": { "32": "icons/icon-32.png", "64": "icons/icon-64.png" }
   },
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["capture.js", "background.js"]
+    "service_worker": "background.js"
   },
   "permissions": ["nativeMessaging", "contextMenus", "scripting", "activeTab", "tabs", "storage"],
   "host_permissions": ["<all_urls>"],

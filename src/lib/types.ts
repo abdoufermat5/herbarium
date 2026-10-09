@@ -451,8 +451,10 @@ export interface BrowserStatus {
 
 export interface BrowserSetup {
   browsers: BrowserStatus[];
-  /** The folder to choose in "Load unpacked". */
+  /** The folder to choose in "Load unpacked" (Chromium browsers). */
   extensionDir: string;
+  /** The folder whose manifest.json Firefox loads as a temporary add-on. */
+  firefoxExtensionDir: string;
   /** A signed Firefox package, when this build ships one. */
   firefoxPackage: string | null;
 }

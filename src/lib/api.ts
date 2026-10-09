@@ -502,9 +502,9 @@ export const api = {
     return invoke("connect_browsers");
   },
 
-  /** Copy the bundled extension to a stable folder, reveal it and return its path. */
-  revealExtension(): Promise<string> {
-    return invoke("reveal_extension");
+  /** Copy the bundled extension to its stable folders, reveal the one this browser loads and return its path. */
+  revealExtension(firefox: boolean): Promise<string> {
+    return invoke("reveal_extension", { firefox });
   },
 
   /** Who remixes pages and whether an API key is stored (the key itself stays in the backend). */

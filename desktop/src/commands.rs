@@ -444,10 +444,17 @@ pub async fn import_ai_export(
     )
 }
 
-/// Copy the browser extension bundled with the app to a stable folder, for
+/// Where the copies of the extension live: one for Chromium browsers, one
+/// for Firefox (see [`firefox_manifest`]).
+struct ExtensionDirs {
+    chromium: PathBuf,
+    firefox: PathBuf,
+}
+
+/// Copy the browser extension bundled with the app to stable folders, for
 /// "Load unpacked" until the extension is in the stores. (An AppImage's own
-/// files vanish when it exits, so the copy is what browsers keep loading.)
-fn prepare_extension(app: &tauri::AppHandle) -> CmdResult<PathBuf> {
+/// files vanish when it exits, so the copies are what browsers keep loading.)
+fn prepare_extension(app: &tauri::AppHandle) -> CmdResult<ExtensionDirs> {
     use tauri::Manager;
     let bundled = app
         .path()
@@ -463,18 +470,47 @@ fn prepare_extension(app: &tauri::AppHandle) -> CmdResult<PathBuf> {
         }
         None => return Err("the browser extension is not bundled with this build".into()),
     };
-    let dest = dirs::data_dir()
-        .ok_or("no data folder")?
-        .join("Herbarium")
-        .join("browser-extension");
-    copy_dir(&source, &dest).map_err(|e| format!("cannot copy the extension: {e}"))?;
-    Ok(dest)
+    let base = dirs::data_dir().ok_or("no data folder")?.join("Herbarium");
+    let dirs = ExtensionDirs {
+        chromium: base.join("browser-extension"),
+        firefox: base.join("browser-extension-firefox"),
+    };
+    let copy_err = |e: std::io::Error| format!("cannot copy the extension: {e}");
+    copy_dir(&source, &dirs.chromium).map_err(copy_err)?;
+    copy_dir(&source, &dirs.firefox).map_err(copy_err)?;
+    let manifest_path = dirs.firefox.join("manifest.json");
+    let manifest: Value = std::fs::read(&manifest_path)
+        .map_err(copy_err)
+        .and_then(|raw| serde_json::from_slice(&raw).map_err(|e| e.to_string()))?;
+    let bytes =
+        serde_json::to_vec_pretty(&firefox_manifest(manifest)).map_err(|e| e.to_string())?;
+    herbarium_core::vault::write_atomic(&manifest_path, &bytes)?;
+    Ok(dirs)
 }
 
-/// Copy the extension to its stable folder and show it.
+/// The extension's manifest as Firefox needs it. Chrome runs the background
+/// as a service worker and warns about `background.scripts` in Manifest V3;
+/// Firefox has no background service workers and loads the same code as
+/// background scripts, `capture.js` first (`background.js` uses it).
+fn firefox_manifest(mut manifest: Value) -> Value {
+    if let Some(background) = manifest
+        .get_mut("background")
+        .and_then(Value::as_object_mut)
+    {
+        let worker = background
+            .remove("service_worker")
+            .and_then(|w| w.as_str().map(str::to_owned))
+            .unwrap_or_else(|| "background.js".into());
+        background.insert("scripts".into(), json!(["capture.js", worker]));
+    }
+    manifest
+}
+
+/// Copy the extension to its stable folders and show the one `browser` loads.
 #[tauri::command]
-pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
-    let dest = prepare_extension(&app)?;
+pub async fn reveal_extension(app: tauri::AppHandle, firefox: bool) -> CmdResult<String> {
+    let dirs = prepare_extension(&app)?;
+    let dest = if firefox { dirs.firefox } else { dirs.chromium };
     tauri_plugin_opener::reveal_item_in_dir(dest.join("manifest.json"))
         .map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().into_owned())
@@ -588,23 +624,26 @@ pub async fn browser_status() -> Vec<BrowserStatus> {
 #[serde(rename_all = "camelCase")]
 pub struct BrowserSetup {
     browsers: Vec<BrowserStatus>,
-    /// The folder to choose in "Load unpacked".
+    /// The folder to choose in "Load unpacked" (Chromium browsers).
     extension_dir: String,
+    /// The folder whose `manifest.json` Firefox loads as a temporary add-on.
+    firefox_extension_dir: String,
     /// A signed Firefox package, when this build ships one.
     firefox_package: Option<String>,
 }
 
 /// Get everything ready for adding the extension: register the native host
-/// with every browser found and copy the extension to its stable folder.
+/// with every browser found and copy the extension to its stable folders.
 #[tauri::command]
 pub async fn browser_setup(app: tauri::AppHandle) -> CmdResult<BrowserSetup> {
     // No browser found is not an error here: the list says so.
     let _ = crate::native_host::install_default();
-    let dir = prepare_extension(&app)?;
-    let xpi = dir.join("herbarium.xpi");
+    let dirs = prepare_extension(&app)?;
+    let xpi = dirs.firefox.join("herbarium.xpi");
     Ok(BrowserSetup {
         browsers: browser_status().await,
-        extension_dir: dir.to_string_lossy().into_owned(),
+        extension_dir: dirs.chromium.to_string_lossy().into_owned(),
+        firefox_extension_dir: dirs.firefox.to_string_lossy().into_owned(),
         firefox_package: xpi.is_file().then(|| xpi.to_string_lossy().into_owned()),
     })
 }
@@ -615,6 +654,7 @@ pub async fn browser_setup(app: tauri::AppHandle) -> CmdResult<BrowserSetup> {
 pub async fn open_browser(app: tauri::AppHandle, browser: String, page: String) -> CmdResult<()> {
     let target = match page.as_str() {
         "package" => prepare_extension(&app)?
+            .firefox
             .join("herbarium.xpi")
             .to_string_lossy()
             .into_owned(),
@@ -681,6 +721,27 @@ pub async fn open_external(app: tauri::AppHandle, url: String) -> CmdResult<()> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn firefox_gets_background_scripts_and_chrome_a_clean_worker() {
+        let chrome: Value =
+            serde_json::from_str(include_str!("../../extension/manifest.json")).unwrap();
+        assert_eq!(
+            chrome["background"],
+            json!({ "service_worker": "background.js" }),
+            "Chrome warns about `background.scripts` in Manifest V3"
+        );
+        let firefox = firefox_manifest(chrome.clone());
+        assert_eq!(
+            firefox["background"],
+            json!({ "scripts": ["capture.js", "background.js"] })
+        );
+        assert_eq!(firefox["version"], chrome["version"]);
+        assert_eq!(
+            firefox["browser_specific_settings"],
+            chrome["browser_specific_settings"]
+        );
+    }
 
     fn temp_dir(tag: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

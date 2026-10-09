@@ -77,9 +77,9 @@
     }
   }
 
-  async function revealFolder() {
+  async function revealFolder(firefox: boolean) {
     try {
-      await api.revealExtension();
+      await api.revealExtension(firefox);
     } catch (e) {
       toast(errorMessage(e), "error");
     }
@@ -180,8 +180,8 @@
                 <span class="small muted">{t("browser.step.loadText")}</span>
               {/if}
               {#if setup}
-                <CopyCommand text={active.firefox ? `${setup.extensionDir}/manifest.json` : setup.extensionDir} />
-                <button class="link" onclick={revealFolder}><Icon name="folder-open" size={12} />{t("browser.showFolder")}</button>
+                <CopyCommand text={active.firefox ? `${setup.firefoxExtensionDir}/manifest.json` : setup.extensionDir} />
+                <button class="link" onclick={() => void revealFolder(active.firefox)}><Icon name="folder-open" size={12} />{t("browser.showFolder")}</button>
               {/if}
             </li>
             <li class="waiting" class:off={!setup}>
