@@ -1,11 +1,13 @@
 mod ai;
 mod ai_import;
+mod browsers;
 mod capture;
 pub mod cli;
 mod commands;
 mod config;
 mod editors;
 mod export;
+mod locate;
 mod native_host;
 mod navigation;
 mod protocol;
@@ -212,6 +214,10 @@ pub fn run() {
             commands::scan_ai_export,
             commands::import_ai_export,
             commands::browser_status,
+            commands::browser_setup,
+            commands::open_browser,
+            commands::claude_code_status,
+            commands::set_claude_code_path,
             commands::connect_browsers,
             commands::reveal_extension,
             commands::save_clipboard_page,

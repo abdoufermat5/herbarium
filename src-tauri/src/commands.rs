@@ -444,12 +444,10 @@ pub async fn import_ai_export(
     )
 }
 
-/// Copy the browser extension bundled with the app to a stable folder and
-/// reveal it, for "Load unpacked" until the extension is in the stores. (An
-/// AppImage's own files vanish when it exits, so the copy is what browsers
-/// keep loading.)
-#[tauri::command]
-pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
+/// Copy the browser extension bundled with the app to a stable folder, for
+/// "Load unpacked" until the extension is in the stores. (An AppImage's own
+/// files vanish when it exits, so the copy is what browsers keep loading.)
+fn prepare_extension(app: &tauri::AppHandle) -> CmdResult<PathBuf> {
     use tauri::Manager;
     let bundled = app
         .path()
@@ -470,6 +468,13 @@ pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
         .join("Herbarium")
         .join("browser-extension");
     copy_dir(&source, &dest).map_err(|e| format!("cannot copy the extension: {e}"))?;
+    Ok(dest)
+}
+
+/// Copy the extension to its stable folder and show it.
+#[tauri::command]
+pub async fn reveal_extension(app: tauri::AppHandle) -> CmdResult<String> {
+    let dest = prepare_extension(&app)?;
     tauri_plugin_opener::reveal_item_in_dir(dest.join("manifest.json"))
         .map_err(|e| e.to_string())?;
     Ok(dest.to_string_lossy().into_owned())
@@ -546,18 +551,76 @@ pub async fn set_capture(
 }
 
 #[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BrowserStatus {
     browser: String,
+    /// The native host is registered with it.
     connected: bool,
+    firefox: bool,
+    /// When its extension last reached the app (unix ms).
+    seen: Option<i64>,
+    /// The app can start it (to open its extensions page).
+    can_open: bool,
 }
 
-/// Browsers found and whether the extension's native host is registered with each.
+/// Browsers found, whether the extension's native host is registered with
+/// each, and when each one's extension last reached the app.
 #[tauri::command]
 pub async fn browser_status() -> Vec<BrowserStatus> {
-    crate::native_host::status()
-        .into_iter()
-        .map(|(browser, connected)| BrowserStatus { browser, connected })
-        .collect()
+    tauri::async_runtime::spawn_blocking(|| {
+        let seen = crate::browsers::seen();
+        crate::native_host::status()
+            .into_iter()
+            .map(|(browser, connected)| BrowserStatus {
+                firefox: browser == "Firefox",
+                seen: seen.get(&browser).copied(),
+                can_open: crate::browsers::can_open(&browser),
+                browser,
+                connected,
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSetup {
+    browsers: Vec<BrowserStatus>,
+    /// The folder to choose in "Load unpacked".
+    extension_dir: String,
+    /// A signed Firefox package, when this build ships one.
+    firefox_package: Option<String>,
+}
+
+/// Get everything ready for adding the extension: register the native host
+/// with every browser found and copy the extension to its stable folder.
+#[tauri::command]
+pub async fn browser_setup(app: tauri::AppHandle) -> CmdResult<BrowserSetup> {
+    // No browser found is not an error here: the list says so.
+    let _ = crate::native_host::install_default();
+    let dir = prepare_extension(&app)?;
+    let xpi = dir.join("herbarium.xpi");
+    Ok(BrowserSetup {
+        browsers: browser_status().await,
+        extension_dir: dir.to_string_lossy().into_owned(),
+        firefox_package: xpi.is_file().then(|| xpi.to_string_lossy().into_owned()),
+    })
+}
+
+/// Open `browser` on its extensions page (`page: "extensions"`), or on the
+/// signed Firefox package (`page: "package"`), which Firefox offers to install.
+#[tauri::command]
+pub async fn open_browser(app: tauri::AppHandle, browser: String, page: String) -> CmdResult<()> {
+    let target = match page.as_str() {
+        "package" => prepare_extension(&app)?
+            .join("herbarium.xpi")
+            .to_string_lossy()
+            .into_owned(),
+        _ => crate::browsers::extensions_page(&browser).to_string(),
+    };
+    crate::browsers::open_in(&browser, &target)
 }
 
 /// Register the native messaging host with every browser found.
@@ -835,6 +898,67 @@ pub async fn ai_models(
     })
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaudeCodeStatus {
+    /// Where it was found, if it was.
+    path: Option<String>,
+    /// What `claude --version` said.
+    version: Option<String>,
+    /// Why it cannot be used.
+    error: Option<String>,
+    /// The user pointed at it themselves.
+    chosen: bool,
+}
+
+/// Look for Claude Code (where the user put it, or wherever a terminal
+/// would find it) and ask it its version.
+#[tauri::command]
+pub async fn claude_code_status() -> ClaudeCodeStatus {
+    let chosen = config::load().unwrap_or_default().claude_code_path;
+    tauri::async_runtime::spawn_blocking(move || {
+        let found = crate::locate::claude(chosen.as_deref());
+        let (path, version, error) = match found {
+            Ok(path) => match crate::locate::claude_version(&path) {
+                Ok(v) => (Some(path), Some(v), None),
+                Err(e) => (Some(path), None, Some(e)),
+            },
+            Err(e) => (None, None, Some(e)),
+        };
+        ClaudeCodeStatus {
+            path: path.map(|p| p.to_string_lossy().into_owned()),
+            version,
+            error,
+            chosen: chosen.is_some_and(|c| !c.trim().is_empty()),
+        }
+    })
+    .await
+    .unwrap_or(ClaudeCodeStatus {
+        path: None,
+        version: None,
+        error: Some("could not look for Claude Code".into()),
+        chosen: false,
+    })
+}
+
+/// Point at Claude Code by hand (None goes back to finding it), after
+/// checking the file is Claude Code.
+#[tauri::command]
+pub async fn set_claude_code_path(path: Option<String>) -> CmdResult<ClaudeCodeStatus> {
+    let path = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    if let Some(p) = &path {
+        let check = PathBuf::from(p);
+        tauri::async_runtime::spawn_blocking(move || crate::locate::claude_version(&check))
+            .await
+            .map_err(|e| e.to_string())??;
+    }
+    config::update(|cfg| {
+        cfg.claude_code_path = path;
+        Ok(())
+    })?;
+    Ok(claude_code_status().await)
+}
+
 /// Remix a page with the configured model and keep the result as a proposal.
 /// Emits `remix-progress` `{ id, chars }` while the answer comes in.
 #[tauri::command]
@@ -871,6 +995,7 @@ pub async fn remix_page(
             model: &model,
             key: key.as_deref(),
             base_url: cfg.ai_base_url.as_deref(),
+            claude_path: cfg.claude_code_path.as_deref(),
             prompt,
         };
         crate::remix::run(job, |chars| {

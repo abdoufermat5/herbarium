@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -20,11 +20,6 @@ use crate::publish::Vault;
 /// The API's address; `HERBARIUM_ANTHROPIC_API` points tests at a fake one.
 fn api_base() -> String {
     crate::ai::anthropic_base()
-}
-
-/// The Claude Code command; `HERBARIUM_CLAUDE_BIN` overrides it.
-fn claude_bin() -> String {
-    std::env::var("HERBARIUM_CLAUDE_BIN").unwrap_or_else(|_| "claude".into())
 }
 
 /// Pages larger than this are not sent: the answer would not fit.
@@ -299,17 +294,20 @@ fn ask_api_at(
 /// Claude Code's tools, none of which a remix needs.
 const NO_TOOLS: &str = "Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,NotebookEdit,NotebookRead,WebFetch,WebSearch,Task,Agent,TodoWrite";
 
-/// Ask Claude Code (`claude -p`), with the prompt on stdin.
+/// Ask Claude Code (`claude -p`), with the prompt on stdin. `chosen` is
+/// where the user said it is, if they had to (see locate.rs).
 pub fn ask_claude_code(
+    chosen: Option<&str>,
     model: &str,
     prompt: &str,
     progress: impl FnMut(usize) -> bool,
 ) -> Result<String, String> {
-    ask_claude_code_with(&claude_bin(), model, prompt, progress)
+    let bin = crate::locate::claude(chosen)?;
+    ask_claude_code_with(&bin, model, prompt, progress)
 }
 
 fn ask_claude_code_with(
-    bin: &str,
+    bin: &std::path::Path,
     model: &str,
     prompt: &str,
     mut progress: impl FnMut(usize) -> bool,
@@ -322,7 +320,7 @@ fn ask_claude_code_with(
     // own: Claude Code gets no tools, and runs in an empty folder.
     let workdir = std::env::temp_dir().join(format!("herbarium-remix-{}", std::process::id()));
     std::fs::create_dir_all(&workdir).map_err(|e| format!("could not prepare Claude Code: {e}"))?;
-    let mut child = Command::new(bin)
+    let mut child = crate::locate::command(bin)
         .args(["-p", "--output-format", "text", "--model", model])
         .args(["--disallowedTools", NO_TOOLS])
         .current_dir(&workdir)
@@ -332,7 +330,10 @@ fn ask_claude_code_with(
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                "Claude Code is not installed (the `claude` command was not found)".to_string()
+                format!(
+                    "Claude Code was not found at {}; check Settings → AI & sharing",
+                    bin.display()
+                )
             } else {
                 format!("could not start Claude Code: {e}")
             }
@@ -368,14 +369,40 @@ fn ask_claude_code_with(
         .map_err(|e| e.to_string())?;
     if !status.success() {
         let err = errors.join().unwrap_or_default();
-        let err = err.trim();
-        return Err(if err.is_empty() {
-            format!("Claude Code failed ({status})")
+        // Claude Code reports some problems (signing in) on stdout.
+        let said = if err.trim().is_empty() {
+            out.trim()
         } else {
-            format!("Claude Code failed: {err}")
-        });
+            err.trim()
+        };
+        return Err(claude_code_error(said, &status.to_string()));
     }
     Ok(out)
+}
+
+/// What to tell the user when Claude Code fails, from what it said.
+fn claude_code_error(said: &str, status: &str) -> String {
+    let lower = said.to_lowercase();
+    if [
+        "/login",
+        "not logged in",
+        "log in",
+        "invalid api key",
+        "authentication",
+        "oauth",
+    ]
+    .iter()
+    .any(|w| lower.contains(w))
+    {
+        return "Claude Code is not signed in: open a terminal, run `claude`, sign in, then try again"
+            .into();
+    }
+    let said: String = said.chars().take(400).collect();
+    if said.is_empty() {
+        format!("Claude Code failed ({status})")
+    } else {
+        format!("Claude Code failed: {said}")
+    }
 }
 
 /// The prompt for remixing page `id`, and the page's `updatedAt` it was read at.
@@ -429,6 +456,8 @@ pub struct Job<'a> {
     pub key: Option<&'a str>,
     /// For OpenAI-compatible services: a custom API address.
     pub base_url: Option<&'a str>,
+    /// Where Claude Code is, when the user chose it.
+    pub claude_path: Option<&'a str>,
     pub prompt: String,
 }
 
@@ -441,7 +470,7 @@ pub fn run(job: Job, progress: impl FnMut(usize) -> bool) -> Result<String, Stri
                 .ok_or("add your Anthropic API key in Settings → AI & sharing first")?;
             ask_api(key, job.model, &job.prompt, progress)?
         }
-        "claude-code" => ask_claude_code(job.model, &job.prompt, progress)?,
+        "claude-code" => ask_claude_code(job.claude_path, job.model, &job.prompt, progress)?,
         other => {
             let provider = crate::ai::provider(other)
                 .ok_or_else(|| format!("unknown AI provider `{other}`"))?;
@@ -666,31 +695,47 @@ mod tests {
         )
         .unwrap();
         std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let bin = bin.to_str().unwrap();
-        let out = ask_claude_code_with(bin, "claude-opus-5-5", "remix me", |_| true).unwrap();
+        let out = ask_claude_code_with(&bin, "claude-opus-5-5", "remix me", |_| true).unwrap();
         assert_eq!(extract_html(&out).unwrap(), "<p>cli</p>");
-        let args = std::fs::read_to_string(format!("{bin}.args")).unwrap();
+        let args = std::fs::read_to_string(dir.join("claude.args")).unwrap();
         assert_eq!(
             args.trim(),
             format!("-p --output-format text --model claude-opus-5-5 --disallowedTools {NO_TOOLS}")
         );
-        assert!(ask_claude_code_with(bin, "--help", "p", |_| true).is_err());
-        let stdin = std::fs::read_to_string(format!("{bin}.stdin")).unwrap();
+        assert!(ask_claude_code_with(&bin, "--help", "p", |_| true).is_err());
+        let stdin = std::fs::read_to_string(dir.join("claude.stdin")).unwrap();
         assert!(stdin.starts_with(SYSTEM) && stdin.ends_with("remix me"));
 
+        // Signing in is reported on stdout and gets a plain explanation.
         std::fs::write(
-            dir.join("fail"),
-            "#!/bin/sh\necho 'not logged in' >&2\nexit 1\n",
+            dir.join("signed-out"),
+            "#!/bin/sh\necho 'Invalid API key · Please run /login'\nexit 1\n",
         )
         .unwrap();
-        std::fs::set_permissions(dir.join("fail"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        let err = ask_claude_code_with(dir.join("fail").to_str().unwrap(), "m", "p", |_| true)
-            .unwrap_err();
-        assert!(err.contains("not logged in"), "{err}");
+        std::fs::write(
+            dir.join("fail"),
+            "#!/bin/sh\necho 'disk full' >&2\nexit 1\n",
+        )
+        .unwrap();
+        for f in ["signed-out", "fail"] {
+            std::fs::set_permissions(dir.join(f), std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let err = ask_claude_code_with(&dir.join("signed-out"), "m", "p", |_| true).unwrap_err();
         assert!(
-            ask_claude_code_with("/nonexistent/claude", "m", "p", |_| true)
-                .unwrap_err()
-                .contains("not installed")
+            err.contains("not signed in") && err.contains("run `claude`"),
+            "{err}"
+        );
+        let err = ask_claude_code_with(&dir.join("fail"), "m", "p", |_| true).unwrap_err();
+        assert!(err.contains("disk full"), "{err}");
+        assert!(
+            ask_claude_code_with(
+                std::path::Path::new("/nonexistent/claude"),
+                "m",
+                "p",
+                |_| true
+            )
+            .unwrap_err()
+            .contains("not found")
         );
         let _ = std::fs::remove_dir_all(&dir);
     }

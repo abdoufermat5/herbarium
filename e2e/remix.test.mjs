@@ -5,7 +5,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { cleanup, herbariumBin, tempDir, vaultPages } from "./helpers.mjs";
@@ -154,6 +154,28 @@ test("herbarium remix leaves the model's page as a proposal", async () => {
       assert.equal(readFileSync(join(work, "claude.args"), "utf8").trim(), "-p --output-format text --model opus --disallowedTools Bash,Edit,MultiEdit,Write,Read,Glob,Grep,LS,NotebookEdit,NotebookRead,WebFetch,WebSearch,Task,Agent,TodoWrite");
       assert.match(readFileSync(join(work, "claude.stdin"), "utf8"), /Translate this page[\s\S]*French[\s\S]*Original text/);
       assert.equal(readFileSync(proposal, "utf8"), remixed("Lesson in French"), "a newer remix replaces the proposal");
+    }
+
+    // Linux Mint: the app is not started from a shell, so its PATH lacks
+    // ~/.local/bin and the folder of the node that `claude` runs on. It is
+    // found all the same, and a missing one is explained.
+    if (process.platform !== "win32") {
+      const local = join(work, ".local", "bin");
+      mkdirSync(local, { recursive: true });
+      writeFileSync(
+        join(local, "claude"),
+        `#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' '\`\`\`html' '${remixed("Lesson from Mint")}' '\`\`\`'\n`,
+        { mode: 0o755 },
+      );
+      const bare = { ...env, ANTHROPIC_API_KEY: "", HERBARIUM_CLAUDE_BIN: "", PATH: "/usr/bin:/bin", SHELL: "/bin/false" };
+      r = await run(["remix", "--vault", vault, "--claude-code", "--preset", "simplify", id], bare);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(readFileSync(proposal, "utf8"), remixed("Lesson from Mint"));
+
+      rmSync(join(local, "claude"));
+      r = await run(["remix", "--vault", vault, "--claude-code", "--preset", "simplify", id], bare);
+      assert.notEqual(r.code, 0);
+      assert.match(r.stderr, /Claude Code was not found on this computer/);
     }
     assert.ok(existsSync(proposal));
   } finally {

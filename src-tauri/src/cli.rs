@@ -397,6 +397,7 @@ pub fn run_remix(args: &[String]) -> i32 {
             model: &model,
             key: key.as_deref(),
             base_url: base_url.as_deref(),
+            claude_path: cfg.claude_code_path.as_deref(),
             prompt,
         };
         let html = crate::remix::run(job, |_| true)?;

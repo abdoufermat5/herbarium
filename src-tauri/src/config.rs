@@ -46,6 +46,10 @@ pub struct Config {
     /// Ollama on another machine).
     #[serde(default)]
     pub ai_base_url: Option<String>,
+    /// Where Claude Code is, when the user had to point at it; empty means
+    /// "find it" (see locate.rs).
+    #[serde(default)]
+    pub claude_code_path: Option<String>,
     /// The GitHub account the stored token belongs to.
     #[serde(default)]
     pub github_login: Option<String>,
@@ -80,6 +84,7 @@ impl Default for Config {
             ai_provider: default_ai_provider(),
             ai_model: default_ai_model(),
             ai_base_url: None,
+            claude_code_path: None,
             github_login: None,
             publish_repo: default_publish_repo(),
         }

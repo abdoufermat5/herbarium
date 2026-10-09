@@ -363,7 +363,11 @@ pub fn run(args: &[String]) -> i32 {
             0
         }
         _ => {
-            // Started by a browser (or by hand with `--vault <path>`).
+            // Started by a browser (or by hand with `--vault <path>`). The
+            // app's browser setup shows the extension as connected from now.
+            if is_browser_launch(args) {
+                crate::browsers::record_seen(&crate::browsers::launching_browser(args));
+            }
             let vault = args
                 .windows(2)
                 .find(|w| w[0] == "--vault")
