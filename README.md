@@ -9,6 +9,7 @@
 [![Release](https://github.com/abdoufermat5/herbarium/actions/workflows/release.yml/badge.svg)](https://github.com/abdoufermat5/herbarium/actions/workflows/release.yml)
 [![Latest release](https://img.shields.io/github/v/release/abdoufermat5/herbarium)](https://github.com/abdoufermat5/herbarium/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/abdoufermat5/herbarium/total)](https://github.com/abdoufermat5/herbarium/releases)
+[![Snap Store](https://img.shields.io/snapcraft/v/herbarium/latest/stable?label=snap)](https://snapcraft.io/herbarium)
 [![License: MIT](https://img.shields.io/github/license/abdoufermat5/herbarium)](LICENSE)
 
 A desktop reader for the HTML pages AI tools generate. Save a page, find it later, open it with its interactivity intact, and schedule it for review so it comes back when you need it.
