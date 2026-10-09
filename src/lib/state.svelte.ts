@@ -105,6 +105,7 @@ interface AppState {
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
   aiImportOpen: boolean;
+  organizeOpen: boolean;
   /** The vault-wide page health report is open. */
   healthOpen: boolean;
   /** The folder or tag whose icon and colour are being edited. */
@@ -198,6 +199,7 @@ export const app: AppState = $state({
   pathId: null,
   focusMode: false,
   aiImportOpen: false,
+  organizeOpen: false,
   lookEdit: null,
   settingsTab: "general",
   healthOpen: false,

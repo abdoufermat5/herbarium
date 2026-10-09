@@ -20,6 +20,7 @@
   import AiImportDialog from "./components/AiImportDialog.svelte";
   import LookDialog from "./components/LookDialog.svelte";
   import HealthDialog from "./components/HealthDialog.svelte";
+  import OrganizeDialog from "./components/OrganizeDialog.svelte";
   import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -421,6 +422,11 @@
   {#key app.lookEdit}
     <LookDialog />
   {/key}
+{/if}
+{#if app.organizeOpen}
+  <div inert={app.paletteOpen || !!confirmState.pending}>
+    <OrganizeDialog />
+  </div>
 {/if}
 {#if app.aiImportOpen}
   <div inert={app.paletteOpen || !!confirmState.pending}>

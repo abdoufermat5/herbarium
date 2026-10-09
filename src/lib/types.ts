@@ -405,6 +405,27 @@ export interface AiSettings {
   providers: AiProviderInfo[];
 }
 
+/** One page the AI proposes to move and/or tag. */
+export interface OrganizeMove {
+  id: string;
+  title: string;
+  from: string | null;
+  to: string | null;
+  addTags: string[];
+  reason: string;
+  /** The destination folder does not exist yet. */
+  newFolder: boolean;
+}
+
+export interface OrganizePlan {
+  summary: string;
+  moves: OrganizeMove[];
+  /** Pages the AI looked at. */
+  considered: number;
+  /** Pages left out because the library is larger than one round. */
+  leftOut: number;
+}
+
 /** What Herbarium found when it looked for Claude Code. */
 export interface ClaudeCodeStatus {
   path: string | null;

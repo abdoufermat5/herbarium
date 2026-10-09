@@ -4,6 +4,7 @@ import type {
   BrowserSetup,
   BrowserStatus,
   ClaudeCodeStatus,
+  OrganizePlan,
   BulkDeleteResult,
   BulkPatch,
   BulkUpdateResult,
@@ -525,6 +526,15 @@ export const api = {
   /** Remix a page with the configured model; the result waits as a proposal. */
   remixPage(id: string, preset: RemixPreset, instructions: string): Promise<ProposalSummary> {
     return invoke("remix_page", { id, preset, instructions });
+  },
+
+  /** Ask the AI how the library should be organized; nothing changes until the plan is applied. */
+  organizePlan(scope: "unsorted" | "all", instructions: string): Promise<OrganizePlan> {
+    return invoke("organize_plan", { scope, instructions });
+  },
+
+  cancelOrganize(): Promise<void> {
+    return invoke("cancel_organize");
   },
 
   /** Stop the remix of page `id`; other remixes keep running. */

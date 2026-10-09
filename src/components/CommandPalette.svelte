@@ -187,6 +187,16 @@
         },
       },
       {
+        key: "organize",
+        group,
+        label: t("organize.palette"),
+        hint: t("organize.paletteHint"),
+        icon: "sparkle",
+        run: () => {
+          app.organizeOpen = true;
+        },
+      },
+      {
         key: "import-ai",
         group,
         label: t("aiImport.title"),
