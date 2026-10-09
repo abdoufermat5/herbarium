@@ -52,11 +52,19 @@ as_root() {
   fi
 }
 
+# Files of an AppImage install. They live in ~/.local, which shadows the .deb's
+# /usr/share entries, so a stale one keeps the old icon and launcher around.
+remove_appimage_install() {
+  rm -f "$BIN_DIR/herbarium" "$APP_DIR/herbarium.desktop" \
+    "$APP_DIR/herbarium-handler.desktop" "$ICON_DIR/herbarium.png"
+  have update-desktop-database && update-desktop-database "$APP_DIR" >/dev/null 2>&1 || true
+}
+
 if [ "$UNINSTALL" -eq 1 ]; then
   if have dpkg && dpkg -s herbarium >/dev/null 2>&1; then
     as_root apt-get remove -y herbarium
   fi
-  rm -f "$BIN_DIR/herbarium" "$APP_DIR/herbarium.desktop" "$ICON_DIR/herbarium.png"
+  remove_appimage_install
   say "Herbarium removed. Your vault (your HTML files) was not touched."
   exit 0
 fi
@@ -127,6 +135,7 @@ if [ "$FORCE_APPIMAGE" -eq 0 ] && have apt-get && have dpkg; then
   say "Installing Herbarium $VERSION (.deb, $DEB_ARCH)..."
   download_verified "herbarium_${VERSION}_${DEB_ARCH}.deb" "$TMP/herbarium.deb"
   as_root apt-get install -y "$TMP/herbarium.deb"
+  remove_appimage_install
   BIN_PATH=""
   if have herbarium; then
     RESOLVED="$(command -v herbarium 2>/dev/null || true)"
