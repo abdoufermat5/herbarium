@@ -488,6 +488,8 @@
   .content {
     flex: 1;
     min-height: 0;
+    /* Never let a tall child push the view past the window's bottom edge. */
+    overflow: hidden;
   }
   .boot {
     height: 100%;
@@ -520,11 +522,15 @@
 
   .shell {
     display: grid;
-    grid-template-columns: var(--sidebar-w) 1fr;
+    grid-template-columns: var(--sidebar-w) minmax(0, 1fr);
+    /* One row pinned to the window height: without it the row grows to the
+       sidebar's full content (a long file tree), and the bottom of the
+       page view is cropped off-screen. */
+    grid-template-rows: minmax(0, 1fr);
     height: 100%;
   }
   .shell.collapsed {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .main {
     display: flex;

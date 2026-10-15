@@ -206,6 +206,8 @@ export const fr: Record<MessageKey, string> = {
   "sidebar.showPages": "Afficher les pages",
   "sidebar.expand": "Déplier",
   "sidebar.collapse": "Replier",
+  "sidebar.collapseAll": "Tout replier",
+  "sidebar.resize": "Redimensionner la barre latérale",
   "sidebar.openIn": "Ouvrir dans {editor}",
   "sidebar.noEditor": "Aucun éditeur externe trouvé",
   "sidebar.trash": "Corbeille",

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { publishSite } from "../lib/exports";
   import { folderLook } from "../lib/appearance";
-  import { tick } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { flip } from "svelte/animate";
   import {
     app,
@@ -91,6 +91,7 @@
   let dropTarget = $state<string | null>(null);
   let menu = $state<{ x: number; y: number; items: DropdownMenuItem[] } | null>(null);
   let treeEl: HTMLElement | undefined = $state();
+  let asideEl: HTMLElement | undefined = $state();
 
   function persistExpanded(next: Set<string>) {
     expanded = next;
@@ -107,6 +108,139 @@
   function toggleFolder(path: string) {
     setExpanded(path, !expanded.has(path));
   }
+
+  /** Tree geometry: each level indents by INDENT; labels clear the chevron column. */
+  const INDENT = 16;
+  const LABEL_GAP = 18;
+  function indent(depth: number): number {
+    return 4 + depth * INDENT;
+  }
+
+  function collapseAll() {
+    persistExpanded(new Set());
+  }
+
+  /* ------------------------------------------------------ section folding */
+
+  type Section = "paths" | "saved" | "files";
+  const SECTIONS_KEY = "herbarium.sidebarSections";
+
+  function loadFolded(): Set<Section> {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(SECTIONS_KEY) ?? "[]"));
+    } catch {
+      return new Set();
+    }
+  }
+
+  let folded = $state(loadFolded());
+
+  function toggleSection(section: Section) {
+    const next = new Set(folded);
+    if (next.has(section)) next.delete(section);
+    else next.add(section);
+    folded = next;
+    try {
+      localStorage.setItem(SECTIONS_KEY, JSON.stringify([...next]));
+    } catch {
+      // Folding still works for this session.
+    }
+  }
+
+  /* --------------------------------------------------------- resizable width */
+
+  const WIDTH_KEY = "herbarium.sidebarWidth";
+  const MIN_WIDTH = 200;
+  const MAX_WIDTH = 480;
+  let width = $state<number | null>(null);
+  let resizing = $state(false);
+
+  function applyWidth(next: number | null) {
+    width = next === null ? null : Math.round(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next)));
+    const root = document.documentElement;
+    if (width === null) root.style.removeProperty("--sidebar-w");
+    else root.style.setProperty("--sidebar-w", `${width}px`);
+  }
+
+  function saveWidth() {
+    try {
+      if (width === null) localStorage.removeItem(WIDTH_KEY);
+      else localStorage.setItem(WIDTH_KEY, String(width));
+    } catch {
+      // The width still applies until the app restarts.
+    }
+  }
+
+  onMount(() => {
+    const stored = Number(localStorage.getItem(WIDTH_KEY));
+    if (stored > 0) applyWidth(stored);
+  });
+
+  function currentWidth(): number {
+    return width ?? asideEl?.getBoundingClientRect().width ?? MIN_WIDTH;
+  }
+
+  function onResizeStart(e: PointerEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const handle = e.currentTarget as HTMLElement;
+    handle.setPointerCapture(e.pointerId);
+    const startX = e.clientX;
+    const startWidth = currentWidth();
+    resizing = true;
+    const move = (ev: PointerEvent) => applyWidth(startWidth + ev.clientX - startX);
+    const end = () => {
+      resizing = false;
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", end);
+      handle.removeEventListener("pointercancel", end);
+      saveWidth();
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", end);
+    handle.addEventListener("pointercancel", end);
+  }
+
+  function onResizeKey(e: KeyboardEvent) {
+    const step = e.shiftKey ? 48 : 16;
+    if (e.key === "ArrowLeft") applyWidth(currentWidth() - step);
+    else if (e.key === "ArrowRight") applyWidth(currentWidth() + step);
+    else if (e.key === "Home") applyWidth(MIN_WIDTH);
+    else if (e.key === "End") applyWidth(MAX_WIDTH);
+    else return;
+    e.preventDefault();
+    saveWidth();
+  }
+
+  function resetWidth() {
+    applyWidth(null);
+    saveWidth();
+  }
+
+  /* ------------------------------------------------- reveal the open page */
+
+  // Like Obsidian's "reveal active file": opening a page unfolds its folders
+  // and scrolls its row into view, so the tree always shows where you are.
+  $effect(() => {
+    const id = app.readId;
+    if (!id) return;
+    const folder = untrack(() => app.library.find((p) => p.id === id)?.folder ?? "");
+    untrack(() => {
+      if (folder) {
+        const parts = folder.split("/");
+        const missing = parts
+          .map((_, i) => parts.slice(0, i + 1).join("/"))
+          .filter((path) => !expanded.has(path));
+        if (missing.length > 0) persistExpanded(new Set([...expanded, ...missing]));
+      }
+      if (folded.has("files")) return;
+      void tick().then(() => {
+        treeEl
+          ?.querySelector<HTMLElement>(`[data-key="${cssEscape(`p:${id}`)}"]`)
+          ?.scrollIntoView({ block: "nearest" });
+      });
+    });
+  });
 
   const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let reduceMotion = $state(motionQuery.matches);
@@ -778,15 +912,16 @@
   }
 </script>
 
+{#snippet guides(depth: number)}
+  {#each { length: depth } as _, i}
+    <span class="guide" style:left="{indent(i) + 8}px" aria-hidden="true"></span>
+  {/each}
+{/snippet}
+
 {#snippet creatorRow(row: TreeRow)}
   <div class="tree-row">
-    <span
-      class="nav-item tree-item creator"
-      style:padding-left="{10 + row.depth * 14 + (row.createKind === "page" ? 16 : 0)}px"
-    >
-      {#if row.createKind === "folder"}
-        <span class="chev"><Icon name="chevron-right" size={10} /></span>
-      {/if}
+    {@render guides(row.depth)}
+    <span class="nav-item tree-item creator" style:padding-left="{indent(row.depth) + LABEL_GAP}px">
       <span class="nav-icon"><Icon name={row.createKind === "folder" ? "folder" : "file-text"} size={14} /></span>
       <!-- svelte-ignore a11y_autofocus -->
       <input
@@ -812,18 +947,9 @@
     ondragleave={() => clearDropTarget(row.path!)}
     ondrop={(e) => void onDropTarget(e, row.path!)}
   >
-    <button
-      type="button"
-      class="chev-btn"
-      tabindex="-1"
-      aria-label={row.expanded ? t("sidebar.collapse") : t("sidebar.expand")}
-      aria-expanded={row.expanded}
-      onclick={() => toggleFolder(row.path!)}
-    >
-      <span class="chev" class:open={row.expanded}><Icon name="chevron-right" size={10} /></span>
-    </button>
+    {@render guides(row.depth)}
     {#if renaming?.kind === "folder" && renaming.path === row.path}
-      <span class="nav-item tree-item tree-folder" style:padding-left="{4 + row.depth * 14}px">
+      <span class="nav-item tree-item tree-folder" style:padding-left="{indent(row.depth) + LABEL_GAP}px">
         <span class="nav-icon"><Icon name={row.expanded ? "folder-open" : "folder"} size={14} /></span>
         <!-- svelte-ignore a11y_autofocus -->
         <input
@@ -841,10 +967,11 @@
         type="button"
         class="nav-item tree-item tree-folder"
         class:active={app.folderFilter === row.path}
-        style:padding-left="{4 + row.depth * 14}px"
+        style:padding-left="{indent(row.depth) + LABEL_GAP}px"
         title={row.path}
         data-key={row.key}
         tabindex={tabbableKey === row.key ? 0 : -1}
+        aria-expanded={row.expanded}
         aria-current={app.folderFilter === row.path ? "true" : undefined}
         onfocus={() => (focusedKey = row.key)}
         onkeydown={onTreeKey}
@@ -855,6 +982,18 @@
           {#if folderIcon(row.path)}<span class="row-emoji">{folderIcon(row.path)}</span>{:else}<Icon name={row.expanded ? "folder-open" : "folder"} size={14} />{/if}
         </span>
         <span class="nav-label ellipsis">{row.name}</span>
+      </button>
+      <!-- After the label so it paints above it; positioned into the indent. -->
+      <button
+        type="button"
+        class="chev-btn"
+        style:left="{indent(row.depth)}px"
+        tabindex="-1"
+        aria-label={row.expanded ? t("sidebar.collapse") : t("sidebar.expand")}
+        aria-expanded={row.expanded}
+        onclick={() => toggleFolder(row.path!)}
+      >
+        <span class="chev" class:open={row.expanded}><Icon name="chevron-right" size={10} /></span>
       </button>
       <span class="row-actions">
         <button class="tool" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} onclick={() => startCreate("page", row.path!)}>
@@ -870,8 +1009,9 @@
 
 {#snippet pageRow(row: TreeRow)}
   <div class="tree-row">
+    {@render guides(row.depth)}
     {#if renaming?.kind === "page" && renaming.id === row.id}
-      <span class="nav-item tree-item tree-page" style:padding-left="{10 + row.depth * 14 + 16}px">
+      <span class="nav-item tree-item tree-page" style:padding-left="{indent(row.depth) + LABEL_GAP}px">
         <span class="nav-icon"><Icon name="file-text" size={14} /></span>
         <!-- svelte-ignore a11y_autofocus -->
         <input
@@ -889,7 +1029,7 @@
         type="button"
         class="nav-item tree-item tree-page"
         class:active={app.readId === row.id}
-        style:padding-left="{10 + row.depth * 14 + 16}px"
+        style:padding-left="{indent(row.depth) + LABEL_GAP}px"
         title={row.name}
         data-key={row.key}
         tabindex={tabbableKey === row.key ? 0 : -1}
@@ -913,38 +1053,52 @@
   </div>
 {/snippet}
 
-<aside class="sidebar">
-  {#if vaults.length > 1}
-    <DropdownMenu items={vaultItems} ariaLabel={t("sidebar.switchVault")} class="brand-switch">
-      {#snippet trigger({ open, toggle })}
-        <button
-          class="brand brand-button"
-          class:open
-          aria-haspopup="menu"
-          aria-expanded={open}
-          title={`${t("sidebar.switchVault")} — ${app.config?.vaultPath ?? ""}`}
-          onclick={toggle}
-        >
-          <Logo size={30} />
-          <div class="brand-text">
-            <strong>Herbarium</strong>
-            <span class="brand-vault ellipsis">{labels[0]}</span>
-          </div>
-          {#if switching}<span class="spinner small"></span>{:else}<Icon name="arrow-up-down" size={13} />{/if}
-        </button>
-      {/snippet}
-    </DropdownMenu>
-  {:else}
-    <div class="brand">
-      <Logo size={30} />
-      <div class="brand-text">
-        <strong>Herbarium</strong>
-        {#if vaultName && vaultName.toLowerCase() !== "herbarium"}
-          <span class="brand-vault ellipsis" title={app.config?.vaultPath ?? ""}>{vaultName}</span>
-        {/if}
+{#snippet sectionHead(section: Section, label: string)}
+  <button
+    type="button"
+    class="section-title"
+    aria-expanded={!folded.has(section)}
+    onclick={() => toggleSection(section)}
+  >
+    <span class="chev" class:open={!folded.has(section)}><Icon name="chevron-right" size={9} /></span>
+    <span class="ellipsis">{label}</span>
+  </button>
+{/snippet}
+
+<aside class="sidebar" class:resizing bind:this={asideEl}>
+  <div class="head">
+    {#if vaults.length > 1}
+      <DropdownMenu items={vaultItems} ariaLabel={t("sidebar.switchVault")} class="brand-switch">
+        {#snippet trigger({ open, toggle })}
+          <button
+            class="brand brand-button"
+            class:open
+            aria-haspopup="menu"
+            aria-expanded={open}
+            title={`${t("sidebar.switchVault")} — ${app.config?.vaultPath ?? ""}`}
+            onclick={toggle}
+          >
+            <Logo size={22} />
+            <span class="brand-name ellipsis">{labels[0]}</span>
+            {#if switching}<span class="spinner small"></span>{:else}<Icon name="arrow-up-down" size={12} />{/if}
+          </button>
+        {/snippet}
+      </DropdownMenu>
+    {:else}
+      <div class="brand" title={app.config?.vaultPath ?? ""}>
+        <Logo size={22} />
+        <span class="brand-name ellipsis">{vaultName || "Herbarium"}</span>
       </div>
-    </div>
-  {/if}
+    {/if}
+    <button
+      class="search-btn"
+      title="{t('sidebar.search')} · / {t('sidebar.toSearch')} · i {t('sidebar.toImport')}"
+      onclick={() => (app.paletteOpen = true)}>
+      <Icon name="search" size={13} />
+      <span>{t("sidebar.search")}</span>
+      <kbd class="kbd">{modKey("K")}</kbd>
+    </button>
+  </div>
 
   <div class="body">
     <nav class="nav" aria-label={t("sidebar.library")}>
@@ -954,7 +1108,7 @@
         aria-current={!app.readId && app.view === "today" ? "page" : undefined}
         onclick={() => void goView("today")}
       >
-        <span class="nav-icon"><Icon name="sun" size={15} /></span>
+        <span class="nav-icon"><Icon name="sun" size={14} /></span>
         <span class="nav-label ellipsis">{t("sidebar.today")}</span>
       </button>
       <button
@@ -968,7 +1122,7 @@
         ondragleave={() => clearDropTarget("")}
         ondrop={(e) => void onDropTarget(e, "")}
       >
-        <span class="nav-icon"><Icon name="files" size={15} /></span>
+        <span class="nav-icon"><Icon name="files" size={14} /></span>
         <span class="nav-label ellipsis">{t("sidebar.all")}</span>
       </button>
       <button
@@ -978,7 +1132,7 @@
         title={dueLabel()}
         onclick={() => void goView("review")}
       >
-        <span class="nav-icon"><Icon name="refresh-cw" size={15} /></span>
+        <span class="nav-icon"><Icon name="refresh-cw" size={14} /></span>
         <span class="nav-label ellipsis">{t("sidebar.review")}</span>
         {#if app.dueCount > 0}
           <span class="badge">{app.dueCount}</span>
@@ -990,126 +1144,135 @@
         aria-current={!app.readId && app.view === "graph" ? "page" : undefined}
         onclick={() => void goView("graph")}
       >
-        <span class="nav-icon"><Icon name="hash" size={15} /></span>
+        <span class="nav-icon"><Icon name="hash" size={14} /></span>
         <span class="nav-label ellipsis">{t("sidebar.graph")}</span>
       </button>
     </nav>
 
-    <div class="group">
-      <div class="group-head">
-        <div class="group-title static">{t("sidebar.paths")}</div>
+    <section class="section">
+      <div class="section-head">
+        {@render sectionHead("paths", t("sidebar.paths"))}
         <div class="tools">
           <button
             class="tool"
             title={t("paths.new")}
             aria-label={t("paths.new")}
-            onclick={() => (pathDraft = { id: null, name: "" })}
+            onclick={() => {
+              if (folded.has("paths")) toggleSection("paths");
+              pathDraft = { id: null, name: "" };
+            }}
           >
-            <Icon name="plus" size={14} />
+            <Icon name="plus" size={13} />
           </button>
         </div>
       </div>
-      <nav class="nav" aria-label={t("sidebar.paths")}>
-        {#if pathDraft && !pathDraft.id}
-          <!-- svelte-ignore a11y_autofocus -->
-          <input
-            class="path-input"
-            bind:value={pathDraft.name}
-            onkeydown={onPathDraftKey}
-            onblur={() => void commitPathDraft()}
-            placeholder={t("paths.namePlaceholder")}
-            aria-label={t("paths.nameLabel")}
-            maxlength="100"
-            autofocus
-          />
-        {/if}
-        {#each app.paths as path (path.id)}
-          {#if pathDraft?.id === path.id}
+      {#if !folded.has("paths")}
+        <nav class="nav" aria-label={t("sidebar.paths")}>
+          {#if pathDraft && !pathDraft.id}
             <!-- svelte-ignore a11y_autofocus -->
             <input
               class="path-input"
               bind:value={pathDraft.name}
               onkeydown={onPathDraftKey}
               onblur={() => void commitPathDraft()}
+              placeholder={t("paths.namePlaceholder")}
               aria-label={t("paths.nameLabel")}
               maxlength="100"
               autofocus
             />
-          {:else}
-            <button
-              class="nav-item"
-              aria-expanded={openPaths.has(path.id)}
-              title={path.description || path.name}
-              onclick={() => togglePathOpen(path.id)}
-              oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
-            >
-              <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
-              <span class="nav-label ellipsis">{path.name}</span>
-              <span class="badge muted-badge">{path.pages.length}</span>
-            </button>
           {/if}
-          {#if openPaths.has(path.id)}
-            {#each path.pages as pageId, i (pageId)}
-              {@const title = pageTitle(pageId)}
-              <button
-                class="nav-item path-page"
-                class:active={app.readId === pageId && app.pathId === path.id}
-                class:missing={title === null}
-                disabled={title === null}
-                title={title ?? t("paths.missing")}
-                onclick={() => void openInPath(path.id, pageId)}
-                oncontextmenu={(e) => pathPageMenu(e, path.id, pageId, i, path.pages.length)}
-              >
-                <span class="path-num">{i + 1}</span>
-                <span class="nav-label ellipsis">{title ?? pageId}</span>
-              </button>
+          {#each app.paths as path (path.id)}
+            {#if pathDraft?.id === path.id}
+              <!-- svelte-ignore a11y_autofocus -->
+              <input
+                class="path-input"
+                bind:value={pathDraft.name}
+                onkeydown={onPathDraftKey}
+                onblur={() => void commitPathDraft()}
+                aria-label={t("paths.nameLabel")}
+                maxlength="100"
+                autofocus
+              />
             {:else}
-              <p class="path-empty">{t("paths.empty")}</p>
-            {/each}
-          {/if}
-        {:else}
-          {#if !pathDraft}
-            <p class="path-empty">{t("paths.none")}</p>
-          {/if}
-        {/each}
-      </nav>
-    </div>
-
-    {#if app.savedSearches.length > 0}
-      <div class="group">
-        <div class="group-head">
-          <div class="group-title static">{t("sidebar.savedSearches")}</div>
-        </div>
-        <nav class="nav" aria-label={t("sidebar.savedSearches")}>
-          {#each app.savedSearches as s (s.name)}
-            {@const active = !app.readId && app.view === "list" && app.search === s.query}
-            <div class="saved-row">
               <button
-                class="nav-item"
-                class:active
-                aria-current={active ? "page" : undefined}
-                title={s.query}
-                onclick={() => void runSearch(s.query)}
+                class="nav-item path-head"
+                aria-expanded={openPaths.has(path.id)}
+                title={path.description || path.name}
+                onclick={() => togglePathOpen(path.id)}
+                oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
               >
-                <span class="nav-icon"><Icon name="search" size={14} /></span>
-                <span class="nav-label ellipsis">{s.name}</span>
+                <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
+                <span class="nav-label ellipsis">{path.name}</span>
+                <span class="count">{path.pages.length}</span>
               </button>
-              <button
-                class="tool saved-remove"
-                title={t("sidebar.removeSearch", { name: s.name })}
-                aria-label={t("sidebar.removeSearch", { name: s.name })}
-                onclick={() => void deleteSavedSearch(s.name)}
-              >
-                <Icon name="x" size={12} />
-              </button>
-            </div>
+            {/if}
+            {#if openPaths.has(path.id)}
+              <div class="path-pages">
+                {#each path.pages as pageId, i (pageId)}
+                  {@const title = pageTitle(pageId)}
+                  <button
+                    class="nav-item path-page"
+                    class:active={app.readId === pageId && app.pathId === path.id}
+                    class:missing={title === null}
+                    disabled={title === null}
+                    title={title ?? t("paths.missing")}
+                    onclick={() => void openInPath(path.id, pageId)}
+                    oncontextmenu={(e) => pathPageMenu(e, path.id, pageId, i, path.pages.length)}
+                  >
+                    <span class="path-num">{i + 1}</span>
+                    <span class="nav-label ellipsis">{title ?? pageId}</span>
+                  </button>
+                {:else}
+                  <p class="path-empty">{t("paths.empty")}</p>
+                {/each}
+              </div>
+            {/if}
+          {:else}
+            {#if !pathDraft}
+              <p class="path-empty">{t("paths.none")}</p>
+            {/if}
           {/each}
         </nav>
-      </div>
+      {/if}
+    </section>
+
+    {#if app.savedSearches.length > 0}
+      <section class="section">
+        <div class="section-head">
+          {@render sectionHead("saved", t("sidebar.savedSearches"))}
+        </div>
+        {#if !folded.has("saved")}
+          <nav class="nav" aria-label={t("sidebar.savedSearches")}>
+            {#each app.savedSearches as s (s.name)}
+              {@const active = !app.readId && app.view === "list" && app.search === s.query}
+              <div class="saved-row">
+                <button
+                  class="nav-item"
+                  class:active
+                  aria-current={active ? "page" : undefined}
+                  title={s.query}
+                  onclick={() => void runSearch(s.query)}
+                >
+                  <span class="nav-icon"><Icon name="search" size={13} /></span>
+                  <span class="nav-label ellipsis">{s.name}</span>
+                </button>
+                <button
+                  class="tool saved-remove"
+                  title={t("sidebar.removeSearch", { name: s.name })}
+                  aria-label={t("sidebar.removeSearch", { name: s.name })}
+                  onclick={() => void deleteSavedSearch(s.name)}
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            {/each}
+          </nav>
+        {/if}
+      </section>
     {/if}
 
-    <div
-      class="group"
+    <section
+      class="section files"
       class:drop-root={dropTarget === ""}
       role="presentation"
       oncontextmenu={filesMenu}
@@ -1117,70 +1280,82 @@
       ondragleave={() => clearDropTarget("")}
       ondrop={(e) => void onDropTarget(e, "")}
     >
-      <div class="group-head">
-        <div class="group-title static">{t("sidebar.files")}</div>
+      <div class="section-head">
+        {@render sectionHead("files", t("sidebar.files"))}
         <div class="tools">
-          <button class="tool" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} onclick={() => startCreate("page", "")}>
-            <Icon name="file-plus" size={14} />
+          <button class="tool" title={t("sidebar.newPage")} aria-label={t("sidebar.newPage")} onclick={() => { if (folded.has("files")) toggleSection("files"); startCreate("page", ""); }}>
+            <Icon name="file-plus" size={13} />
           </button>
-          <button class="tool" title={t("sidebar.newFolder")} aria-label={t("sidebar.newFolder")} onclick={() => startCreate("folder", "")}>
-            <Icon name="folder-plus" size={14} />
+          <button class="tool" title={t("sidebar.newFolder")} aria-label={t("sidebar.newFolder")} onclick={() => { if (folded.has("files")) toggleSection("files"); startCreate("folder", ""); }}>
+            <Icon name="folder-plus" size={13} />
+          </button>
+          <button class="tool" title={t("sidebar.collapseAll")} aria-label={t("sidebar.collapseAll")} disabled={expanded.size === 0} onclick={collapseAll}>
+            <Icon name="collapse-all" size={12} />
           </button>
         </div>
       </div>
-      <nav class="tree" aria-label={t("sidebar.files")} bind:this={treeEl}>
-        {#each rows as row (row.key)}
-          <div animate:flip={{ duration: reduceMotion ? 0 : 120 }}>
-            {#if row.kind === "creator"}
-              {@render creatorRow(row)}
-            {:else if row.kind === "folder"}
-              {@render folderRow(row)}
-            {:else}
-              {@render pageRow(row)}
-            {/if}
+      {#if !folded.has("files")}
+        <nav class="tree" aria-label={t("sidebar.files")} bind:this={treeEl}>
+          {#each rows as row (row.key)}
+            <div animate:flip={{ duration: reduceMotion ? 0 : 120 }}>
+              {#if row.kind === "creator"}
+                {@render creatorRow(row)}
+              {:else if row.kind === "folder"}
+                {@render folderRow(row)}
+              {:else}
+                {@render pageRow(row)}
+              {/if}
+            </div>
+          {/each}
+        </nav>
+        {#if app.library.length === 0 && app.folders.length === 0 && !creating}
+          <div class="hint">
+            <Icon name="info" size={14} />
+            <span>{t("sidebar.hint")}</span>
           </div>
-        {/each}
-      </nav>
-      {#if app.library.length === 0 && app.folders.length === 0 && !creating}
-        <div class="hint">
-          <Icon name="info" size={14} />
-          <span>{t("sidebar.hint")}</span>
-        </div>
+        {/if}
       {/if}
-    </div>
+    </section>
+  </div>
 
-  </div>
   <div class="foot">
-    <nav class="nav" aria-label={t("sidebar.more")}>
-      <button
-        class="nav-item"
-        class:active={!app.readId && app.view === "settings"}
-        aria-current={!app.readId && app.view === "settings" ? "page" : undefined}
-        title={modKey(",")}
-        onclick={() => void goView("settings")}
-      >
-        <span class="nav-icon"><Icon name="settings" size={15} /></span>
-        <span class="nav-label ellipsis">{t("settings.title")}</span>
-      </button>
-      <button
-        class="nav-item"
-        class:active={!app.readId && app.view === "trash"}
-        aria-current={!app.readId && app.view === "trash" ? "page" : undefined}
-        onclick={() => void goView("trash")}
-      >
-        <span class="nav-icon"><Icon name="trash-2" size={15} /></span>
-        <span class="nav-label ellipsis">{t("sidebar.trash")}</span>
-      </button>
-    </nav>
-    <button class="search-btn" onclick={() => (app.paletteOpen = true)}>
-      <Icon name="search" size={14} />
-      <span>{t("sidebar.search")}</span>
-      <kbd class="kbd">{modKey("K")}</kbd>
+    <button
+      class="foot-btn"
+      class:active={!app.readId && app.view === "settings"}
+      aria-current={!app.readId && app.view === "settings" ? "page" : undefined}
+      title="{t('settings.title')} ({modKey(',')})"
+      onclick={() => void goView("settings")}
+    >
+      <Icon name="settings" size={14} />
+      <span class="ellipsis">{t("settings.title")}</span>
     </button>
-    <p class="shortcut-hint">
-      <kbd class="kbd">/</kbd> {t("sidebar.toSearch")} · <kbd class="kbd">i</kbd> {t("sidebar.toImport")}
-    </p>
+    <button
+      class="foot-btn"
+      class:active={!app.readId && app.view === "trash"}
+      aria-current={!app.readId && app.view === "trash" ? "page" : undefined}
+      title={t("sidebar.trash")}
+      onclick={() => void goView("trash")}
+    >
+      <Icon name="trash-2" size={14} />
+      <span class="ellipsis">{t("sidebar.trash")}</span>
+    </button>
   </div>
+
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+  <div
+    class="resizer"
+    role="separator"
+    tabindex="0"
+    aria-orientation="vertical"
+    aria-label={t("sidebar.resize")}
+    aria-valuemin={MIN_WIDTH}
+    aria-valuemax={MAX_WIDTH}
+    aria-valuenow={width ?? undefined}
+    title={t("sidebar.resize")}
+    onpointerdown={onResizeStart}
+    onkeydown={onResizeKey}
+    ondblclick={resetWidth}
+  ></div>
 </aside>
 
 {#if menu}
@@ -1189,23 +1364,49 @@
 
 <style>
   .sidebar {
+    position: relative;
     display: flex;
     flex-direction: column;
     height: 100%;
     min-width: 0;
+    min-height: 0;
+    overflow: hidden;
     background: var(--raised);
     border-right: 1px solid var(--border);
+    font-size: var(--fs-sm);
+  }
+  .sidebar.resizing {
+    user-select: none;
+  }
+
+  /* ---------------------------------------------------------------- head */
+
+  .head {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px 8px 8px;
   }
   .brand {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 20px 18px 18px;
+    gap: 8px;
+    min-width: 0;
+    padding: 4px 6px;
+  }
+  .brand-name {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-md);
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    color: var(--text);
   }
   /* With several vaults the brand opens the vault switcher. */
   .sidebar :global(.brand-switch) {
     display: flex;
-    margin: 12px 8px 10px;
   }
   .sidebar :global(.brand-switch .dropdown-menu) {
     left: 0;
@@ -1215,9 +1416,8 @@
   .brand-button {
     flex: 1;
     min-width: 0;
-    padding: 8px 10px;
     border: 1px solid transparent;
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     background: none;
     color: var(--muted);
     font: inherit;
@@ -1229,47 +1429,53 @@
   }
   .brand-button:hover,
   .brand-button.open {
-    background: var(--surface);
-    border-color: var(--border);
+    background: var(--sunken);
   }
   .brand-button:focus-visible {
     outline: 2px solid var(--accent-ring);
     outline-offset: 1px;
   }
-  .brand-button .brand-text {
-    flex: 1;
-  }
   .brand-button .spinner.small {
     width: 12px;
     height: 12px;
   }
-  .brand-text {
-    display: flex;
-    flex-direction: column;
+  .search-btn {
     min-width: 0;
-    line-height: 1.2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    height: 28px;
+    padding: 0 4px 0 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: var(--fs-sm);
+    transition:
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
   }
-  .brand-text strong {
-    font-family: var(--font-display);
-    font-size: var(--fs-lg);
-    font-weight: 500;
-    letter-spacing: -0.02em;
+  .search-btn:hover {
+    border-color: var(--border-hover);
     color: var(--text);
   }
-  .brand-vault {
-    font-family: var(--mono);
-    font-size: var(--fs-2xs);
-    color: var(--muted);
+  .search-btn span {
+    flex: 1;
+    text-align: left;
   }
+
+  /* ---------------------------------------------------------------- body */
 
   .body {
     flex: 1;
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
-    padding: 4px 10px 12px;
+    padding: 2px 6px 12px;
     display: flex;
     flex-direction: column;
-    gap: 22px;
+    gap: 10px;
   }
   .nav {
     display: flex;
@@ -1280,10 +1486,12 @@
   .nav-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 6px 10px;
-    border-radius: var(--radius-sm);
-    font-size: var(--fs-base);
+    gap: 8px;
+    min-height: 26px;
+    padding: 3px 8px;
+    border-radius: var(--radius-xs);
+    font-size: var(--fs-sm);
+    line-height: 1.35;
     color: var(--text-soft);
     text-align: left;
     transition:
@@ -1300,10 +1508,15 @@
     color: var(--accent-strong);
     font-weight: 500;
   }
+  .nav-item.drop {
+    background: var(--leaf-soft);
+    box-shadow: inset 0 0 0 1px var(--leaf);
+  }
   .nav-icon {
     flex: none;
     display: grid;
     place-items: center;
+    width: 16px;
     color: var(--muted);
   }
   .nav-item.active .nav-icon {
@@ -1317,71 +1530,63 @@
     margin-left: auto;
   }
 
-  .group {
+  /* ------------------------------------------------------------ sections */
+
+  .section {
     display: flex;
     flex-direction: column;
     gap: 1px;
-    /* Fill the rest of the body so its empty space takes the files context menu and root drops. */
-    flex: 1 0 auto;
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
   }
-  .group.drop-root {
+  /* Files fill the rest of the body so its empty space takes the context menu and root drops. */
+  .section.files {
+    flex: 1 0 auto;
+  }
+  .section.drop-root {
     background: var(--leaf-soft);
     box-shadow: inset 0 0 0 1px var(--leaf);
   }
-  .group-title {
+  .section-head {
+    position: sticky;
+    top: -2px;
+    z-index: 1;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 2px 10px 6px;
-    font-size: var(--fs-2xs);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-    border-radius: var(--radius-xs);
+    gap: 2px;
+    background: var(--raised);
   }
-  .group-title:hover {
+  .section-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 26px;
+    padding: 0 6px 0 4px;
+    border-radius: var(--radius-xs);
+    font-size: var(--fs-2xs);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    text-align: left;
+  }
+  .section-title:hover {
     color: var(--text);
   }
-  .chev {
-    display: grid;
-    place-items: center;
-    transition: transform var(--t-fast) var(--ease-out);
+  .section-title .chev {
+    width: 12px;
   }
-  .chev.open {
-    transform: rotate(90deg);
-  }
-  .group-title.static {
-    cursor: default;
-  }
-  .group-title.static:hover {
-    color: var(--muted);
-  }
-  .tree {
+  .tools {
     display: flex;
-    flex-direction: column;
     gap: 1px;
+    opacity: 0.55;
+    transition: opacity var(--t-fast) var(--ease-out);
   }
-  .tree-item {
-    width: 100%;
-    font-size: var(--fs-sm);
-    color: var(--text-soft);
-    gap: 6px;
+  .section-head:hover .tools,
+  .tools:focus-within {
+    opacity: 1;
   }
-  .tree-page {
-    color: var(--muted);
-  }
-  .tree-folder.active {
-    color: var(--accent-strong);
-  }
-  .group-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding-right: 4px;
-  }
-  .tools,
   .row-actions {
     display: flex;
     gap: 1px;
@@ -1394,25 +1599,69 @@
     border-radius: var(--radius-xs);
     color: var(--muted);
   }
-  .tool:hover {
+  .tool:hover:not(:disabled) {
     background: var(--sunken);
     color: var(--text);
+  }
+  .tool:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .chev {
+    display: grid;
+    place-items: center;
+    transition: transform var(--t-fast) var(--ease-out);
+  }
+  .chev.open {
+    transform: rotate(90deg);
+  }
+
+  /* ---------------------------------------------------------------- tree */
+
+  .tree {
+    display: flex;
+    flex-direction: column;
   }
   .tree-row {
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0;
+  }
+  .tree-item {
+    flex: 1;
+    min-width: 0;
+    padding-right: 8px;
+    color: var(--text-soft);
+  }
+  .tree-folder {
+    color: var(--text);
+  }
+  .tree-folder.active {
+    color: var(--accent-strong);
   }
   .tree-row.drop {
     background: var(--leaf-soft);
     box-shadow: inset 0 0 0 1px var(--leaf);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-xs);
+  }
+  /* Indent guides, one per ancestor level, like Obsidian's file explorer. */
+  .guide {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--border-strong);
+    pointer-events: none;
+  }
+  .tree:hover .guide {
+    background: var(--border-hover);
   }
   .chev-btn {
-    flex: none;
-    width: 18px;
-    height: 24px;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 16px;
+    height: 22px;
     display: grid;
     place-items: center;
     color: var(--muted);
@@ -1420,15 +1669,15 @@
   }
   .chev-btn:hover {
     color: var(--text);
+    background: var(--border);
   }
   .row-actions {
     position: absolute;
-    right: 4px;
+    right: 2px;
     top: 50%;
     transform: translateY(-50%);
     opacity: 0;
     pointer-events: none;
-    background: var(--raised);
     border-radius: var(--radius-xs);
   }
   .tree-row:hover .row-actions,
@@ -1460,60 +1709,67 @@
   .hint {
     display: flex;
     gap: 8px;
-    padding: 12px;
+    margin: 4px 2px;
+    padding: 10px;
     font-size: var(--fs-xs);
     line-height: 1.5;
     color: var(--muted);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    background: var(--surface);
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
   }
   .hint :global(svg) {
     margin-top: 2px;
   }
 
-  .foot {
-    flex: none;
-    padding: 10px 10px 14px;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .search-btn {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 6px 6px 10px;
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--border);
-    background: var(--surface);
+  /* ------------------------------------------------------- reading paths */
+
+  .path-head .chev {
+    width: 16px;
     color: var(--muted);
-    font-size: var(--fs-sm);
-    transition:
-      border-color var(--t-fast) var(--ease-out),
-      color var(--t-fast) var(--ease-out);
   }
-  .search-btn:hover {
-    border-color: var(--border-hover);
-    color: var(--text);
-  }
-  .search-btn span {
-    flex: 1;
-    text-align: left;
-  }
-  @media (max-height: 700px) {
-    .shortcut-hint {
-      display: none;
-    }
-  }
-  .shortcut-hint {
+  .count {
+    flex: none;
+    font-family: var(--mono);
     font-size: var(--fs-2xs);
     color: var(--muted);
-    text-align: center;
   }
+  .path-pages {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin-left: 15px;
+    padding-left: 6px;
+    border-left: 1px solid var(--border-strong);
+  }
+  .path-input {
+    width: 100%;
+    margin: 2px 0;
+    font-size: var(--fs-sm);
+  }
+  .path-page {
+    padding-left: 6px;
+  }
+  .path-page.missing {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .path-num {
+    flex: none;
+    min-width: 14px;
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+    text-align: right;
+  }
+  .path-empty {
+    margin: 2px 0 4px 10px;
+    font-size: var(--fs-xs);
+    color: var(--muted);
+  }
+
+  /* ------------------------------------------------------ saved searches */
+
   .saved-row {
     position: relative;
     display: flex;
@@ -1526,42 +1782,82 @@
   }
   .saved-remove {
     position: absolute;
-    right: 4px;
+    right: 2px;
+    width: 22px;
+    height: 22px;
     opacity: 0;
   }
   .saved-row:hover .saved-remove,
   .saved-remove:focus-visible {
     opacity: 1;
   }
-  .path-input {
-    width: 100%;
-    margin: 2px 0;
-    font-size: var(--fs-sm);
-  }
-  .path-page {
-    padding-left: 26px;
-  }
-  .path-page.missing {
-    opacity: 0.55;
-    text-decoration: line-through;
-  }
-  .path-num {
+
+  /* ---------------------------------------------------------------- foot */
+
+  .foot {
     flex: none;
-    width: 16px;
-    font-family: var(--mono);
-    font-size: var(--fs-2xs);
-    color: var(--muted);
-    text-align: right;
+    display: flex;
+    gap: 2px;
+    padding: 6px;
+    border-top: 1px solid var(--border);
   }
-  .path-empty {
-    margin: 2px 0 4px 26px;
+  .foot-btn {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: var(--radius-xs);
+    color: var(--muted);
     font-size: var(--fs-xs);
-    color: var(--muted);
+    transition:
+      background var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
   }
-  .muted-badge {
+  .foot-btn:hover {
+    background: var(--sunken);
+    color: var(--text);
+  }
+  .foot-btn.active {
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+    color: var(--accent-strong);
+  }
+
+  /* --------------------------------------------------------- resize grip */
+
+  .resizer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 2;
+    width: 6px;
+    cursor: col-resize;
+    touch-action: none;
+  }
+  .resizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 2px;
+    width: 2px;
     background: transparent;
-    color: var(--muted);
+    transition: background var(--t-fast) var(--ease-out);
   }
+  .resizer:hover::after,
+  .resizer:focus-visible::after,
+  .sidebar.resizing .resizer::after {
+    background: var(--border-hover);
+  }
+  .resizer:focus-visible {
+    outline: none;
+  }
+
   .row-emoji {
     font-size: 13px;
     line-height: 1;
