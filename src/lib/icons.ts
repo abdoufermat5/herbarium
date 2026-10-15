@@ -48,7 +48,8 @@ export type IconName =
   | "folders"
   | "tree-structure"
   | "download-simple"
-  | "dots-three";
+  | "dots-three"
+  | "collapse-all";
 
 export const icons: Record<IconName, string> = {
   "leaf":
@@ -143,4 +144,7 @@ export const icons: Record<IconName, string> = {
     '<path d="M228,144v64a12,12,0,0,1-12,12H40a12,12,0,0,1-12-12V144a12,12,0,0,1,24,0v52H204V144a12,12,0,0,1,24,0Zm-108.49,8.49a12,12,0,0,0,17,0l40-40a12,12,0,0,0-17-17L140,115V32a12,12,0,0,0-24,0v83L96.49,95.51a12,12,0,0,0-17,17Z"/>',
   "dots-three":
     '<path d="M144,128a16,16,0,1,1-16-16A16,16,0,0,1,144,128ZM60,112a16,16,0,1,0,16,16A16,16,0,0,0,60,112Zm136,0a16,16,0,1,0,16,16A16,16,0,0,0,196,112Z"/>',
+  // Two chevrons pointing inward, drawn to match the Bold weight.
+  "collapse-all":
+    '<path d="M200.49,40.49l-64,64a12,12,0,0,1-17,0l-64-64a12,12,0,0,1,17-17L128,79l55.51-55.52a12,12,0,0,1,17,17Zm0,175-64-64a12,12,0,0,0-17,0l-64,64a12,12,0,0,0,17,17L128,177l55.51,55.52a12,12,0,0,0,17-17Z"/>',
 };

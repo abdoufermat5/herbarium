@@ -5,6 +5,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- Redesigned sidebar, closer to Obsidian's file explorer: denser rows, indent guides in the file tree, chevrons that follow each folder's depth, collapsible Reading paths / Saved searches / Files sections (remembered), sticky section headers, a "Collapse all" button, search at the top and Settings/Trash in a compact bottom bar.
+- The sidebar can be resized by dragging its right edge (or with the arrow keys when the edge is focused); double-click resets it. The width is remembered.
+- Opening a page unfolds its folders in the file tree and scrolls it into view.
+
+### Fixed
+- The bottom of the window was cut off when the file tree was taller than the window: the whole layout grew to the sidebar's height, so the end of the open page could only be reached by resizing the window.
+
 ## [0.4.1] - 2026-10-09
 
 ### Fixed

@@ -207,6 +207,8 @@ export const en = {
   "sidebar.showPages": "Show pages",
   "sidebar.expand": "Expand",
   "sidebar.collapse": "Collapse",
+  "sidebar.collapseAll": "Collapse all",
+  "sidebar.resize": "Resize sidebar",
   "sidebar.openIn": "Open in {editor}",
   "sidebar.noEditor": "No external editor found",
   "sidebar.trash": "Trash",
