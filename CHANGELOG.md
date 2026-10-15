@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-10-15
+
 ### Changed
 - Redesigned sidebar, closer to Obsidian's file explorer: denser rows, indent guides in the file tree, chevrons that follow each folder's depth, collapsible Reading paths / Saved searches / Files sections (remembered), sticky section headers, a "Collapse all" button, search at the top and Settings/Trash in a compact bottom bar.
 - The sidebar can be resized by dragging its right edge (or with the arrow keys when the edge is focused); double-click resets it. The width is remembered.
@@ -177,7 +179,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/abdoufermat5/herbarium/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/abdoufermat5/herbarium/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/abdoufermat5/herbarium/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/abdoufermat5/herbarium/compare/v0.3.1...v0.3.2
