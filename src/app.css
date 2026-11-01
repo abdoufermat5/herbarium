@@ -117,6 +117,13 @@
   --t-fast: 140ms;
   --t-med: 200ms;
   --t-slow: 600ms;
+  --t-enter: 320ms;
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* Soft overshoot spring (~8%), for discrete user actions only */
+  --ease-spring: linear(
+    0, 0.333, 0.624, 0.841, 0.981, 1.057, 1.085, 1.084, 1.069, 1.048, 1.029, 1.014,
+    1.004, 0.998, 0.995, 0.995, 0.995, 0.997, 0.998, 0.999, 1
+  );
 
   /* Layout */
   --sidebar-w: 248px;
@@ -256,6 +263,16 @@ button:disabled {
   cursor: default;
 }
 
+/* Press feedback. Uses the independent `scale` property so it composes with
+   any `transform` a component already sets. */
+button {
+  transition: scale var(--t-fast) var(--ease-out);
+}
+
+button:active:not(:disabled):not([role="menuitem"]):not([role="option"]):not([role="treeitem"]) {
+  scale: 0.98;
+}
+
 input,
 textarea {
   font: inherit;
@@ -327,6 +344,12 @@ body,
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
+}
+
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -456,7 +479,7 @@ body,
     background var(--t-fast) var(--ease-out),
     border-color var(--t-fast) var(--ease-out),
     color var(--t-fast) var(--ease-out),
-    transform var(--t-fast) var(--ease-out);
+    scale var(--t-fast) var(--ease-out);
 }
 
 .btn:hover:not(:disabled) {
@@ -465,7 +488,7 @@ body,
 }
 
 .btn:active:not(:disabled) {
-  transform: scale(0.98);
+  scale: 0.98;
 }
 
 .btn:disabled {
