@@ -10,6 +10,7 @@ export function reducedMotion(): boolean {
 }
 
 interface ViewTransitionHandle {
+  ready: Promise<void>;
   finished: Promise<void>;
   updateCallbackDone: Promise<void>;
 }
@@ -54,6 +55,8 @@ export async function transition(update: () => void | Promise<void>): Promise<vo
     done();
     throw e;
   }
+  // A newer transition skips this one: `ready` then rejects, which is expected.
+  vt.ready.catch(() => undefined);
   vt.finished.then(done, done);
   await vt.updateCallbackDone;
 }
