@@ -195,12 +195,12 @@
   let ringReady = $state(false);
   let ringPlayed = false;
 
-  // Fill the arc from empty once the first reading has rendered.
+  // Fill the arc from empty once the first reading has rendered. No cleanup:
+  // a reload triggered by the same tick would cancel the pending frame.
   $effect(() => {
     if (ringPlayed || !summary || !stats) return;
     ringPlayed = true;
-    const frame = requestAnimationFrame(() => (ringReady = true));
-    return () => cancelAnimationFrame(frame);
+    requestAnimationFrame(() => (ringReady = true));
   });
 
   const ringProgress = $derived.by(() => {
