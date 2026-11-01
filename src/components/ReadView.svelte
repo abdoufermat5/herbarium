@@ -22,6 +22,7 @@
     openPage,
     openInPath,
     setPageInPath,
+    refreshPathProgress,
   } from "../lib/state.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
@@ -431,7 +432,10 @@
       await flushStorage();
       const loaded = await api.getPage(id);
       page = loaded;
-      void api.markRead(id).catch((e) => console.error(e));
+      void api
+        .markRead(id)
+        .then(() => (app.paths.some((p) => p.pages.includes(id)) ? refreshPathProgress() : undefined))
+        .catch((e) => console.error(e));
       baseUpdatedAt = loaded.meta.updatedAt;
       source = loaded.html;
       syncDraft(loaded.meta);

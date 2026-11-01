@@ -115,6 +115,10 @@ export interface ReadingPath {
   pages: string[];
 }
 
+/** `paths.progress`: per path, the pages the user has opened (reading order)
+ *  and how many of its pages are still in the vault. Finished when equal. */
+export type PathProgress = Record<string, { read: string[]; total: number }>;
+
 /** An HTML artifact found in a Claude or ChatGPT data export. */
 export interface AiExportCandidate {
   key: string;

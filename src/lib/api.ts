@@ -40,6 +40,7 @@ import type {
   Page,
   PageMeta,
   PageStorage,
+  PathProgress,
   ReviewGrade,
   ReviewPreview,
   ReviewSettings,
@@ -220,6 +221,11 @@ export const api = {
 
   listPaths(): Promise<ReadingPath[]> {
     return op("paths.list");
+  },
+
+  /** Opened pages of each reading path, and how many pages it holds. */
+  pathProgress(): Promise<PathProgress> {
+    return op("paths.progress");
   },
 
   createPath(name: string, pages: string[] = []): Promise<ReadingPath> {

@@ -13,6 +13,7 @@ import type {
   BulkUpdateResult,
   Config,
   PageMeta,
+  PathProgress,
   ProposalSummary,
   ReadingPath,
   Appearance,
@@ -24,7 +25,7 @@ import type {
   TagCount,
 } from "./types";
 
-export type View = "today" | "list" | "review" | "settings" | "trash" | "graph";
+export type View = "today" | "list" | "review" | "settings" | "trash" | "graph" | "path";
 export type Layout = "grid" | "list";
 /** `relevance` keeps the backend's full-text ranking while searching and falls back to recent otherwise. */
 export type SettingsTab = "general" | "review" | "vault" | "capture" | "ai" | "about";
@@ -98,12 +99,16 @@ interface AppState {
   proposalOpen: boolean;
   savedSearches: SavedSearch[];
   paths: ReadingPath[];
+  /** Opened pages of each reading path (see `paths.progress`); grows its tree. */
+  pathProgress: PathProgress;
   /** Icons and colours of folders and tags. */
   appearance: Appearance;
   /** Page previews by id (made in the background by the Thumbnailer). */
   previews: Record<string, PreviewDigest>;
   /** The reading path the reader was opened from, for previous/next. */
   pathId: string | null;
+  /** The reading path the path view (its tree) shows. */
+  pathView: string | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
@@ -198,9 +203,11 @@ export const app: AppState = $state({
   proposalOpen: false,
   savedSearches: [],
   paths: [],
+  pathProgress: {},
   appearance: { folders: {}, tags: {} },
   previews: {},
   pathId: null,
+  pathView: null,
   focusMode: false,
   aiImportOpen: false,
   ai: null,
@@ -361,7 +368,7 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
-  const [tags, folders, due, library, settings, stats, proposals, searches, paths, looks] = await Promise.allSettled([
+  const [tags, folders, due, library, settings, stats, proposals, searches, paths, looks, progress] = await Promise.allSettled([
     api.tags(),
     api.folders(),
     api.reviewToday(),
@@ -372,6 +379,7 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     api.savedSearches(),
     api.listPaths(),
     api.appearance(),
+    api.pathProgress(),
   ]);
   // A newer refresh owns the shared state; this one only hands back its library.
   if (seq !== refreshSeq) return library.status === "fulfilled" ? library.value : null;
@@ -407,6 +415,8 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
   else console.error(paths.reason);
   if (looks.status === "fulfilled") app.appearance = looks.value;
   else console.error(looks.reason);
+  if (progress.status === "fulfilled") app.pathProgress = progress.value;
+  else console.error(progress.reason);
 
   if (library.status === "rejected") {
     console.error(library.reason);
@@ -578,9 +588,11 @@ export function resetWorkspace() {
   app.proposalOpen = false;
   app.savedSearches = [];
   app.paths = [];
+  app.pathProgress = {};
   app.appearance = { folders: {}, tags: {} };
   app.previews = {};
   app.pathId = null;
+  app.pathView = null;
   app.focusMode = false;
   knownProposals = null;
   app.createRequest = null;
@@ -775,6 +787,25 @@ export async function openInPath(pathId: string, pageId: string): Promise<boolea
   const opened = await openPage(pageId);
   if (opened) app.pathId = pathId;
   return opened;
+}
+
+/** Show a reading path: its tree and its pages in order. */
+export function openPathView(pathId: string): Promise<boolean> {
+  return go(() => {
+    app.reviewSession = false;
+    app.readId = null;
+    app.pathView = pathId;
+    app.view = "path";
+  });
+}
+
+/** Reload how far each reading path has been read (after a page was opened). */
+export async function refreshPathProgress(): Promise<void> {
+  try {
+    app.pathProgress = await api.pathProgress();
+  } catch (e) {
+    console.error(e);
+  }
 }
 
 /** Run a reading-path change and adopt the result; errors are toasted. */
