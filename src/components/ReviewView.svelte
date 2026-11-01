@@ -1,20 +1,28 @@
 <script lang="ts">
+  import { onMount, untrack } from "svelte";
   import { api } from "../lib/api";
   import {
     app,
     errorMessage,
+    fmtDay,
     goAll,
+    nextDueLine,
     openPage,
     refreshAll,
+    session,
     startReviewSession,
     toast,
   } from "../lib/state.svelte";
   import { dueInfo, fmtDate, fmtDateTime, fmtDuration, plural } from "../lib/format";
   import type { PageMeta, ReviewGrade, ReviewStats } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import Illustration from "../lib/Illustration.svelte";
+  import { reducedMotion } from "../lib/motion";
   import { reveal } from "../lib/reveal";
   import PresetButtons from "./PresetButtons.svelte";
-  import { i18n, LOCALES, t } from "../lib/i18n.svelte";
+  import SessionComplete from "./SessionComplete.svelte";
+  import VitalityLeaf from "./VitalityLeaf.svelte";
+  import { t } from "../lib/i18n.svelte";
 
   const now = Date.now();
 
@@ -36,6 +44,36 @@
   let listEl = $state<HTMLDivElement | null>(null);
   let expanded = $state<Record<string, boolean>>({});
   let forecastView = $state<"chart" | "table">("chart");
+
+  /** A number that counts up to its value (500ms); instant under reduced motion. */
+  function countUp(get: () => number) {
+    let shown = $state(0);
+    $effect(() => {
+      const to = get();
+      const from = untrack(() => shown);
+      if (from === to || reducedMotion()) {
+        shown = to;
+        return;
+      }
+      const start = performance.now();
+      let frame = requestAnimationFrame(function step(now) {
+        const k = Math.min(1, (now - start) / 500);
+        shown = from + (to - from) * (1 - Math.pow(1 - k, 3));
+        if (k < 1) frame = requestAnimationFrame(step);
+      });
+      return () => cancelAnimationFrame(frame);
+    });
+    return {
+      get value() {
+        return Math.round(shown);
+      },
+    };
+  }
+
+  const nDue = countUp(() => shownStats?.dueTotal ?? 0);
+  const nOverdue = countUp(() => shownStats?.overdue ?? 0);
+  const nToday = countUp(() => shownStats?.reviewedToday ?? 0);
+  const nTotal = countUp(() => shownStats?.totalReviews ?? 0);
 
   /** Load the (capped) due queue and the uncapped statistics independently.
    *  `queueLoaded` stays true across reloads so the list never flashes back to
@@ -154,17 +192,17 @@
     return t(`review.grade.${grade}`);
   }
 
-  /** Format a UTC `YYYY-MM-DD` day as a locale date without timezone drift. */
-  /** Activity heatmap: columns are weeks (Monday first, UTC), oldest left. */
+  /** Activity heatmap ("the garden"): columns are weeks (Monday first, UTC), oldest left. */
   const activity = $derived(shownStats?.activity ?? []);
   const activityTotal = $derived(activity.reduce((sum, d) => sum + d.count, 0));
   const activityMax = $derived(Math.max(0, ...activity.map((d) => d.count)));
+  type Cell = { day: string; count: number; i: number };
   const activityWeeks = $derived.by(() => {
-    if (activity.length === 0) return [] as Array<Array<(typeof activity)[number] | null>>;
+    if (activity.length === 0) return [] as Array<Array<Cell | null>>;
     const [y, m, d] = activity[0].day.split("-").map(Number);
     // getUTCDay: 0 = Sunday; shift so Monday is row 0.
     const lead = (new Date(Date.UTC(y, m - 1, d)).getUTCDay() + 6) % 7;
-    const cells: Array<(typeof activity)[number] | null> = [...Array(lead).fill(null), ...activity];
+    const cells: Array<Cell | null> = [...Array(lead).fill(null), ...activity.map((a, i) => ({ ...a, i }))];
     const weeks = [];
     for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
     return weeks;
@@ -176,15 +214,52 @@
     return Math.min(4, Math.max(1, Math.ceil((count / activityMax) * 4)));
   }
 
-  function fmtDay(day: string): string {
-    const [y, m, d] = day.split("-").map(Number);
-    if (!y || !m || !d) return day;
-    return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
-      month: "short",
-      day: "numeric",
-      timeZone: "UTC",
-    });
+  // One roving tab stop for the whole garden; arrows move between days.
+  let heatEl = $state<HTMLDivElement | null>(null);
+  let heatWrap = $state<HTMLDivElement | null>(null);
+  let heatFocus = $state(-1);
+  const heatActive = $derived(heatFocus >= 0 ? Math.min(heatFocus, activity.length - 1) : activity.length - 1);
+  let tip = $state<{ text: string; x: number; y: number } | null>(null);
+
+  function showTip(el: HTMLElement, cell: Cell) {
+    const wrap = heatWrap?.getBoundingClientRect();
+    if (!wrap) return;
+    const box = el.getBoundingClientRect();
+    tip = {
+      text: `${fmtDay(cell.day)} · ${plural(cell.count, "review")}`,
+      x: box.left - wrap.left + box.width / 2,
+      y: box.top - wrap.top,
+    };
   }
+
+  function onCellKey(e: KeyboardEvent, i: number) {
+    const step =
+      e.key === "ArrowLeft" ? -7 : e.key === "ArrowRight" ? 7 : e.key === "ArrowUp" ? -1 : e.key === "ArrowDown" ? 1
+      : e.key === "Home" ? -i : e.key === "End" ? activity.length - 1 - i : 0;
+    if (!step) return;
+    e.preventDefault();
+    const next = Math.max(0, Math.min(activity.length - 1, i + step));
+    heatFocus = next;
+    heatEl?.querySelector<HTMLElement>(`[data-i="${next}"]`)?.focus();
+  }
+
+  const utcToday = new Date().toISOString().slice(0, 10);
+
+  // R starts a session, as on the Today board.
+  function onKey(e: KeyboardEvent) {
+    if (e.key.toLowerCase() !== "r" || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (app.view !== "review" || app.readId || !queueLoaded || due.length === 0) return;
+    if (app.paletteOpen || app.importOpen || document.querySelector('[aria-modal="true"]')) return;
+    const el = e.target as HTMLElement | null;
+    if (el?.closest("input, textarea, select, [contenteditable='true']")) return;
+    e.preventDefault();
+    void startReviewSession();
+  }
+
+  onMount(() => {
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   function barHeight(count: number): string {
     if (count <= 0) return "0%";
@@ -192,6 +267,9 @@
   }
 </script>
 
+{#if session.summary}
+  <SessionComplete />
+{:else}
 <div class="pane">
   <div class="inner">
     <header class="head">
@@ -209,6 +287,7 @@
           >
             <Icon name="calendar-clock" size={14} />
             {t("review.start")}
+            <span class="kbd">R</span>
           </button>
         {/if}
         <button class="btn" onclick={() => void goAll()}>
@@ -228,19 +307,19 @@
       <dl class="stats">
         <div class="stat">
           <dt class="stat-l">{t("review.stat.due")}</dt>
-          <dd class="stat-n" class:zero={shownStats.dueTotal === 0}>{shownStats.dueTotal}</dd>
+          <dd class="stat-n" class:zero={shownStats.dueTotal === 0}>{nDue.value}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.overdue")}</dt>
-          <dd class="stat-n" class:hot={shownStats.overdue > 0} class:zero={shownStats.overdue === 0}>{shownStats.overdue}</dd>
+          <dd class="stat-n" class:hot={shownStats.overdue > 0} class:zero={shownStats.overdue === 0}>{nOverdue.value}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.today")}</dt>
-          <dd class="stat-n" class:zero={shownStats.reviewedToday === 0}>{shownStats.reviewedToday}</dd>
+          <dd class="stat-n" class:zero={shownStats.reviewedToday === 0}>{nToday.value}</dd>
         </div>
         <div class="stat">
           <dt class="stat-l">{t("review.stat.total")}</dt>
-          <dd class="stat-n" class:zero={shownStats.totalReviews === 0}>{shownStats.totalReviews}</dd>
+          <dd class="stat-n" class:zero={shownStats.totalReviews === 0}>{nTotal.value}</dd>
         </div>
       </dl>
       {#if statsError}
@@ -266,10 +345,11 @@
         <button class="btn btn-sm" onclick={load}>{t("boot.retry")}</button>
       </div>
     {:else if due.length === 0}
-      <div class="empty">
-        <span class="empty-icon"><Icon name="circle-check" size={20} /></span>
+      <div class="empty caught">
+        <Illustration name="watering-can" size={120} animate />
         <strong>{t("review.caughtUp")}</strong>
         <span>{t("review.caughtUpHint")}</span>
+        {#if shownStats}<span class="caught-next">{nextDueLine(shownStats)}</span>{/if}
         <button class="btn btn-sm" onclick={() => void goAll()}>{t("review.browse")}</button>
       </div>
     {:else}
@@ -298,7 +378,7 @@
                 onkeydown={(e) => onRowKey(e, i)}
                 onclick={() => void openPage(p.id)}
               >
-                <span class="thumb"><Icon name="leaf" size={15} /></span>
+                <span class="thumb"><VitalityLeaf meta={p} size={18} /></span>
                 <span class="body">
                   <span class="title ellipsis">{p.title || t("common.untitled")}</span>
                   <span class="meta">
@@ -430,17 +510,20 @@
             role="list"
             aria-label={t("review.forecast.chartLabel", { total: forecastTotal })}
           >
-            {#each upcoming as day (day.day)}
+            {#each upcoming as day, k (day.day)}
               <div
                 class="bar-col"
+                class:today={day.day === utcToday}
                 role="listitem"
                 aria-label={`${fmtDay(day.day)}: ${plural(day.count, "page")}`}
               >
                 <span class="bar-count" aria-hidden="true">{day.count}</span>
                 <span class="bar-track" aria-hidden="true">
-                  <span class="bar" style={`height:${barHeight(day.count)}`}></span>
+                  <span class="bar" style:height={barHeight(day.count)} style:--k={k}></span>
                 </span>
-                <span class="bar-day" aria-hidden="true">{fmtDay(day.day)}</span>
+                <span class="bar-day" aria-hidden="true">
+                  {day.day === utcToday ? t("review.forecast.todayTag") : fmtDay(day.day)}
+                </span>
               </div>
             {/each}
           </div>
@@ -472,37 +555,65 @@
           <h2 class="fc-title">{t("review.activity.title")}</h2>
           <p class="fc-hint">{t("review.activity.hint", { total: activityTotal })}</p>
         </div>
-        <dl class="streaks">
-          <div><dt>{t("review.activity.streak")}</dt><dd>{plural(shownStats.streak, "day")}</dd></div>
-          <div><dt>{t("review.activity.longest")}</dt><dd>{plural(shownStats.longestStreak, "day")}</dd></div>
-        </dl>
+        <div class="fc-side">
+          {#if shownStats.streak > 0}
+            <p class="streak-callout">
+              <Icon name="leaf" size={13} />
+              {t("review.streak.line", { count: shownStats.streak })}
+              {#if shownStats.streak > 1 && shownStats.streak === shownStats.longestStreak}
+                <span class="best">{t("review.streak.best")}</span>
+              {/if}
+            </p>
+          {/if}
+          <dl class="streaks">
+            <div><dt>{t("review.activity.longest")}</dt><dd>{plural(shownStats.longestStreak, "day")}</dd></div>
+          </dl>
+        </div>
       </header>
       {#if activityTotal === 0}
         <p class="fc-empty muted">{t("review.activity.empty")}</p>
       {:else}
-        <div
-          class="heatmap"
-          role="img"
-          aria-label={t("review.activity.label", {
-            total: activityTotal,
-            streak: shownStats.streak,
-            longest: shownStats.longestStreak,
-          })}
-        >
-          {#each activityWeeks as week, w (w)}
-            <div class="hm-week">
-              {#each week as cell, i (i)}
-                {#if cell}
-                  <span
-                    class="hm-cell l{level(cell.count)}"
-                    title={`${fmtDay(cell.day)}: ${plural(cell.count, "review")}`}
-                  ></span>
-                {:else}
-                  <span class="hm-cell blank"></span>
-                {/if}
-              {/each}
-            </div>
-          {/each}
+        <div class="heat-wrap" bind:this={heatWrap}>
+          <div
+            class="heatmap"
+            role="group"
+            aria-label={t("review.activity.label", {
+              total: activityTotal,
+              streak: shownStats.streak,
+              longest: shownStats.longestStreak,
+            })}
+            bind:this={heatEl}
+            onscroll={() => (tip = null)}
+          >
+            {#each activityWeeks as week, w (w)}
+              <div class="hm-week">
+                {#each week as cell, i (i)}
+                  {#if cell}
+                    <button
+                      class="hm-cell l{level(cell.count)}"
+                      class:today={cell.day === utcToday}
+                      data-i={cell.i}
+                      tabindex={cell.i === heatActive ? 0 : -1}
+                      aria-label={`${fmtDay(cell.day)}: ${plural(cell.count, "review")}`}
+                      onmouseenter={(e) => showTip(e.currentTarget, cell)}
+                      onmouseleave={() => (tip = null)}
+                      onfocus={(e) => {
+                        heatFocus = cell.i;
+                        showTip(e.currentTarget, cell);
+                      }}
+                      onblur={() => (tip = null)}
+                      onkeydown={(e) => onCellKey(e, cell.i)}
+                    ></button>
+                  {:else}
+                    <span class="hm-cell blank"></span>
+                  {/if}
+                {/each}
+              </div>
+            {/each}
+          </div>
+          {#if tip}
+            <div class="hm-tip" role="tooltip" style:left={`${tip.x}px`} style:top={`${tip.y}px`}>{tip.text}</div>
+          {/if}
         </div>
         <div class="hm-legend" aria-hidden="true">
           <span>{t("review.activity.less")}</span>
@@ -514,6 +625,7 @@
     {/if}
   </div>
 </div>
+{/if}
 
 <style>
   .pane {
@@ -586,7 +698,7 @@
   }
   .stat-n {
     margin: 0;
-    font-family: var(--font-display);
+    font-family: var(--mono);
     font-size: var(--fs-2xl);
     font-weight: 500;
     line-height: 1;
@@ -674,8 +786,7 @@
     width: 30px;
     height: 30px;
     border-radius: var(--radius-sm);
-    background: var(--leaf-soft);
-    color: var(--leaf);
+    background: var(--sunken);
   }
 
   .body {
@@ -843,8 +954,22 @@
     width: 100%;
     min-height: 0;
     border-radius: var(--radius-xs) var(--radius-xs) 0 0;
-    background: var(--leaf);
-    transition: height var(--t-med) var(--ease-out);
+    background: color-mix(in oklab, var(--c-sage) 45%, var(--surface));
+    transform-origin: bottom;
+    /* Staggered rise, one bar after the next. */
+    animation: bar-rise 420ms var(--ease-out) calc(var(--k) * 35ms) backwards;
+  }
+  .bar-col.today .bar {
+    background: var(--c-sage);
+  }
+  .bar-col.today .bar-day {
+    color: var(--text);
+    font-weight: 500;
+  }
+  @keyframes bar-rise {
+    from {
+      transform: scaleY(0);
+    }
   }
   .bar-day {
     font-size: var(--fs-2xs);
@@ -857,6 +982,27 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+  .fc-side {
+    display: flex;
+    align-items: flex-start;
+    gap: 20px;
+    flex-wrap: wrap;
+  }
+  .streak-callout {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--c-sage-soft);
+    color: var(--c-sage);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+  }
+  .streak-callout .best {
+    font-weight: 400;
   }
   .streaks {
     display: flex;
@@ -878,40 +1024,82 @@
     font-weight: 500;
     color: var(--text);
   }
+  .heat-wrap {
+    position: relative;
+  }
   .heatmap {
     display: flex;
-    gap: 2px;
+    gap: 3px;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding: 2px 2px 4px;
   }
   .hm-week {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
   }
   .hm-cell {
     display: block;
     width: 11px;
     height: 11px;
+    padding: 0;
+    border: 0;
     border-radius: 2px;
     background: var(--sunken);
     flex: none;
   }
+  button.hm-cell {
+    cursor: default;
+    transition: transform var(--t-fast) var(--ease-out);
+  }
+  button.hm-cell:hover,
+  button.hm-cell:focus-visible {
+    transform: scale(1.35);
+  }
+  button.hm-cell:focus-visible {
+    outline: 2px solid var(--accent-strong);
+    outline-offset: 1px;
+    border-radius: 2px;
+  }
+  .hm-cell.today {
+    box-shadow: 0 0 0 1px var(--text-soft);
+  }
   .hm-cell.blank {
     background: transparent;
   }
-  /* One hue, light to dark: the share of the busiest day. */
+  /* One hue, stepped from bare soil to full green: the share of the busiest day. */
   .hm-cell.l1 {
-    background: color-mix(in oklab, var(--leaf) 30%, var(--surface));
+    background: color-mix(in oklab, var(--c-sage) 28%, var(--sunken));
   }
   .hm-cell.l2 {
-    background: color-mix(in oklab, var(--leaf) 55%, var(--surface));
+    background: color-mix(in oklab, var(--c-sage) 50%, var(--sunken));
   }
   .hm-cell.l3 {
-    background: color-mix(in oklab, var(--leaf) 78%, var(--surface));
+    background: color-mix(in oklab, var(--c-sage) 75%, var(--sunken));
   }
   .hm-cell.l4 {
-    background: var(--leaf);
+    background: var(--c-sage);
+  }
+  .hm-tip {
+    position: absolute;
+    z-index: 2;
+    transform: translate(-50%, calc(-100% - 8px));
+    padding: 4px 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    box-shadow: var(--shadow);
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--text);
+    white-space: nowrap;
+    pointer-events: none;
+    animation: tip-in var(--t-fast) var(--ease-out);
+  }
+  @keyframes tip-in {
+    from {
+      opacity: 0;
+    }
   }
   .hm-legend {
     display: flex;
@@ -930,6 +1118,18 @@
   .fc-empty {
     font-size: var(--fs-sm);
     margin: 0;
+  }
+
+  .caught {
+    padding: 48px 20px 56px;
+  }
+  .caught :global(svg) {
+    margin-bottom: 8px;
+  }
+  .caught-next {
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    color: var(--muted);
   }
 
   .fc-table {

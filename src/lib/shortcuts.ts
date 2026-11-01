@@ -123,6 +123,8 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "reviewSkip", section: "review", context: "review", action: "shortcuts.action.reviewSkip", keys: ["S"] },
   { id: "exitReview", section: "review", context: "review", action: "shortcuts.action.exitReview", keys: ["Esc"] },
   { id: "startReview", section: "review", context: "list", action: "shortcuts.action.startReview", keys: ["R"] },
+  { id: "sessionPrimary", section: "review", context: "review", action: "shortcuts.action.sessionPrimary", keys: ["Enter"] },
+  { id: "sessionBack", section: "review", context: "review", action: "shortcuts.action.sessionBack", keys: ["Esc"] },
 
   // Reader and HTML editor
   { id: "inspector", section: "editor", context: "reader", action: "shortcuts.action.inspector", keys: ["I"] },
