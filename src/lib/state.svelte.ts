@@ -230,17 +230,53 @@ export function errorMessage(error: unknown): string {
 
 let toastSeq = 0;
 
+/** Each toast's remaining lifetime; `handle` is unset while the toasts are paused. */
+const toastTimers = new Map<number, { handle?: ReturnType<typeof setTimeout>; left: number; since: number }>();
+
+function armToast(id: number) {
+  const timer = toastTimers.get(id);
+  if (!timer) return;
+  timer.since = Date.now();
+  timer.handle = setTimeout(() => dismissToast(id), timer.left);
+}
+
 /** Show a toast and return its id. `action` adds a button that runs it and dismisses the toast. */
 export function toast(message: string, kind: ToastKind = "info", ttl?: number, action?: ToastAction): number {
   const id = ++toastSeq;
   app.toasts = [...app.toasts, { id, message, kind, action }].slice(-4);
-  const life = ttl ?? (kind === "error" ? 6000 : 4200);
-  setTimeout(() => dismissToast(id), life);
+  // Toasts pushed off the stack no longer need a timer.
+  for (const known of toastTimers.keys()) {
+    if (!app.toasts.some((x) => x.id === known)) dismissToast(known);
+  }
+  toastTimers.set(id, { left: ttl ?? (kind === "error" ? 6000 : 4200), since: 0 });
+  if (!toastsPaused) armToast(id);
   return id;
 }
 
 export function dismissToast(id: number) {
+  clearTimeout(toastTimers.get(id)?.handle);
+  toastTimers.delete(id);
   app.toasts = app.toasts.filter((t) => t.id !== id);
+}
+
+let toastsPaused = false;
+
+/** Hold every toast's countdown (pointer over the stack, focus inside it). */
+export function pauseToasts() {
+  toastsPaused = true;
+  const now = Date.now();
+  for (const timer of toastTimers.values()) {
+    if (timer.handle === undefined) continue;
+    clearTimeout(timer.handle);
+    timer.handle = undefined;
+    timer.left = Math.max(timer.left - (now - timer.since), 1200);
+  }
+}
+
+/** Let the countdowns run again; each toast keeps what was left (at least 1.2s). */
+export function resumeToasts() {
+  toastsPaused = false;
+  for (const [id, timer] of toastTimers) if (timer.handle === undefined) armToast(id);
 }
 
 /* ------------------------------------------------------------------ prefs */

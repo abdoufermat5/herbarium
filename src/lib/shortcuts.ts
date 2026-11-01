@@ -91,6 +91,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "settings", section: "application", context: "global", action: "shortcuts.action.settings", keys: [{ mod: "," }] },
   { id: "import", section: "application", context: "list", action: "shortcuts.action.import", keys: ["I"] },
   { id: "escape", section: "application", context: "global", action: "shortcuts.action.escape", keys: ["Esc"] },
+  { id: "dismissToast", section: "application", context: "global", action: "shortcuts.action.dismissToast", keys: ["Esc"] },
 
   // Search — page search field and command palette
   { id: "search", section: "search", context: "list", action: "shortcuts.action.search", keys: ["/"] },
@@ -108,6 +109,11 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "deleteItem", section: "navigation", context: "sidebar", action: "shortcuts.action.deleteItem", keys: ["Delete"] },
   { id: "rangeSelect", section: "navigation", context: "list", action: "shortcuts.action.rangeSelect", keys: [{ click: "shift" }] },
   { id: "multiSelect", section: "navigation", context: "list", action: "shortcuts.action.multiSelect", keys: [{ click: "mod" }] },
+  { id: "moveCard", section: "navigation", context: "list", action: "shortcuts.action.moveCard", keys: ["↑", "↓", "←", "→"] },
+  { id: "selectCard", section: "navigation", context: "list", action: "shortcuts.action.selectCard", keys: ["X"] },
+  { id: "selectAll", section: "navigation", context: "list", action: "shortcuts.action.selectAll", keys: [{ mod: "A" }] },
+  { id: "scheduleCard", section: "navigation", context: "list", action: "shortcuts.action.scheduleCard", keys: ["S"] },
+  { id: "trashCard", section: "navigation", context: "list", action: "shortcuts.action.trashCard", keys: ["Delete"] },
 
   // Review session
   { id: "reviewAgain", section: "review", context: "review", action: "shortcuts.action.reviewAgain", keys: ["1"] },
@@ -116,6 +122,7 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "reviewEasy", section: "review", context: "review", action: "shortcuts.action.reviewEasy", keys: ["4"] },
   { id: "reviewSkip", section: "review", context: "review", action: "shortcuts.action.reviewSkip", keys: ["S"] },
   { id: "exitReview", section: "review", context: "review", action: "shortcuts.action.exitReview", keys: ["Esc"] },
+  { id: "startReview", section: "review", context: "list", action: "shortcuts.action.startReview", keys: ["R"] },
 
   // Reader and HTML editor
   { id: "inspector", section: "editor", context: "reader", action: "shortcuts.action.inspector", keys: ["I"] },
