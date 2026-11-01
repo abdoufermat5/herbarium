@@ -29,6 +29,7 @@
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { fmtDuration, modKey, vaultLabels, vaultName } from "../lib/format";
   import Icon from "../lib/Icon.svelte";
+  import VitalityLeaf from "./VitalityLeaf.svelte";
   import type { IconName } from "../lib/icons";
   import type { PageMeta, ReviewGrade, SearchHit } from "../lib/types";
 
@@ -37,8 +38,31 @@
     group: string;
     label: string;
     hint?: string;
+    /** Keyboard shortcut, rendered as a key cap instead of prose. */
+    kbd?: string;
     icon: IconName;
+    /** Present on page results, drawn as a leaf showing how well it is remembered. */
+    page?: PageMeta;
     run: () => void | Promise<unknown>;
+  }
+
+  /** Split `label` into plain runs and occurrences of the search needle, for <mark> highlighting. */
+  function highlight(label: string, query: string): Array<{ text: string; hit: boolean }> {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return [{ text: label, hit: false }];
+    const lower = label.toLowerCase();
+    const parts: Array<{ text: string; hit: boolean }> = [];
+    let from = 0;
+    for (;;) {
+      const at = lower.indexOf(needle, from);
+      if (at < 0) {
+        if (from < label.length) parts.push({ text: label.slice(from), hit: false });
+        return parts;
+      }
+      if (at > from) parts.push({ text: label.slice(from, at), hit: false });
+      parts.push({ text: label.slice(at, at + needle.length), hit: true });
+      from = at + needle.length;
+    }
   }
 
   let q = $state("");
@@ -192,7 +216,7 @@
         key: "ai",
         group,
         label: t("ai.palette"),
-        hint: modKey("J"),
+        kbd: modKey("J"),
         icon: "sparkle",
         run: () => openAi(),
       },
@@ -402,6 +426,7 @@
         .filter(Boolean)
         .join("   "),
       icon: "file-text" as IconName,
+      page: p,
       run: () => openPage(p.id),
     }));
   });
@@ -553,7 +578,7 @@
     <div class="p-list" id="palette-list" role="listbox" aria-label={t("palette.results")}>
       {#each items as item, i (item.key)}
         {#if i === 0 || items[i - 1].group !== item.group}
-          <div class="p-group">{item.group}</div>
+          <div class="p-group eyebrow" role="presentation">{item.group}</div>
         {/if}
         <div
           id={`palette-item-${i}`}
@@ -568,9 +593,21 @@
             void run(item);
           }}
         >
-          <span class="p-icon"><Icon name={item.icon} size={15} /></span>
-          <span class="p-label ellipsis">{item.label}</span>
-          {#if item.hint}
+          <span class="p-icon">
+            {#if item.page}
+              <VitalityLeaf meta={item.page} size={14} />
+            {:else}
+              <Icon name={item.icon} size={15} />
+            {/if}
+          </span>
+          <span class="p-label ellipsis">
+            {#each highlight(item.label, needle) as part, j (j)}
+              {#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}
+            {/each}
+          </span>
+          {#if item.kbd}
+            <kbd class="kbd p-kbd">{item.kbd}</kbd>
+          {:else if item.hint}
             <span class="p-hint ellipsis">{item.hint}</span>
           {/if}
         </div>
@@ -600,7 +637,7 @@
     justify-content: center;
     padding: 12vh 24px 24px;
     background: var(--scrim);
-    animation: fade-in var(--t-fast) var(--ease-out);
+    animation: palette-scrim var(--t-fast) var(--ease-out);
   }
   .palette {
     width: 580px;
@@ -613,7 +650,7 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     overflow: hidden;
-    animation: pop-in var(--t-med) var(--ease-out);
+    animation: palette-in 160ms var(--ease-out);
   }
   .p-search {
     display: flex;
@@ -642,24 +679,40 @@
   }
   .p-group {
     padding: 10px 10px 4px;
-    font-size: var(--fs-2xs);
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
   }
   .p-item {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 7px 10px;
+    padding: 7px 10px 7px 12px;
     border-radius: var(--radius-sm);
     cursor: pointer;
     color: var(--text-soft);
+    transition:
+      background-color 80ms var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+  /* The active edge: a hairline that grows from the middle of the row. */
+  .p-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 1px;
+    background: var(--text);
+    transform: scaleY(0);
+    transform-origin: center;
+    transition: transform var(--t-fast) var(--ease-out);
   }
   .p-item.active {
-    background: var(--sunken);
-    color: var(--accent-strong);
+    background: var(--raised);
+    color: var(--text);
+  }
+  .p-item.active::before {
+    transform: scaleY(1);
   }
   .p-icon {
     flex: none;
@@ -671,6 +724,14 @@
     min-width: 0;
     font-size: var(--fs-base);
     font-weight: 500;
+  }
+  .p-label mark {
+    background: none;
+    color: var(--text);
+    font-weight: 600;
+  }
+  .p-kbd {
+    flex: none;
   }
   .p-hint {
     flex: none;
@@ -690,6 +751,7 @@
 
   .p-foot {
     display: flex;
+    flex-wrap: wrap;
     gap: 14px;
     padding: 9px 14px;
     border-top: 1px solid var(--border);
@@ -703,15 +765,15 @@
     gap: 4px;
   }
 
-  @keyframes fade-in {
+  @keyframes palette-scrim {
     from {
       opacity: 0;
     }
   }
-  @keyframes pop-in {
+  @keyframes palette-in {
     from {
       opacity: 0;
-      transform: translateY(-6px);
+      transform: scale(0.98) translateY(-4px);
     }
   }
 </style>
