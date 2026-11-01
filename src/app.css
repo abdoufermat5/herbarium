@@ -269,7 +269,8 @@ button {
   transition: scale var(--t-fast) var(--ease-out);
 }
 
-button:active:not(:disabled):not([role="menuitem"]):not([role="option"]):not([role="treeitem"]) {
+/* `:where` keeps the specificity at one element + one pseudo-class, so any component can opt out. */
+button:active:where(:not(:disabled):not([role="menuitem"]):not([role="option"]):not([role="treeitem"])) {
   scale: 0.98;
 }
 

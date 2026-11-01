@@ -76,3 +76,37 @@ export function rafThrottle<A extends unknown[]>(fn: (...args: A) => void): ((..
   };
   return wrapped;
 }
+
+/**
+ * Svelte action: one indicator that slides between the items of a group. The
+ * container holds a `.slide-ind` element and exactly one `.active` direct
+ * child at a time; the action publishes that child's box as `--ind-x/y/w/h`
+ * (and `--ind-on`: 0 when nothing is active) for the indicator to transform to.
+ * Pass any value that changes whenever the active item does.
+ */
+export function slideIndicator(node: HTMLElement, _key?: unknown) {
+  function measure() {
+    const active = node.querySelector<HTMLElement>(":scope > .active");
+    if (active) {
+      node.style.setProperty("--ind-x", `${active.offsetLeft}px`);
+      node.style.setProperty("--ind-y", `${active.offsetTop}px`);
+      node.style.setProperty("--ind-w", `${active.offsetWidth}px`);
+      node.style.setProperty("--ind-h", `${active.offsetHeight}px`);
+    }
+    node.style.setProperty("--ind-on", active ? "1" : "0");
+  }
+  measure();
+  // No slide on the first placement: it should simply be there.
+  const frame = requestAnimationFrame(() => node.setAttribute("data-ready", ""));
+  const resize = new ResizeObserver(measure);
+  resize.observe(node);
+  return {
+    update() {
+      void tick().then(measure);
+    },
+    destroy() {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+    },
+  };
+}

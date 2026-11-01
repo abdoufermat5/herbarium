@@ -3,6 +3,9 @@
   import { folderLook } from "../lib/appearance";
   import { onMount, tick, untrack } from "svelte";
   import { flip } from "svelte/animate";
+  import { slide } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
+  import { slideIndicator } from "../lib/motion";
   import {
     app,
     clearFilters,
@@ -240,6 +243,19 @@
           ?.scrollIntoView({ block: "nearest" });
       });
     });
+  });
+
+  /** Changes whenever the active nav item does, so the indicator knows to slide. */
+  const navKey = $derived(`${app.readId}|${app.view}|${app.folderFilter}|${app.tagFilter}`);
+
+  // The due badge pops when its number changes (not when it first appears with the app).
+  let badgeTick = $state(0);
+  let lastDue = app.dueCount;
+  $effect(() => {
+    const n = app.dueCount;
+    if (n === lastDue) return;
+    lastDue = n;
+    badgeTick++;
   });
 
   const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -1101,7 +1117,8 @@
   </div>
 
   <div class="body">
-    <nav class="nav" aria-label={t("sidebar.library")}>
+    <nav class="nav has-ind" aria-label={t("sidebar.library")} use:slideIndicator={navKey}>
+      <span class="slide-ind" aria-hidden="true"></span>
       <button
         class="nav-item"
         class:active={!app.readId && app.view === "today"}
@@ -1135,7 +1152,9 @@
         <span class="nav-icon"><Icon name="refresh-cw" size={14} /></span>
         <span class="nav-label ellipsis">{t("sidebar.review")}</span>
         {#if app.dueCount > 0}
-          <span class="badge">{app.dueCount}</span>
+          {#key badgeTick}
+            <span class="badge" class:pop={badgeTick > 0}>{app.dueCount}</span>
+          {/key}
         {/if}
       </button>
       <button
@@ -1297,7 +1316,11 @@
       {#if !folded.has("files")}
         <nav class="tree" aria-label={t("sidebar.files")} bind:this={treeEl}>
           {#each rows as row (row.key)}
-            <div animate:flip={{ duration: reduceMotion ? 0 : 120 }}>
+            <div
+              animate:flip={{ duration: reduceMotion ? 0 : 120 }}
+              in:slide={{ duration: reduceMotion ? 0 : 150, easing: cubicOut }}
+              out:slide={{ duration: reduceMotion ? 0 : 110, easing: cubicOut }}
+            >
               {#if row.kind === "creator"}
                 {@render creatorRow(row)}
               {:else if row.kind === "folder"}
@@ -1318,7 +1341,8 @@
     </section>
   </div>
 
-  <div class="foot">
+  <div class="foot has-ind" use:slideIndicator={navKey}>
+    <span class="slide-ind" aria-hidden="true"></span>
     <button
       class="foot-btn"
       class:active={!app.readId && app.view === "settings"}
@@ -1502,11 +1526,57 @@
     background: var(--sunken);
     color: var(--text);
   }
+  .nav-item:focus-visible,
+  .foot-btn:focus-visible,
+  .section-title:focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: -2px;
+  }
   .nav-item.active {
     background: var(--surface);
     box-shadow: 0 0 0 1px var(--border);
     color: var(--accent-strong);
     font-weight: 500;
+  }
+  /* Rows are large click targets: they get no press-scale. */
+  .nav-item:active,
+  .foot-btn:active,
+  .section-title:active {
+    scale: 1;
+  }
+
+  /* One indicator slides between the items of a group (see slideIndicator). */
+  .has-ind {
+    position: relative;
+  }
+  .slide-ind {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: var(--ind-w, 0px);
+    height: var(--ind-h, 0px);
+    transform: translate(var(--ind-x, 0px), var(--ind-y, 0px));
+    border-radius: var(--radius-xs);
+    background: var(--surface);
+    box-shadow: 0 0 0 1px var(--border);
+    opacity: var(--ind-on, 0);
+    pointer-events: none;
+  }
+  .has-ind[data-ready] > .slide-ind {
+    transition:
+      transform var(--t-med) var(--ease-out),
+      opacity var(--t-fast) var(--ease-out);
+  }
+  .has-ind > .nav-item,
+  .has-ind > .foot-btn {
+    position: relative;
+  }
+  .has-ind > .nav-item.active,
+  .has-ind > .foot-btn.active,
+  .has-ind > .nav-item.active:hover,
+  .has-ind > .foot-btn.active:hover {
+    background: transparent;
+    box-shadow: none;
   }
   .nav-item.drop {
     background: var(--leaf-soft);
@@ -1528,6 +1598,14 @@
   }
   .nav-item .badge {
     margin-left: auto;
+  }
+  .badge.pop {
+    animation: badge-pop var(--t-enter) var(--ease-spring);
+  }
+  @keyframes badge-pop {
+    from {
+      transform: scale(0.6);
+    }
   }
 
   /* ------------------------------------------------------------ sections */
