@@ -1,8 +1,16 @@
+<script module lang="ts">
+  /** Where the previous page's progress bar ended, so the next page's bar continues from it. */
+  const hud = { start: 0, fill: 0 };
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy } from "svelte";
   import { api } from "../lib/api";
   import {
     app,
+    session,
+    recordGrade,
+    fmtClock,
     reloadPages,
     toast,
     errorMessage,
@@ -25,6 +33,8 @@
   import Icon from "../lib/Icon.svelte";
   import { t } from "../lib/i18n.svelte";
   import PresetButtons from "./PresetButtons.svelte";
+  import VitalityLeaf from "./VitalityLeaf.svelte";
+  import { reducedMotion } from "../lib/motion";
   import { loadHtmlEditor } from "../lib/lazy";
   import HistoryPanel from "./HistoryPanel.svelte";
   import { exportPageFile } from "../lib/exports";
@@ -114,6 +124,44 @@
   let error = $state<string | null>(null);
   /** Intervals each grade would schedule for the open page (review session only). */
   let preview = $state<ReviewPreview | null>(null);
+  /** Which button was just pressed, for the ~400ms of feedback. */
+  let pressed = $state<ReviewGrade | "skip" | null>(null);
+  let pressTimer: ReturnType<typeof setTimeout> | undefined;
+  /** The reader's content is sliding out: another page is about to open. */
+  let leaving = $state(false);
+  /** The review bar just changed the schedule: its date springs in once. */
+  let pulse = $state(false);
+  let pulseTimer: ReturnType<typeof setTimeout> | undefined;
+  function pulseBar() {
+    pulse = true;
+    clearTimeout(pulseTimer);
+    pulseTimer = setTimeout(() => (pulse = false), 600);
+  }
+
+  // Review-session HUD: progress, the clock and the spring-driven fill.
+  const handled = $derived(session.graded + session.skipped);
+  const sessionTotal = $derived(Math.max(session.total, handled + 1));
+  let clockNow = $state(Date.now());
+  const clock = $derived(fmtClock(clockNow - session.startedAt));
+  let fill = $state(hud.start === session.startedAt ? hud.fill : 0);
+
+  $effect(() => {
+    if (!app.reviewSession) return;
+    const timer = setInterval(() => (clockNow = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+
+  // Continue the bar from where the previous page left it, so it visibly moves.
+  $effect(() => {
+    if (!app.reviewSession) return;
+    const target = Math.min(1, handled / sessionTotal);
+    hud.start = session.startedAt;
+    const raf = requestAnimationFrame(() => {
+      fill = target;
+      hud.fill = target;
+    });
+    return () => cancelAnimationFrame(raf);
+  });
   let frameReady = $state(false);
   let saving = $state(false);
   let deleting = $state(false);
@@ -1187,6 +1235,7 @@
       p.meta = await api.scheduleReview(p.meta.id, minutes);
       baseUpdatedAt = p.meta.updatedAt;
       toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
+      pulseBar();
       void reloadPages();
     } catch (e) {
       toast(`${t("read.scheduleFailed")} ${errorMessage(e)}`, "error");
@@ -1211,6 +1260,23 @@
     }
   }
 
+  const GRADES = [
+    { id: "again", key: "1" },
+    { id: "hard", key: "2" },
+    { id: "good", key: "3" },
+    { id: "easy", key: "4" },
+  ] as const;
+
+  const LEAVE_MS = 200;
+  const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+  /** Press feedback: the button pops and the bar washes in the grade's colour (~400ms). */
+  function press(key: ReviewGrade | "skip") {
+    pressed = key;
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => (pressed = null), 420);
+  }
+
   /** Record a grade; only a successful grade advances the session. */
   async function grade(g: ReviewGrade) {
     const p = page;
@@ -1220,15 +1286,28 @@
       return;
     }
     saving = true;
+    press(g);
+    const inSession = app.reviewSession;
+    const before = $state.snapshot(p.meta);
     try {
-      p.meta = await api.completeReview(p.meta.id, g);
-      baseUpdatedAt = p.meta.updatedAt;
-      toast(t("toast.reviewed", { when: fmtDuration(p.meta.intervalMinutes ?? 1) }), "success");
+      // The page slides away while the grade is written; whichever is slower sets the pace.
+      leaving = inSession && !reducedMotion();
+      const [meta] = await Promise.all([api.completeReview(p.meta.id, g), leaving ? sleep(LEAVE_MS) : undefined]);
+      p.meta = meta;
+      baseUpdatedAt = meta.updatedAt;
       void reloadPages();
-      if (app.reviewSession) await nextReviewPage();
+      if (inSession) {
+        // The HUD's intervals and the wash already say what happened.
+        recordGrade(before, meta, g);
+        await nextReviewPage();
+      } else {
+        toast(t("toast.reviewed", { when: fmtDuration(meta.intervalMinutes ?? 1) }), "success");
+        pulseBar();
+      }
     } catch (e) {
       toast(`${t("read.scheduleFailed")} ${errorMessage(e)}`, "error");
     } finally {
+      leaving = false;
       saving = false;
     }
   }
@@ -1236,18 +1315,22 @@
   async function skip() {
     const p = page;
     if (!p || saving || pageGone) return;
-    // `nextReviewPage` leaves the page due but out of this session; the leave
-    // guard still gets its say so a dirty draft is never dropped.
-    await nextReviewPage(p.meta.id);
+    saving = true;
+    press("skip");
+    try {
+      leaving = !reducedMotion();
+      if (leaving) await sleep(LEAVE_MS);
+      // `nextReviewPage` leaves the page due but out of this session; the leave
+      // guard still gets its say so a dirty draft is never dropped.
+      await nextReviewPage(p.meta.id);
+    } finally {
+      leaving = false;
+      saving = false;
+    }
   }
 
   async function exitSession() {
     await goView(app.view);
-  }
-
-  /** " · 3d" suffix showing what a grade would schedule now, when known. */
-  function previewLabel(grade: ReviewGrade): string {
-    return preview ? ` · ${fmtDurationShort(preview[grade])}` : "";
   }
 
   /* --------------------------------------------------------------- shortcuts */
@@ -1333,6 +1416,8 @@
 
   onDestroy(() => {
     clearTimeout(frameTimer);
+    clearTimeout(pressTimer);
+    clearTimeout(pulseTimer);
     clearTimeout(draftTimer);
     void flushStorage();
     unregisterGuard?.();
@@ -1352,10 +1437,13 @@
 
     {#if page}
       <div class="identity">
-        <h1 class="title ellipsis" title={page.meta.title || t("common.untitled")}>
-          {#if page.meta.ext?.look?.icon}<span class="title-icon">{page.meta.ext.look.icon}</span>{/if}
-          {page.meta.title || t("common.untitled")}
-        </h1>
+        <div class="title-row">
+          <h1 class="title ellipsis" title={page.meta.title || t("common.untitled")}>
+            {#if page.meta.ext?.look?.icon}<span class="title-icon">{page.meta.ext.look.icon}</span>{/if}
+            {page.meta.title || t("common.untitled")}
+          </h1>
+          <VitalityLeaf meta={page.meta} size={18} />
+        </div>
         <div class="meta">
           {#if page.meta.folder}
             <span class="loc"><Icon name="folder" size={12} />{page.meta.folder}</span>
@@ -1528,79 +1616,78 @@
     {/if}
 
     {#if app.reviewSession}
-      <div class="review-bar session-bar">
+      <div class="review-bar session-bar" data-flash={pressed && pressed !== "skip" ? pressed : undefined}>
         <span class="rb-label eyebrow">
           <Icon name="calendar-clock" size={12} />{t("read.session.active")}
         </span>
-        <div class="rb-btns">
-          <button
-            class="btn btn-xs"
-            onclick={() => grade("again")}
-            disabled={saving || pageGone}
-            title={t("read.session.againHint")}
-          >
-            1 · {t("review.again")}{previewLabel("again")}
-          </button>
-          <button
-            class="btn btn-xs"
-            onclick={() => grade("hard")}
-            disabled={saving || pageGone}
-            title={t("read.session.hardHint")}
-          >
-            2 · {t("review.hard")}{previewLabel("hard")}
-          </button>
-          <button
-            class="btn btn-xs btn-primary"
-            onclick={() => grade("good")}
-            disabled={saving || pageGone}
-            title={t("read.session.goodHint")}
-          >
-            3 · {t("review.good")}{previewLabel("good")}
-          </button>
-          <button
-            class="btn btn-xs"
-            onclick={() => grade("easy")}
-            disabled={saving || pageGone}
-            title={t("read.session.easyHint")}
-          >
-            4 · {t("review.easy")}{previewLabel("easy")}
-          </button>
-          <button
-            class="btn btn-xs"
-            onclick={skip}
-            disabled={saving || pageGone}
-            title={t("read.session.skipHint")}
-          >
-            S · {t("read.session.skip")}
-          </button>
+        <div
+          class="hud-progress"
+          role="progressbar"
+          aria-label={t("read.session.progressLabel", { n: Math.min(handled + 1, sessionTotal), total: sessionTotal })}
+          aria-valuemin={0}
+          aria-valuemax={sessionTotal}
+          aria-valuenow={handled}
+        >
+          <span class="hud-count">
+            {t("read.session.progress", { n: Math.min(handled + 1, sessionTotal), total: sessionTotal })}
+          </span>
+          <span class="hud-track" aria-hidden="true">
+            <span class="hud-fill" style:transform={`scaleX(${fill})`}></span>
+          </span>
+        </div>
+        <span class="hud-time" title={t("read.session.elapsed")}>{clock}</span>
+        <div class="grades" role="group" aria-label={t("read.session.active")}>
+          {#each GRADES as g (g.id)}
+            <button
+              class="grade"
+              class:pressed={pressed === g.id}
+              data-grade={g.id}
+              onclick={() => grade(g.id)}
+              disabled={saving || pageGone}
+              title={t(`read.session.${g.id}Hint`)}
+            >
+              <span class="g-top"><kbd class="kbd">{g.key}</kbd>{t(`review.${g.id}`)}</span>
+              <span class="g-int">{preview ? fmtDurationShort(preview[g.id]) : "–"}</span>
+            </button>
+          {/each}
         </div>
         <span class="rb-sep" aria-hidden="true"></span>
         <button
           class="btn btn-xs btn-ghost"
-          onclick={exitSession}
-          title={t("read.session.exitHint")}
-          >Esc · {t("read.session.exit")}</button
+          class:pressed={pressed === "skip"}
+          onclick={skip}
+          disabled={saving || pageGone}
+          title={t("read.session.skipHint")}
         >
-        <span class="rb-keys">{t("read.session.keys")}</span>
-        {#if saving}
-          <span class="spinner" role="status" aria-label={t("read.saving")}></span>
-        {/if}
+          <kbd class="kbd">S</kbd>{t("read.session.skip")}
+        </button>
+        <button class="btn btn-xs btn-ghost" onclick={exitSession} title={t("read.session.exitHint")}>
+          <kbd class="kbd">Esc</kbd>{t("read.session.exit")}
+        </button>
       </div>
     {:else if !app.focusMode}
-      <div class="review-bar">
+      <div class="review-bar" class:pulse>
         {#if page.meta.nextReview}
-          <button class="btn btn-xs done" onclick={() => grade("good")} disabled={saving}>
+          <button
+            class="btn btn-xs done"
+            class:pressed={pressed === "good"}
+            onclick={() => grade("good")}
+            disabled={saving}
+            title={t("review.doneHint")}
+          >
             <Icon name="check" size={12} />{t("review.done")}
           </button>
           <span class="rb-label eyebrow"><Icon name="calendar-clock" size={12} />{t("read.nextReview")}</span>
-          <span class="rb-date" class:overdue={due?.overdue}>
-            {fmtDateTime(page.meta.nextReview)}
-            {#if due?.overdue}· {due.label}{/if}
-          </span>
+          {#key page.meta.nextReview}
+            <span class="rb-date" class:overdue={due?.overdue}>
+              {fmtDateTime(page.meta.nextReview)}
+              {#if due?.overdue}· {due.label}{/if}
+            </span>
+          {/key}
           <span class="rb-sep" aria-hidden="true"></span>
           <span class="rb-label eyebrow">{t("read.reschedule")}</span>
           <div class="rb-btns">
-            <PresetButtons onpick={schedule} disabled={saving || pageGone} />
+            <PresetButtons onpick={schedule} disabled={saving || pageGone} current={page.meta.intervalMinutes} />
           </div>
           <button class="btn btn-xs btn-ghost" onclick={clearReview} disabled={saving || pageGone}>
             {t("common.clear")}
@@ -1620,7 +1707,7 @@
       </div>
     {/if}
 
-    <div class="content">
+    <div class="content" class:leaving class:enter={app.reviewSession && handled > 0}>
       <div class="frame-wrap">
         {#if claudeDependent}
           <div class="notice">
@@ -2073,7 +2160,15 @@
     gap: 3px;
   }
 
+  .title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
   .title {
+    min-width: 0;
     font-family: var(--font-display);
     font-size: var(--fs-lg);
     font-weight: 500;
@@ -2122,6 +2217,9 @@
   }
   .done:hover:not(:disabled) {
     filter: brightness(0.97);
+  }
+  .done.pressed {
+    background: color-mix(in oklab, var(--ok) 18%, var(--ok-soft));
   }
 
   /* Narrow windows: the review bar keeps to one line. */
@@ -2225,6 +2323,15 @@
     font-family: var(--mono);
     font-size: var(--fs-xs);
   }
+  .review-bar.pulse .rb-date {
+    animation: date-in 360ms var(--ease-spring);
+  }
+  @keyframes date-in {
+    from {
+      opacity: 0;
+      transform: translateY(5px);
+    }
+  }
 
   .rb-date.overdue {
     color: var(--danger);
@@ -2247,16 +2354,193 @@
     font-size: var(--fs-xs);
   }
 
-  .rb-keys {
-    margin-left: auto;
-    font-size: var(--fs-xs);
-    color: var(--muted);
+  /* ------------------------------------------------- review session HUD */
+
+  .session-bar {
+    position: relative;
+    isolation: isolate;
+    gap: 12px;
+    padding: 6px 16px;
+  }
+  /* The bar takes the colour of the grade just given, then lets go. */
+  .session-bar::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--g-soft);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-bar[data-flash]::before {
+    animation: bar-wash 420ms var(--ease-out);
+  }
+  @keyframes bar-wash {
+    0% {
+      opacity: 0;
+    }
+    25% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 0;
+    }
   }
 
+  [data-grade="again"],
+  [data-flash="again"] {
+    --g: var(--c-rose);
+    --g-soft: var(--c-rose-soft);
+  }
+  [data-grade="hard"],
+  [data-flash="hard"] {
+    --g: var(--c-amber);
+    --g-soft: var(--c-amber-soft);
+  }
+  [data-grade="good"],
+  [data-flash="good"] {
+    --g: var(--c-sage);
+    --g-soft: var(--c-sage-soft);
+  }
+  [data-grade="easy"],
+  [data-flash="easy"] {
+    --g: var(--c-sky);
+    --g-soft: var(--c-sky-soft);
+  }
+
+  .hud-progress {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 150px;
+    min-width: 96px;
+  }
+  .hud-count {
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    line-height: 1;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+  .hud-track {
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border-strong);
+    overflow: hidden;
+  }
+  .hud-fill {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--c-sage);
+    transform-origin: left center;
+    transform: scaleX(0);
+    transition: transform 400ms var(--ease-spring);
+  }
+  .hud-time {
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .grades {
+    display: flex;
+    gap: 6px;
+    margin-left: auto;
+  }
+  .grade {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 88px;
+    padding: 4px 10px 3px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    line-height: 1.2;
+    transition:
+      background var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+  .grade[data-grade="good"] {
+    border-color: color-mix(in oklab, var(--c-sage) 55%, var(--border-strong));
+  }
+  .grade:hover:not(:disabled) {
+    background: var(--g-soft);
+    border-color: var(--g);
+  }
+  .grade:disabled {
+    opacity: 0.45;
+  }
+  .grade .kbd {
+    height: 16px;
+    min-width: 16px;
+    padding: 0 4px;
+  }
+  .g-top {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .g-int {
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+  .grade.pressed,
+  .grade.pressed:disabled {
+    background: var(--g-soft);
+    border-color: var(--g);
+    color: var(--g);
+    opacity: 1;
+  }
+  .grade.pressed .g-int {
+    color: var(--g);
+  }
+
+  /* A quick dip, then a spring back: the same for every pressed control here. */
+  .pressed {
+    animation: press-pop 360ms var(--ease-spring);
+  }
+  @keyframes press-pop {
+    from {
+      transform: scale(0.92);
+    }
+  }
+
+  .session-bar :global(.btn-ghost .kbd) {
+    height: 16px;
+    min-width: 16px;
+    padding: 0 4px;
+  }
+
+  /* The page slides out to the left as the next one slides in from the right. */
   .content {
     flex: 1;
     min-height: 0;
     display: flex;
+    transition:
+      opacity var(--t-med) var(--ease-out),
+      transform var(--t-med) var(--ease-out);
+  }
+  .content.leaving {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  .content.enter {
+    animation: page-in var(--t-med) var(--ease-out) backwards;
+  }
+  @keyframes page-in {
+    from {
+      opacity: 0;
+      transform: translateX(12px);
+    }
   }
 
   .frame-wrap {
