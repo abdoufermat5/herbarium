@@ -195,12 +195,12 @@
   let ringReady = $state(false);
   let ringPlayed = false;
 
-  // Fill the arc from empty once the first reading has rendered. No cleanup:
-  // a reload triggered by the same tick would cancel the pending frame.
+  // Fill the arc from empty once the first reading has rendered. The second
+  // frame lets the browser paint the empty track before the transition starts.
   $effect(() => {
     if (ringPlayed || !summary || !stats) return;
     ringPlayed = true;
-    requestAnimationFrame(() => (ringReady = true));
+    requestAnimationFrame(() => requestAnimationFrame(() => (ringReady = true)));
   });
 
   const ringProgress = $derived.by(() => {
