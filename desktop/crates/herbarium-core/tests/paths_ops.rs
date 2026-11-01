@@ -165,3 +165,34 @@ fn paths_reject_unknown_pages_and_bad_names() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+#[test]
+fn progress_counts_opened_pages_still_in_the_vault() {
+    let vault = temp_vault("progress");
+    let host = open(&vault);
+    let (a, b, c) = (page(&host, "A"), page(&host, "B"), page(&host, "C"));
+    call(&host, "paths.create", json!({ "name": "Grow", "pages": [a, b, c] }));
+    call(&host, "paths.create", json!({ "name": "Empty" }));
+    assert_eq!(
+        call(&host, "paths.progress", json!({})),
+        json!({ "grow": { "read": [], "total": 3 }, "empty": { "read": [], "total": 0 } })
+    );
+
+    // Opened out of order, the read list still follows the path's order.
+    for id in [&c, &a] {
+        host.call(Caller::Ui, "reads.mark", json!({ "id": id })).unwrap();
+    }
+    assert_eq!(
+        call(&host, "paths.progress", json!({}))["grow"],
+        json!({ "read": [a, c], "total": 3 })
+    );
+
+    // A trashed page leaves the count; reading the rest finishes the path.
+    call(&host, "pages.delete", json!({ "id": b }));
+    assert_eq!(
+        call(&host, "paths.progress", json!({}))["grow"],
+        json!({ "read": [a, c], "total": 2 })
+    );
+
+    let _ = std::fs::remove_dir_all(&vault);
+}

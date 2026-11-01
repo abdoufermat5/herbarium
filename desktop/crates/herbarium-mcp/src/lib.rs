@@ -164,6 +164,7 @@ const ANNOTATIONS: &[(&str, &str, Effect)] = &[
     ("appearance.set_tag", "Set tag colour", Effect::Idempotent),
     ("paths.list", "List reading paths", Effect::ReadOnly),
     ("paths.get", "Read reading path", Effect::ReadOnly),
+    ("paths.progress", "Reading path progress", Effect::ReadOnly),
     ("paths.create", "Create reading path", Effect::Additive),
     ("paths.update", "Update reading path", Effect::Idempotent),
     ("paths.add_page", "Add page to path", Effect::Idempotent),

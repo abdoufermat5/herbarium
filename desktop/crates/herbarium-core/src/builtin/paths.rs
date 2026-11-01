@@ -349,6 +349,31 @@ impl Extension for Paths {
                 store(&vault, &all)?;
                 Ok(json!({ "deleted": a.id }))
             },
+        ))?;
+
+        r.add(Operation::new(
+            "paths.progress",
+            "How far the user has read each reading path: `{ <path id>: { read, total } }`, where `read` lists the pages of the path the user has opened (in reading order) and `total` counts the path's pages still in the vault. A path is finished when `read` holds `total` pages.",
+            object(json!({}), &[]),
+            |ctx: &mut Ctx, _: NoArgs| {
+                let reads = super::today::load_reads(&ctx.store.vault);
+                let mut out = serde_json::Map::new();
+                for path in load(&ctx.store.vault) {
+                    let mut read = Vec::new();
+                    let mut total = 0usize;
+                    for id in &path.pages {
+                        if ctx.store.get_meta(id).map_err(|e| e.to_string())?.is_none() {
+                            continue;
+                        }
+                        total += 1;
+                        if reads.contains_key(id) {
+                            read.push(id.clone());
+                        }
+                    }
+                    out.insert(path.id, json!({ "read": read, "total": total }));
+                }
+                Ok(Value::Object(out))
+            },
         ))
     }
 }
