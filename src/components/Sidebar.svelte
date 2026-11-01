@@ -1065,7 +1065,7 @@
   </button>
 {/snippet}
 
-<aside class="sidebar" class:resizing bind:this={asideEl}>
+<aside class="sidebar" data-vt="sidebar" class:resizing bind:this={asideEl}>
   <div class="head">
     {#if vaults.length > 1}
       <DropdownMenu items={vaultItems} ariaLabel={t("sidebar.switchVault")} class="brand-switch">

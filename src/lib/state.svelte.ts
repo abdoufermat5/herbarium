@@ -4,6 +4,7 @@ import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
 import { i18n, t, LOCALES } from "./i18n.svelte";
 import { navigate } from "./navigation.svelte";
+import { transition } from "./motion";
 import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
 import type {
@@ -658,9 +659,24 @@ export function clearFilters() {
  * veto it. These helpers resolve true when the change happened, false when a
  * guard vetoed it or it failed (the failure is toasted); they never reject. */
 
-async function go(action: () => void | Promise<void>): Promise<boolean> {
+/**
+ * `change` is the synchronous route change; it runs inside a view transition
+ * (once every guard has agreed). `after` is slow follow-up work (a reload) that
+ * must not hold the transition's frozen frame, so it runs once `change` landed.
+ * `animate: false` runs `change` directly, for callers that animate the swap
+ * themselves (review hops between pages).
+ */
+async function go(
+  change: () => void | Promise<void>,
+  after?: () => Promise<void>,
+  { animate = true }: { animate?: boolean } = {},
+): Promise<boolean> {
   try {
-    return await navigate(action);
+    return await navigate(async () => {
+      if (animate) await transition(change);
+      else await change();
+      await after?.();
+    });
   } catch (e) {
     console.error(e);
     toast(errorMessage(e), "error");
@@ -704,15 +720,18 @@ export function goView(view: View): Promise<boolean> {
 
 /** The whole library: no filters, no search. */
 export function goAll(): Promise<boolean> {
-  return go(async () => {
-    const hadSearch = app.search !== "";
-    app.reviewSession = false;
-    app.readId = null;
-    app.view = "list";
-    clearFilters();
-    app.search = "";
-    if (hadSearch) await reloadPages(true);
-  });
+  let hadSearch = false;
+  return go(
+    () => {
+      hadSearch = app.search !== "";
+      app.reviewSession = false;
+      app.readId = null;
+      app.view = "list";
+      clearFilters();
+      app.search = "";
+    },
+    () => (hadSearch ? reloadPages(true) : Promise.resolve()),
+  );
 }
 
 /** Open `pageId` as part of reading path `pathId` (the reader shows previous/next). */
@@ -782,14 +801,16 @@ export async function deletePath(id: string): Promise<boolean> {
 
 /** Show the library searched for `query` (a saved search, filters included). */
 export function runSearch(query: string): Promise<boolean> {
-  return go(async () => {
-    app.reviewSession = false;
-    app.readId = null;
-    app.view = "list";
-    clearFilters();
-    app.search = query;
-    await reloadPages(true);
-  });
+  return go(
+    () => {
+      app.reviewSession = false;
+      app.readId = null;
+      app.view = "list";
+      clearFilters();
+      app.search = query;
+    },
+    () => reloadPages(true),
+  );
 }
 
 /** Save the search `query` under `name`; errors are toasted. */

@@ -21,7 +21,7 @@
   });
 </script>
 
-<header class="titlebar" data-tauri-drag-region>
+<header class="titlebar" data-vt="titlebar" data-tauri-drag-region>
   {#if app.config?.vaultPath}
     <button
       class="ctl toggle"
