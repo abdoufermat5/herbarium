@@ -96,6 +96,14 @@
       </button>
     </header>
 
+    <input
+      class="filter"
+      type="search"
+      placeholder={t("shortcuts.filter")}
+      aria-label={t("shortcuts.filter")}
+      bind:value={filter}
+    />
+
     <div class="tabs" role="group" aria-label={t("shortcuts.sections")}>
       <button class="tab" class:active={selected === "all"} aria-pressed={selected === "all"} onclick={() => (selected = "all")}>
         {t("shortcuts.section.all")}
@@ -107,12 +115,10 @@
       {/each}
     </div>
 
-    <input class="filter" type="search" placeholder={t("shortcuts.filter")} aria-label={t("shortcuts.filter")} bind:value={filter} />
-
-    <div class="body">
+    <div class="body" class:single={visible.length === 1}>
       {#each visible as s (s.id)}
-        <section aria-labelledby={`shortcuts-sec-${s.id}`}>
-          <h3 id={`shortcuts-sec-${s.id}`}>{s.title}</h3>
+        <section class="sheet" aria-labelledby={`shortcuts-sec-${s.id}`}>
+          <h3 id={`shortcuts-sec-${s.id}`} class="eyebrow">{s.title}</h3>
           <ul>
             {#each s.items as item (item.id)}
               <li>
@@ -123,7 +129,7 @@
                 <div class="keys">
                   {#each item.keys as k, i (i)}
                     {#if i > 0}<span class="or">{t("shortcuts.or")}</span>{/if}
-                    <kbd class="kbd">{k}</kbd>
+                    <kbd class="key">{k}</kbd>
                   {/each}
                 </div>
               </li>
@@ -151,7 +157,7 @@
   }
 
   .dialog {
-    width: 640px;
+    width: 720px;
     max-width: 100%;
     max-height: 80vh;
     display: flex;
@@ -161,7 +167,7 @@
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
     outline: none;
-    animation: sc-pop var(--t-med) var(--ease-out);
+    animation: sc-pop 160ms var(--ease-out);
   }
 
   .head {
@@ -179,6 +185,17 @@
     margin-top: 2px;
     font-size: var(--fs-sm);
     color: var(--muted);
+  }
+
+  .filter {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--raised);
+    color: var(--text);
+    font: inherit;
+    font-size: var(--fs-sm);
   }
 
   .tabs {
@@ -214,34 +231,25 @@
     box-shadow: 0 0 0 3px var(--accent-ring);
   }
 
-  .filter {
-    width: 100%;
-    padding: 7px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    background: var(--sunken);
-    color: var(--text);
-    font: inherit;
-    font-size: var(--fs-sm);
-  }
-
   .body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 22px 36px;
     padding-right: 4px;
   }
 
+  .body.single {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   h3 {
-    margin-bottom: 6px;
-    font-size: var(--fs-xs);
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    color: var(--muted);
+    margin-bottom: 8px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border);
   }
 
   ul {
@@ -287,12 +295,31 @@
     gap: 5px;
   }
 
+  /* A key cap: a thin border with a heavier bottom edge, sitting on the page. */
+  .key {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border);
+    border-bottom: 2px solid var(--border-strong);
+    border-radius: 4px;
+    background: var(--raised);
+    color: var(--text-soft);
+    font-family: var(--mono);
+    font-size: 11px;
+    line-height: 1;
+  }
+
   .or {
     font-size: var(--fs-xs);
     color: var(--muted);
   }
 
   .empty {
+    grid-column: 1 / -1;
     padding: 24px 0;
     text-align: center;
     font-size: var(--fs-sm);
@@ -308,14 +335,13 @@
   @keyframes sc-pop {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.98);
+      transform: scale(0.98) translateY(-4px);
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .overlay,
-    .dialog {
-      animation: none;
+  @media (max-width: 760px) {
+    .body {
+      grid-template-columns: minmax(0, 1fr);
     }
   }
 </style>
