@@ -1264,6 +1264,13 @@ export const en = {
   "ai.retry": "Try again",
   "ai.refresh": "Refresh",
   "ai.refreshHint": "Ask the service again for its models",
+
+  "vitality.seed": "Seed: not reviewed yet",
+  "vitality.thriving": "Thriving: well remembered",
+  "vitality.healthy": "Healthy: still fresh",
+  "vitality.thirsty": "Thirsty: time to review",
+  "vitality.wilting": "Wilting: fading from memory",
+  "vitality.recall": "{percent}% likely to recall",
 } as const;
 
 export type MessageKey = keyof typeof en;

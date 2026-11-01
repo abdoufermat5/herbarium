@@ -1274,4 +1274,11 @@ export const fr: Record<MessageKey, string> = {
   "ai.retry": "Réessayer",
   "ai.refresh": "Actualiser",
   "ai.refreshHint": "Redemander ses modèles au service",
+
+  "vitality.seed": "Graine : pas encore révisée",
+  "vitality.thriving": "Florissante : bien mémorisée",
+  "vitality.healthy": "En forme : encore fraîche",
+  "vitality.thirsty": "Assoiffée : à réviser",
+  "vitality.wilting": "Fanée : s'efface de la mémoire",
+  "vitality.recall": "{percent} % de chances de s'en souvenir",
 };
