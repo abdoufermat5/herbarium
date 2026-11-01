@@ -4,7 +4,7 @@
 // answers. Injected before main.ts only in the `web-preview` Vite mode; never
 // part of the app build. `?onboarding` starts without a vault.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { Config, PreviewDigest } from "../lib/types";
+import type { Config, ImportFile, PreviewDigest } from "../lib/types";
 
 const params = new URLSearchParams(location.search);
 const PREVIEWS_KEY = `herbarium.preview.digests:${location.port}`;
@@ -40,6 +40,17 @@ async function op(name: string, args: Record<string, unknown> = {}): Promise<unk
       previews[args.id as string] = args.digest as PreviewDigest;
       localStorage.setItem(PREVIEWS_KEY, JSON.stringify(previews));
       return null;
+    case "pages.import": {
+      // UI-only in the core; agents' `pages.create` does the same per file.
+      const files = (args.files ?? []) as ImportFile[];
+      const errors: string[] = [];
+      for (const file of files) {
+        await op("pages.create", { html: file.content, folder: args.folder ?? null, allowCdn: args.allowCdn }).catch((e) =>
+          errors.push(`${file.name ?? "pasted"}: ${String(e)}`),
+        );
+      }
+      return { imported: files.length - errors.length, errors };
+    }
     case "storage.get":
       return { local: {}, personal: {}, shared: {} };
     case "storage.write":
