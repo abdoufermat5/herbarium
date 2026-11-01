@@ -59,12 +59,21 @@
     height: 16px;
     border-radius: 50%;
     background: var(--muted);
+    transform-origin: left center;
     transition:
-      transform var(--t-fast) var(--ease-out),
+      transform var(--t-enter) var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1)),
       background var(--t-fast) var(--ease-out);
   }
   .on .thumb {
     transform: translateX(16px);
     background: var(--on-accent);
+    transform-origin: right center;
+  }
+  /* Pressing stretches the thumb away from the edge it rests against. */
+  .switch:active:not(:disabled) .thumb {
+    transform: scaleX(1.15);
+  }
+  .switch:active:not(:disabled).on .thumb {
+    transform: translateX(16px) scaleX(1.15);
   }
 </style>
