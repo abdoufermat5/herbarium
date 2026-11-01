@@ -610,6 +610,15 @@ export const en = {
   "import.rootFolder": "Vault root",
   "import.allowCdn": "Allow CDN access",
   "import.allowCdnHint": "Let these pages load allowlisted scripts and styles from the network.",
+  "import.doneTitle_one": "{count} page imported",
+  "import.doneTitle_other": "{count} pages imported",
+  "import.doneIn": "Saved in {folder}.",
+  "import.done": "Done",
+  "import.more": "Import more",
+  "import.status.ready": "Ready to import",
+  "import.status.busy": "Importing",
+  "import.status.done": "Imported",
+  "import.status.failed": "Failed",
 
   "onboard.welcome": "Welcome to Herbarium",
   "onboard.intro":

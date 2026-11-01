@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { onMount, onDestroy } from "svelte";
+  import { onMount, onDestroy, tick } from "svelte";
   import { api } from "../lib/api";
-  import { app, pendingFiles, reloadPages, toast } from "../lib/state.svelte";
+  import { app, pendingFiles, reloadPages } from "../lib/state.svelte";
   import { plural } from "../lib/format";
   import type { ImportFile } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import Illustration from "../lib/Illustration.svelte";
   import { t } from "../lib/i18n.svelte";
   import { prefs, lastImportFolder, rememberImportFolder } from "../lib/prefs.svelte";
   import Select, { type SelectOption } from "./Select.svelte";
@@ -36,6 +37,14 @@
   let busy = $state(false);
   let message = $state("");
   let messageErr = $state(false);
+  /** Files that went in during this visit, shown ticked above the ones still waiting. */
+  let imported = $state<File[]>([]);
+  /** Why each staged file failed, by file key (empty when the importer gave no reason). */
+  let failed = $state<Record<string, string>>({});
+  /** Set once everything is in: the dialog then shows the result instead of the form. */
+  let outcome = $state<{ count: number; folder: string } | null>(null);
+  let doneBtn = $state<HTMLButtonElement | undefined>(undefined);
+  let importedTotal = 0;
   // Network access for the pages about to be imported; starts from the vault
   // default and is overridable per import. `cdnTouched` keeps a late-arriving
   // default from clobbering an explicit choice (drop metadata or the switch).
@@ -186,6 +195,41 @@
     return files.filter((f) => failed.has(f.name));
   }
 
+  type FileState = "ready" | "busy" | "done" | "failed";
+  function stateOf(f: File): FileState {
+    if (imported.includes(f)) return "done";
+    if (failed[fileKey(f)] !== undefined) return "failed";
+    return busy ? "busy" : "ready";
+  }
+
+  /** "<name>: <reason>" lines from the importer, matched back to the files they name. */
+  function reasonsFor(files: File[], errors: string[]): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const f of files) {
+      const own = errors.find((e) => e.startsWith(`${f.name}: `));
+      out[fileKey(f)] = own ? own.slice(f.name.length + 2) : "";
+    }
+    return out;
+  }
+
+  async function finish(count: number) {
+    busy = false;
+    bigPaste = null;
+    outcome = { count, folder: target || t("import.rootFolder") };
+    await tick();
+    doneBtn?.focus();
+  }
+
+  function importMore() {
+    outcome = null;
+    imported = [];
+    failed = {};
+    importedTotal = 0;
+    message = "";
+    tab = "files";
+    setTimeout(() => dropBtn?.focus());
+  }
+
   async function doImport(files: File[]) {
     const htmlFiles = files.filter(isHtml);
     if (htmlFiles.length === 0) {
@@ -196,11 +240,13 @@
     busy = true;
     message = "";
     messageErr = false;
+    failed = {};
     try {
       const payload: ImportFile[] = [];
       for (const f of htmlFiles) payload.push({ name: f.name, content: await f.text() });
       const res = await api.importFiles(payload, target || null, allowCdn);
       if (res.imported > 0) rememberImportFolder(target);
+      importedTotal += res.imported;
       if (res.errors.length > 0) {
         messageErr = true;
         message = t("import.partial", {
@@ -208,16 +254,17 @@
           failed: plural(res.errors.length, "file"),
           errors: res.errors.join("\n"),
         });
-        // Keep the files the backend named so they can be retried.
-        staged = failedStaged(htmlFiles, res.errors, res.imported);
+        // Keep the files the backend named so they can be retried; the rest stay ticked.
+        const left = failedStaged(htmlFiles, res.errors, res.imported);
+        imported = [...imported, ...htmlFiles.filter((f) => !left.includes(f))];
+        staged = left;
+        failed = reasonsFor(left, res.errors);
         if (res.imported > 0) void reloadPages();
       } else if (res.imported > 0) {
-        toast(t("toast.imported", { count: res.imported }), "success");
+        imported = [...imported, ...htmlFiles];
         staged = [];
         void reloadPages();
-        busy = false;
-        bigPaste = null;
-        close(true);
+        await finish(importedTotal);
       } else {
         message = t("import.nothing");
       }
@@ -242,11 +289,9 @@
         messageErr = true;
         message = t("import.failed", { error: res.errors.join("\n") });
       } else {
-        toast(t("toast.imported", { count: res.imported }), "success");
+        importedTotal += res.imported;
         void reloadPages();
-        busy = false;
-        bigPaste = null;
-        close(true);
+        await finish(importedTotal);
       }
     } catch (e) {
       messageErr = true;
@@ -255,6 +300,8 @@
       busy = false;
     }
   }
+
+  const rows = $derived([...imported, ...staged]);
 
   function onPick(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
@@ -332,166 +379,194 @@
       </button>
     </header>
 
-    <div class="tabs" role="tablist" aria-label={t("import.method")} tabindex={-1} onkeydown={onTabKeys}>
-      <button
-        class="tab"
-        class:active={tab === "files"}
-        role="tab"
-        id="tab-files"
-        aria-selected={tab === "files"}
-        aria-controls="panel-files"
-        tabindex={tab === "files" ? 0 : -1}
-        onclick={() => setTab("files")}
-      >
-        {t("import.tabFiles")}
-      </button>
-      <button
-        class="tab"
-        class:active={tab === "paste"}
-        role="tab"
-        id="tab-paste"
-        aria-selected={tab === "paste"}
-        aria-controls="panel-paste"
-        tabindex={tab === "paste" ? 0 : -1}
-        onclick={() => setTab("paste")}
-      >
-        {t("import.tabPaste")}
-      </button>
-    </div>
-
-    {#if app.folders.length > 0}
-      <div class="dest">
-        <span class="dest-label">{t("import.destination")}</span>
-        <Select
-          value={target}
-          options={destOptions}
-          ariaLabel={t("import.destination")}
-          disabled={busy}
-          onchange={(v) => (destination = v)}
-        />
-      </div>
-    {/if}
-
-    <div class="cdn">
-      <div class="cdn-text">
-        <span class="cdn-label">{t("import.allowCdn")}</span>
-        <span class="cdn-hint">{t("import.allowCdnHint")}</span>
-      </div>
-      <Switch
-        checked={allowCdn}
-        label={t("import.allowCdn")}
-        disabled={busy}
-        onchange={(v) => {
-          allowCdn = v;
-          cdnTouched = true;
-        }}
-      />
-    </div>
-
-    {#if tab === "files"}
-      <div class="panel" role="tabpanel" id="panel-files" aria-labelledby="tab-files">
-        <button
-          type="button"
-          class="dropzone"
-          class:over={dragOver}
-          bind:this={dropBtn}
-          onclick={() => fileInput?.click()}
-          ondragenter={onDragEnter}
-          ondragover={onDragOver}
-          ondragleave={() => (dragDepth = Math.max(0, dragDepth - 1))}
-          ondrop={onDrop}
-        >
-          <span class="drop-icon"><Icon name="upload" size={18} /></span>
-          <strong>{dragOver ? t("import.release") : t("import.drop")}</strong>
-          <span>{t("import.browse")}</span>
-        </button>
-        <input
-          class="sr-only"
-          type="file"
-          tabindex="-1"
-          aria-hidden="true"
-          accept=".html,.htm,text/html"
-          multiple
-          bind:this={fileInput}
-          onchange={onPick}
-        />
-        {#if staged.length > 0}
-          <ul class="staged" aria-label={t("import.selected")}>
-            {#each staged as file (fileKey(file))}
-              <li>
-                <Icon name="file-text" size={14} />
-                <span class="fname" title={file.name}>{file.name}</span>
-                <span class="fsize">{formatSize(file.size)}</span>
-                <button
-                  class="btn btn-ghost btn-icon"
-                  aria-label={t("import.remove", { name: file.name })}
-                  disabled={busy}
-                  onclick={() => unstage(file)}
-                >
-                  <Icon name="x" size={14} />
-                </button>
-              </li>
-            {/each}
-          </ul>
-        {/if}
+    {#if outcome}
+      <div class="success" role="status">
+        <Illustration name="seedling" size={104} animate />
+        <h3>{t("import.doneTitle", { count: outcome.count })}</h3>
+        <p>{t("import.doneIn", { folder: outcome.folder })}</p>
+        <div class="success-actions">
+          <button type="button" class="btn btn-ghost" onclick={importMore}>{t("import.more")}</button>
+          <button type="button" class="btn btn-primary" bind:this={doneBtn} onclick={() => close(true)}>
+            {t("import.done")}
+          </button>
+        </div>
       </div>
     {:else}
-      <div class="panel" role="tabpanel" id="panel-paste" aria-labelledby="tab-paste">
-        {#if bigPaste !== null}
-          <div class="big-paste">
-            <Icon name="file-text" size={16} />
-            <span class="bp-text">
-              <strong>{bigPasteTitle || t("common.untitled")}</strong>
-              <small>{t("import.bigPaste", { size: (bigPaste.length / 1024 / 1024).toFixed(1) })}</small>
-            </span>
-            <button class="btn btn-sm btn-ghost" onclick={() => ((bigPaste = null), queueMicrotask(() => pasteArea?.focus()))}>
-              {t("common.clear")}
-            </button>
-          </div>
-        {:else}
-          <textarea
-            bind:this={pasteArea}
-            bind:value={pasted}
-            onpaste={onPaste}
-            rows={6}
-            aria-label={t("import.tabPaste")}
-            placeholder={t("import.pastePlaceholder")}
-            spellcheck={false}
-          ></textarea>
-        {/if}
-      </div>
-    {/if}
-
-    <button
-      class="btn btn-ghost btn-sm ai-link"
-      onclick={() => {
-        app.importOpen = false;
-        app.aiImportOpen = true;
-      }}
-    >
-      <Icon name="files" size={13} />{t("aiImport.fromDialog")}
-    </button>
-
-    <footer class="foot">
-      <p class="message" class:err={messageErr} aria-live="polite">{message}</p>
-      {#if busy}
-        <span class="spinner" aria-label={t("import.importingLabel")}></span>
-      {/if}
-      {#if tab === "files" && staged.length > 0}
-        <button class="btn btn-primary" disabled={busy} onclick={() => doImport(staged)}>
-          {busy ? t("import.importing") : t("import.importN", { count: staged.length })}
-        </button>
-      {/if}
-      {#if tab === "paste"}
+      <div class="tabs" role="tablist" aria-label={t("import.method")} tabindex={-1} onkeydown={onTabKeys}>
         <button
-          class="btn btn-primary"
-          disabled={busy || !pasteContent.trim()}
-          onclick={pasteImport}
+          class="tab"
+          class:active={tab === "files"}
+          role="tab"
+          id="tab-files"
+          aria-selected={tab === "files"}
+          aria-controls="panel-files"
+          tabindex={tab === "files" ? 0 : -1}
+          onclick={() => setTab("files")}
         >
-          {busy ? t("import.importing") : t("import.button")}
+          {t("import.tabFiles")}
         </button>
+        <button
+          class="tab"
+          class:active={tab === "paste"}
+          role="tab"
+          id="tab-paste"
+          aria-selected={tab === "paste"}
+          aria-controls="panel-paste"
+          tabindex={tab === "paste" ? 0 : -1}
+          onclick={() => setTab("paste")}
+        >
+          {t("import.tabPaste")}
+        </button>
+      </div>
+
+      {#if app.folders.length > 0}
+        <div class="dest">
+          <span class="dest-label">{t("import.destination")}</span>
+          <Select
+            value={target}
+            options={destOptions}
+            ariaLabel={t("import.destination")}
+            disabled={busy}
+            onchange={(v) => (destination = v)}
+          />
+        </div>
       {/if}
-    </footer>
+
+      <div class="cdn">
+        <div class="cdn-text">
+          <span class="cdn-label">{t("import.allowCdn")}</span>
+          <span class="cdn-hint">{t("import.allowCdnHint")}</span>
+        </div>
+        <Switch
+          checked={allowCdn}
+          label={t("import.allowCdn")}
+          disabled={busy}
+          onchange={(v) => {
+            allowCdn = v;
+            cdnTouched = true;
+          }}
+        />
+      </div>
+
+      {#if tab === "files"}
+        <div class="panel" role="tabpanel" id="panel-files" aria-labelledby="tab-files">
+          <button
+            type="button"
+            class="dropzone"
+            class:over={dragOver}
+            bind:this={dropBtn}
+            onclick={() => fileInput?.click()}
+            ondragenter={onDragEnter}
+            ondragover={onDragOver}
+            ondragleave={() => (dragDepth = Math.max(0, dragDepth - 1))}
+            ondrop={onDrop}
+          >
+            <span class="drop-icon"><Icon name="upload" size={18} /></span>
+            <strong>{dragOver ? t("import.release") : t("import.drop")}</strong>
+            <span>{t("import.browse")}</span>
+          </button>
+          <input
+            class="sr-only"
+            type="file"
+            tabindex="-1"
+            aria-hidden="true"
+            accept=".html,.htm,text/html"
+            multiple
+            bind:this={fileInput}
+            onchange={onPick}
+          />
+          {#if rows.length > 0}
+            <ul class="staged" aria-label={t("import.selected")}>
+              {#each rows as file, n (fileKey(file))}
+                {@const state = stateOf(file)}
+                <li style:--n={Math.min(n, 6)}>
+                  <span class="tick {state}" role="img" aria-label={t(`import.status.${state}`)}>
+                    {#if state === "done"}
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 8.5 7 11.5 12 5" pathLength="1" /></svg>
+                    {:else if state === "failed"}
+                      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 5 11 11M11 5 5 11" pathLength="1" /></svg>
+                    {/if}
+                  </span>
+                  <span class="fname" title={file.name}>{file.name}</span>
+                  {#if failed[fileKey(file)]}
+                    <span class="freason" title={failed[fileKey(file)]}>{failed[fileKey(file)]}</span>
+                  {/if}
+                  <span class="fsize">{formatSize(file.size)}</span>
+                  {#if state === "done"}
+                    <span class="fgap"></span>
+                  {:else}
+                    <button
+                      class="btn btn-ghost btn-icon"
+                      aria-label={t("import.remove", { name: file.name })}
+                      disabled={busy}
+                      onclick={() => unstage(file)}
+                    >
+                      <Icon name="x" size={14} />
+                    </button>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </div>
+      {:else}
+        <div class="panel" role="tabpanel" id="panel-paste" aria-labelledby="tab-paste">
+          {#if bigPaste !== null}
+            <div class="big-paste">
+              <Icon name="file-text" size={16} />
+              <span class="bp-text">
+                <strong>{bigPasteTitle || t("common.untitled")}</strong>
+                <small>{t("import.bigPaste", { size: (bigPaste.length / 1024 / 1024).toFixed(1) })}</small>
+              </span>
+              <button class="btn btn-sm btn-ghost" onclick={() => ((bigPaste = null), queueMicrotask(() => pasteArea?.focus()))}>
+                {t("common.clear")}
+              </button>
+            </div>
+          {:else}
+            <textarea
+              bind:this={pasteArea}
+              bind:value={pasted}
+              onpaste={onPaste}
+              rows={6}
+              aria-label={t("import.tabPaste")}
+              placeholder={t("import.pastePlaceholder")}
+              spellcheck={false}
+            ></textarea>
+          {/if}
+        </div>
+      {/if}
+
+      <button
+        class="btn btn-ghost btn-sm ai-link"
+        onclick={() => {
+          app.importOpen = false;
+          app.aiImportOpen = true;
+        }}
+      >
+        <Icon name="files" size={13} />{t("aiImport.fromDialog")}
+      </button>
+
+      <footer class="foot">
+        <p class="message" class:err={messageErr} aria-live="polite">{message}</p>
+        {#if busy}
+          <span class="spinner" aria-label={t("import.importingLabel")}></span>
+        {/if}
+        {#if tab === "files" && staged.length > 0}
+          <button class="btn btn-primary" disabled={busy} onclick={() => doImport(staged)}>
+            {busy ? t("import.importing") : t("import.importN", { count: staged.length })}
+          </button>
+        {/if}
+        {#if tab === "paste"}
+          <button
+            class="btn btn-primary"
+            disabled={busy || !pasteContent.trim()}
+            onclick={pasteImport}
+          >
+            {busy ? t("import.importing") : t("import.button")}
+          </button>
+        {/if}
+      </footer>
+    {/if}
   </div>
 </div>
 
@@ -583,7 +658,9 @@
     transition:
       border-color var(--t-fast) var(--ease-out),
       background var(--t-fast) var(--ease-out),
-      color var(--t-fast) var(--ease-out);
+      color var(--t-fast) var(--ease-out),
+      transform var(--t-enter) var(--ease-spring),
+      box-shadow var(--t-med) var(--ease-out);
   }
 
   .dropzone:hover {
@@ -591,10 +668,14 @@
     color: var(--text-soft);
   }
 
+  /* Pressed paper: the sheet sinks a little into the page and the icon settles tilted. */
   .dropzone.over {
-    border-color: var(--info);
-    background: var(--info-soft);
-    color: var(--info);
+    border-style: solid;
+    border-color: var(--leaf);
+    background: var(--leaf-soft);
+    color: var(--leaf);
+    box-shadow: inset 0 0 0 1px var(--leaf);
+    transform: scale(0.985);
   }
 
   .drop-icon {
@@ -607,6 +688,10 @@
     border-radius: var(--radius-sm);
     background: var(--surface);
     color: var(--text);
+    transition: transform var(--t-enter) var(--ease-spring);
+  }
+  .dropzone.over .drop-icon {
+    transform: translateY(3px) rotate(-6deg);
   }
 
   .dropzone strong {
@@ -637,10 +722,120 @@
     padding: 4px 6px 4px 10px;
     font-size: var(--fs-sm);
     color: var(--muted);
+    animation: row-in var(--t-fast) var(--ease-out) backwards;
+    animation-delay: calc(var(--n, 0) * 30ms);
   }
 
   .staged li + li {
     border-top: 1px solid var(--border);
+  }
+
+  @keyframes row-in {
+    from {
+      opacity: 0;
+      transform: translateY(3px);
+    }
+  }
+
+  /* Status tick: empty ring while waiting, spinning arc while importing, a drawn check when in. */
+  .tick {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    border: 1.5px solid var(--border-input);
+    border-radius: 50%;
+    transition:
+      background var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out);
+  }
+  .tick.busy {
+    border-color: var(--border);
+    border-top-color: var(--leaf);
+    animation: spin 700ms linear infinite;
+  }
+  .tick.done {
+    background: var(--leaf);
+    border-color: var(--leaf);
+    animation: tick-pop 360ms var(--ease-spring) backwards;
+    animation-delay: calc(var(--n, 0) * 60ms);
+  }
+  .tick.failed {
+    background: var(--danger-soft);
+    border-color: var(--danger);
+  }
+  .tick svg {
+    width: 10px;
+    height: 10px;
+    fill: none;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .tick.done svg {
+    stroke: var(--on-accent);
+  }
+  .tick.failed svg {
+    stroke: var(--danger);
+  }
+  .tick path {
+    stroke-dasharray: 1;
+    animation: tick-draw 280ms var(--ease-out) backwards;
+    animation-delay: calc(var(--n, 0) * 60ms + 120ms);
+  }
+  @keyframes tick-pop {
+    from {
+      transform: scale(0.4);
+      opacity: 0;
+    }
+  }
+  @keyframes tick-draw {
+    from {
+      stroke-dashoffset: 1;
+    }
+  }
+  .freason {
+    flex: 0 1 40%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--danger);
+    font-size: var(--fs-xs);
+  }
+  .fgap {
+    flex: none;
+    width: 28px;
+  }
+
+  /* Everything is in: the seedling draws itself and the dialog says how many. */
+  .success {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 0 2px;
+    text-align: center;
+  }
+  .success h3 {
+    margin: 6px 0 0;
+    font-family: var(--font-display);
+    font-size: var(--fs-2xl);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--text);
+  }
+  .success p {
+    margin: 0;
+    font-size: var(--fs-sm);
+    color: var(--muted);
+  }
+  .success-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
   }
 
   .fname {

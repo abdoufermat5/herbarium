@@ -618,6 +618,15 @@ export const fr: Record<MessageKey, string> = {
   "import.rootFolder": "Racine du coffre",
   "import.allowCdn": "Autoriser l'accès aux CDN",
   "import.allowCdnHint": "Laisser ces pages charger des scripts et styles autorisés depuis le réseau.",
+  "import.doneTitle_one": "{count} page importée",
+  "import.doneTitle_other": "{count} pages importées",
+  "import.doneIn": "Enregistrée dans {folder}.",
+  "import.done": "Terminé",
+  "import.more": "Importer d'autres pages",
+  "import.status.ready": "Prête à importer",
+  "import.status.busy": "Import en cours",
+  "import.status.done": "Importée",
+  "import.status.failed": "Échec",
 
   "onboard.welcome": "Bienvenue dans Herbarium",
   "onboard.intro":
