@@ -7,8 +7,8 @@ import { navigate } from "./navigation.svelte";
 import { transition } from "./motion";
 import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
-import type {
 import { vitality, type VitalityLevel } from "./vitality";
+import type {
   BulkError,
   BulkUpdateResult,
   Config,
@@ -18,8 +18,8 @@ import { vitality, type VitalityLevel } from "./vitality";
   Appearance,
   PreviewDigest,
   ReviewSettings,
-  ReviewStats,
   ReviewGrade,
+  ReviewStats,
   SavedSearch,
   TagCount,
 } from "./types";
@@ -866,21 +866,6 @@ export function requestCreate(kind: "page" | "folder", parent = "") {
 /** Pages the user skipped in the running session; they stay due but are not offered again. */
 const sessionSkipped = new Set<string>();
 
-/** Open the first due page in the reader and keep advancing as pages are completed. */
-export async function startReviewSession(): Promise<boolean> {
-  const ok = await go(async () => {
-    resetSession();
-    const queue = await api.reviewToday();
-    const first = queue[0];
-    if (!first) {
-      toast(t("toast.reviewEmpty"));
-      return;
-    }
-    app.reviewSession = true;
-    app.readId = first.id;
-  });
-  return ok && app.reviewSession;
-}
 /** A vitality reading as it was at one moment: enough to redraw a leaf. */
 export type VitalitySnapshot = Pick<PageMeta, "lastReview" | "nextReview" | "ext"> & { at: number };
 
@@ -975,6 +960,41 @@ function summarize(): SessionSummary {
   };
 }
 
+/** "4:07", or "1:04:07" past an hour: the session clock. */
+export function fmtClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = String(total % 60).padStart(2, "0");
+  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
+}
+
+/** Open the first due page in the reader and keep advancing as pages are completed. */
+export async function startReviewSession(): Promise<boolean> {
+  let queue: PageMeta[];
+  let dueTotal = 0;
+  try {
+    queue = await api.reviewToday();
+    // The queue is capped by a setting; the statistics count every due page.
+    if (queue.length > 0) dueTotal = await api.reviewStats().then((s) => s.dueTotal, () => 0);
+  } catch (e) {
+    console.error(e);
+    toast(errorMessage(e), "error");
+    return false;
+  }
+  const first = queue[0];
+  if (!first) {
+    toast(t("toast.reviewEmpty"));
+    return false;
+  }
+  const ok = await go(() => {
+    resetSession();
+    session.total = Math.max(dueTotal, queue.length);
+    app.reviewSession = true;
+    app.readId = first.id;
+  });
+  return ok && app.reviewSession;
+}
 
 /**
  * Advance the session to the next due page. `skipId` is a page to leave due
@@ -983,35 +1003,42 @@ function summarize(): SessionSummary {
  * graded, else on the review view. Resolves true when another page was opened.
  */
 export async function nextReviewPage(skipId?: string): Promise<boolean> {
-  if (skipId && !sessionSkipped.has(skipId)) {
-    sessionSkipped.add(skipId);
-    session.skipped++;
+  let due: PageMeta[];
+  try {
+    due = await api.reviewToday();
+  } catch (e) {
+    console.error(e);
+    toast(errorMessage(e), "error");
+    return false;
   }
-    // The queue is capped by a setting; the statistics count every due page.
-    const dueTotal = await api
-      .reviewStats()
-      .then((s) => s.dueTotal)
-      .catch(() => 0);
-    session.total = Math.max(dueTotal, queue.length);
-    session.startedAt = Date.now();
-  const ok = await go(async () => {
-    const due = await api.reviewToday();
-    const next = due.find((p) => !sessionSkipped.has(p.id) && p.id !== app.readId);
-    if (next) {
-      app.reviewSession = true;
-      app.readId = next.id;
-      return;
-    }
-    app.reviewSession = false;
-    app.readId = null;
-    app.view = "review";
-    if (session.graded > 0) {
-      session.summary = summarize();
-    } else {
-      toast(t("toast.reviewSessionDone"), "success");
-    }
-    void refreshAll();
-  });
+  const next = due.find((p) => p.id !== skipId && !sessionSkipped.has(p.id) && p.id !== app.readId);
+  const ok = await go(
+    () => {
+      // Counted once the guards agreed, so a vetoed skip leaves the page in play.
+      if (skipId && !sessionSkipped.has(skipId)) {
+        sessionSkipped.add(skipId);
+        session.skipped++;
+      }
+      if (next) {
+        app.reviewSession = true;
+        app.readId = next.id;
+        return;
+      }
+      app.reviewSession = false;
+      app.readId = null;
+      app.view = "review";
+      if (session.graded > 0) {
+        session.summary = summarize();
+      } else {
+        toast(t("toast.reviewSessionDone"), "success");
+      }
+      void refreshAll();
+    },
+    undefined,
+    // Hopping between pages animates itself (the reader slides content out and
+    // in); only the end of the session gets the shell's view transition.
+    { animate: !next },
+  );
   return ok && app.reviewSession;
 }
 
