@@ -13,6 +13,8 @@
   import { Simulation, groupAnchors, seedPosition, type SimNode } from "../lib/graph-sim";
   import type { PageGraph } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
+  import VitalityLeaf from "./VitalityLeaf.svelte";
+  import { vitality, type VitalityLevel } from "../lib/vitality";
 
   // Identity colour is the top-level folder. A folder the user coloured keeps
   // its colour; the others take the first three categorical slots (the ones
@@ -26,6 +28,11 @@
   const BUNDLE_ABOVE = 1200;
   /** How far links bow, as a share of their length. */
   const BEND = 0.08;
+  /** Opacity of the pages outside the one in focus. */
+  const DIM = 0.18;
+  /** Vitality levels in legend order, with the token each is drawn in (the same ones VitalityLeaf uses). */
+  const LEVELS: VitalityLevel[] = ["thriving", "healthy", "thirsty", "wilting", "seed"];
+  const LEVEL_TOKENS = ["--c-sage", "--c-teal", "--c-amber", "--c-clay", "--muted"];
 
   interface Group {
     key: string;
@@ -60,6 +67,9 @@
   let activeMatch = $state(0);
   let arranging = $state(false);
   let dragging = $state(false);
+  /** What a page's disc is tinted by: how well it is remembered, or its top-level folder. */
+  let colorBy = $state<"vitality" | "folder">(readColorBy());
+  let levelCounts = $state<number[]>([0, 0, 0, 0, 0]);
 
   let stage: HTMLDivElement | undefined = $state();
   let canvas: HTMLCanvasElement | undefined = $state();
@@ -74,6 +84,16 @@
   let edgeDir = new Uint8Array(0);
   /** Node indices by importance, for labels. */
   let byDegree: number[] = [];
+  /** Per page, an index into LEVELS. */
+  let levelOf = new Uint8Array(0);
+  /** Eased 0..1: the picture grows in when the view opens. */
+  let grow = 1;
+  let entry: { start: number; ms: number } | null = null;
+  let opened = false;
+  /** Opacity of the pages outside the one in focus, eased toward `dimTarget`. */
+  let dim = 1;
+  let dimTarget = 1;
+  let litPrev: Uint8Array | null = null;
   let labelWidth = new Float32Array(0);
   let cam = { k: 1, tx: 0, ty: 0 };
   let size = { w: 0, h: 0, dpr: 1 };
@@ -113,6 +133,7 @@
     const brief = (i: number) => ({ index: i, title: items[i].title, color: groups[items[i].group]?.css });
     return {
       ...it,
+      meta: app.library.find((p) => p.id === it.id) ?? { lastReview: null, nextReview: null },
       group: groups[it.group],
       out: it.out.map(brief).sort((a, b) => a.title.localeCompare(b.title)),
       in: it.in.map(brief).sort((a, b) => a.title.localeCompare(b.title)),
@@ -125,6 +146,24 @@
     } catch {
       return false;
     }
+  }
+
+  function readColorBy(): "vitality" | "folder" {
+    try {
+      return localStorage.getItem("herbarium.graph.color") === "folder" ? "folder" : "vitality";
+    } catch {
+      return "vitality";
+    }
+  }
+
+  function setColorBy(next: "vitality" | "folder") {
+    colorBy = next;
+    try {
+      localStorage.setItem("herbarium.graph.color", next);
+    } catch {
+      /* the choice just won't persist */
+    }
+    invalidate();
   }
 
   /** Lowercase without accents, for search. */
@@ -151,6 +190,7 @@
       edge: "rgba(107,106,104,0.3)",
       font: "sans-serif",
       groups: [] as string[],
+      levels: [] as string[],
     };
   }
 
@@ -170,6 +210,7 @@
         const m = /^var\((--[\w-]+)\)$/.exec(g.css);
         return (m ? v(m[1]) : g.css) || v("--series-other");
       }),
+      levels: LEVEL_TOKENS.map((name) => v(name) || v("--muted")),
     };
     dirty = true;
     schedule();
@@ -186,6 +227,15 @@
       await tick();
       readColors();
       resize();
+      if (!opened) {
+        // The first picture of this visit settles in instead of appearing at once.
+        opened = true;
+        if (!reducedMotion && data.nodes.length > 0) {
+          grow = 0;
+          entry = { start: performance.now(), ms: 700 };
+          schedule();
+        }
+      }
       if (!userMoved) fit(false);
     } catch (e) {
       error = errorMessage(e);
@@ -279,6 +329,15 @@
     groups = list;
     linkCount = ea.length;
     unlinked = next.filter((it) => it.near.length === 0).length;
+    const metas = new Map(app.library.map((p) => [p.id, p]));
+    const counts5 = [0, 0, 0, 0, 0];
+    levelOf = Uint8Array.from(next, (it) => {
+      const meta = metas.get(it.id);
+      const level = LEVELS.indexOf(meta ? vitality(meta).level : "seed");
+      counts5[level]++;
+      return level;
+    });
+    levelCounts = counts5;
     // Keep the selection when the page is still there.
     const keep = selected !== null ? graph?.nodes[selected]?.id : undefined;
     selected = keep !== undefined && index.has(keep) ? index.get(keep)! : null;
@@ -335,8 +394,20 @@
       if (p >= 1) flight = null;
       dirty = true;
     }
+    if (entry) {
+      const p = Math.min(1, (now - entry.start) / entry.ms);
+      grow = 1 - Math.pow(1 - p, 3);
+      dirty = true;
+      if (p >= 1) entry = null;
+    }
+    if (Math.abs(dim - dimTarget) > 0.004) {
+      dim = reducedMotion ? dimTarget : dim + (dimTarget - dim) * 0.35;
+      dirty = true;
+    } else {
+      dim = dimTarget;
+    }
     if (dirty && !(arranging && sim?.running)) draw();
-    if (sim?.running || flight) schedule();
+    if (sim?.running || flight || entry || dim !== dimTarget) schedule();
   }
 
   function invalidate() {
@@ -386,7 +457,11 @@
     const { k, tx, ty } = cam;
     const sx = (x: number) => x * k + tx;
     const sy = (y: number) => y * k + ty;
-    const lit = emphasis();
+    const current = emphasis();
+    if (current) litPrev = current;
+    // While the dimming eases out, keep drawing the last emphasis so it fades rather than snaps.
+    const lit = current ?? (dim < 0.99 ? litPrev : null);
+    dimTarget = current ? DIM : 1;
     const focus = hovered ?? selected;
     const margin = 40;
     const visible = (i: number) => {
@@ -446,7 +521,8 @@
       path.moveTo(x1, y1);
       path.quadraticCurveTo((x1 + x2) / 2 - (y2 - y1) * BEND, (y1 + y2) / 2 + (x2 - x1) * BEND, x2, y2);
     }
-    const fade = lit ? 0.25 : 1;
+    const fade = lit ? 1 - 0.75 * ((1 - dim) / (1 - DIM)) : 1;
+    const sizeGrow = 0.55 + 0.45 * grow;
     if (bundles.size) {
       ctx.strokeStyle = colors.muted;
       for (const [key, count] of bundles) {
@@ -473,7 +549,7 @@
       });
     } else {
       ctx.strokeStyle = colors.edge;
-      ctx.globalAlpha = fade;
+      ctx.globalAlpha = fade * grow;
       ctx.stroke(quiet);
     }
     ctx.globalAlpha = 1;
@@ -486,22 +562,24 @@
 
     // Pages, a path per colour; the faded ones first.
     for (const pass of lit ? [0, 1] : [1]) {
-      ctx.globalAlpha = lit && pass === 0 ? 0.18 : 1;
-      const paths = groups.map(() => new Path2D());
+      ctx.globalAlpha = (lit && pass === 0 ? dim : 1) * grow;
+      const byLevel = colorBy === "vitality";
+      const paths = Array.from({ length: byLevel ? LEVELS.length : groups.length }, () => new Path2D());
       for (let i = 0; i < nodes.length; i++) {
         if (lit && (lit[i] ? 1 : 0) !== pass) continue;
         if (!visible(i)) continue;
-        const r = screenRadius(nodes[i].r);
+        const r = screenRadius(nodes[i].r) * sizeGrow;
         const x = sx(nodes[i].x);
         const y = sy(nodes[i].y);
-        paths[items[i].group].moveTo(x + r, y);
-        paths[items[i].group].arc(x, y, r, 0, Math.PI * 2);
+        const path = paths[byLevel ? levelOf[i] : items[i].group];
+        path.moveTo(x + r, y);
+        path.arc(x, y, r, 0, Math.PI * 2);
       }
       // A thin gap around each disc; tiny discs get none, it would hide them.
       ctx.lineWidth = Math.min(1.5, Math.max(0, screenRadius(5) - 2.5) * 0.6);
       ctx.strokeStyle = colors.surface;
-      paths.forEach((p, g) => {
-        ctx.fillStyle = colors.groups[g] ?? colors.muted;
+      paths.forEach((p, slot) => {
+        ctx.fillStyle = (byLevel ? colors.levels[slot] : colors.groups[slot]) ?? colors.muted;
         ctx.fill(p);
         if (ctx.lineWidth > 0.2) ctx.stroke(p);
       });
@@ -521,7 +599,9 @@
     if (selected !== null && items[selected]) ring(selected, 4, 2, colors.text);
     if (hovered !== null && hovered !== selected && items[hovered]) ring(hovered, 3, 1.5, colors.soft);
 
+    ctx.globalAlpha = grow;
     drawLabels(ctx, lit, sx, sy, visible, islands);
+    ctx.globalAlpha = 1;
   }
 
   /** Small heads on the focused page's links, showing which way each one goes. */
@@ -576,7 +656,7 @@
   ) {
     if (groups.length < 2 || cam.k > 1.6) return;
     ctx.font = `600 11px ${font}`;
-    ctx.globalAlpha = Math.min(1, (1.6 - cam.k) / 0.5) * 0.9;
+    ctx.globalAlpha = Math.min(1, (1.6 - cam.k) / 0.5) * 0.9 * grow;
     groups.forEach((group, i) => {
       const g = islands[i];
       if (!g || g.n < 3) return;
@@ -624,6 +704,7 @@
     let shown = 0;
     // Folder names first: they are the map's regions.
     if (!lit) drawRegions(ctx, sx, sy, placed, font, islands);
+    ctx.globalAlpha = grow;
     for (const i of order) {
       if (shown >= (lit ? MAX_LABELS : budget)) break;
       if (!visible(i)) continue;
@@ -909,6 +990,7 @@
     void matches;
     void selected;
     void isolated;
+    void colorBy;
     invalidate();
   });
   $effect(() => {
@@ -946,10 +1028,32 @@
       <h1 class="display">{t("graph.title")}</h1>
       {#if graph}<p class="sub">{summary}</p>{/if}
     </div>
-    <label class="toggle">
-      <input type="checkbox" checked={showAll} onchange={toggleAll} />
-      {t("graph.showAll")}
-    </label>
+    <div class="head-tools">
+      <div class="seg" role="group" aria-label={t("graph.colorBy")}>
+        <button
+          type="button"
+          class="seg-btn"
+          class:active={colorBy === "vitality"}
+          aria-pressed={colorBy === "vitality"}
+          onclick={() => setColorBy("vitality")}
+        >
+          {t("graph.byVitality")}
+        </button>
+        <button
+          type="button"
+          class="seg-btn"
+          class:active={colorBy === "folder"}
+          aria-pressed={colorBy === "folder"}
+          onclick={() => setColorBy("folder")}
+        >
+          {t("graph.byFolder")}
+        </button>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" checked={showAll} onchange={toggleAll} />
+        {t("graph.showAll")}
+      </label>
+    </div>
   </header>
 
   {#if error}
@@ -1037,6 +1141,19 @@
       </button>
     </div>
 
+    {#if colorBy === "vitality" && items.length > 0}
+      <ul class="vkey" class:beside={!!card} aria-label={t("graph.vitalityLegend")}>
+        {#each LEVELS as level, n (level)}
+          {#if levelCounts[n] > 0}
+            <li>
+              <span class="dot" style={`background:var(${LEVEL_TOKENS[n]})`}></span>{t(`graph.level.${level}`)}
+              <span class="count">{levelCounts[n]}</span>
+            </li>
+          {/if}
+        {/each}
+      </ul>
+    {/if}
+
     {#if groups.length > 1}
       <ul class="legend" class:beside={!!card} aria-label={t("graph.legend")}>
         {#each groups as g, i (g.key)}
@@ -1050,7 +1167,7 @@
                 title={t("graph.isolate", { folder: g.label })}
                 onclick={() => toggleIsolate(i)}
               >
-                <span class="dot" style={`background:${g.css}`}></span>{g.label}<span class="count">{g.count}</span>
+                <span class="dot" class:hollow={colorBy === "vitality"} style={`background:${g.css}`}></span>{g.label}<span class="count">{g.count}</span>
               </button>
             </li>
           {/if}
@@ -1071,7 +1188,10 @@
           <span class="dot big" style={`background:${card.group?.css}`}></span>
           <div class="who">
             <strong>{card.title}</strong>
-            <span>{card.group?.label} · {t("graph.degree", { count: card.near.length })}</span>
+            <span class="who-meta">
+              <VitalityLeaf meta={card.meta} size={13} />
+              {card.group?.label} · {t("graph.degree", { count: card.near.length })}
+            </span>
           </div>
           <button class="btn btn-icon btn-ghost" onclick={() => (selected = null)} aria-label={t("graph.closeCard")}>
             <Icon name="x" size={14} />
@@ -1461,5 +1581,62 @@
   }
   .empty p {
     margin: 0 0 6px;
+  }
+  .head-tools .seg-btn {
+    width: auto;
+    padding: 0 10px;
+    font-size: var(--fs-xs);
+  }
+  .head-tools {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  /* With vitality tinting the folder legend only names islands, so its dots are outlines. */
+  .dot.hollow {
+    background: transparent !important;
+    box-shadow: inset 0 0 0 1.5px var(--muted);
+  }
+  .vkey {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    margin: 0;
+    padding: 6px 10px;
+    list-style: none;
+    display: flex;
+    gap: 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    font-size: var(--fs-xs);
+    color: var(--text-soft);
+    animation: vkey-in var(--t-enter) var(--ease-out) backwards;
+  }
+  .vkey.beside {
+    right: 314px;
+  }
+  .vkey li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .vkey .count {
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+  }
+  @keyframes vkey-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+  .who .who-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
   }
 </style>
