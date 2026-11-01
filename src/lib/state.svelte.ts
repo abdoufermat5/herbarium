@@ -1005,6 +1005,27 @@ export function fmtClock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+/** A UTC `YYYY-MM-DD` day as a short locale date, without timezone drift. */
+export function fmtDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  if (!y || !m || !d) return day;
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+/** "Next: 3 pages tomorrow", from the 14-day forecast (UTC days); a plain note when nothing is scheduled. */
+export function nextDueLine(stats: ReviewStats): string {
+  const next = stats.upcoming.find((d) => d.count > 0);
+  if (!next) return t("session.nextNone");
+  const utcDay = (offsetDays: number) => new Date(Date.now() + offsetDays * 86_400_000).toISOString().slice(0, 10);
+  if (next.day <= utcDay(0)) return t("session.nextToday", { count: next.count });
+  if (next.day === utcDay(1)) return t("session.nextTomorrow", { count: next.count });
+  return t("session.nextOn", { count: next.count, date: fmtDay(next.day) });
+}
+
 /** Open the first due page in the reader and keep advancing as pages are completed. */
 export async function startReviewSession(): Promise<boolean> {
   let queue: PageMeta[];
