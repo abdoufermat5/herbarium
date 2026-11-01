@@ -95,9 +95,12 @@ Needs [Node.js](https://nodejs.org), [pnpm](https://pnpm.io), [Rust](https://rus
 ```bash
 pnpm install
 pnpm tauri dev    # run the app
+pnpm preview:web  # the interface in a browser, on a throwaway demo vault (PORT=1530)
 make ci           # everything CI checks
 pnpm test:e2e     # end-to-end suites (see e2e/)
 ```
+
+`pnpm preview:web` runs the real interface in any browser, backed by the vault core through `herbarium mcp` (built on first use) on a freshly seeded copy of the demo vault. Desktop-only features (AI, publishing, browser capture, file dialogs) do nothing there. Add `?onboarding` to the address to start without a vault.
 
 The end-to-end suites run the `herbarium` binary, the browser extension in Playwright's Chromium, and the desktop app through [tauri-driver](https://v2.tauri.app/develop/tests/webdriver/) on a virtual display. The desktop suite needs Linux with `webkit2gtk-driver`, `xvfb` and `cargo install tauri-driver`, and is skipped without them. `E2E_SCREENSHOTS=<folder>` keeps screenshots of the key moments.
 
