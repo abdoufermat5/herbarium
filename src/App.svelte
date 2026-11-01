@@ -31,11 +31,13 @@
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import Logo from "./lib/Logo.svelte";
+  import { rafThrottle, reducedMotion } from "./lib/motion";
   import type { ShortcutContext } from "./lib/shortcuts";
   import type { CaptureOffer } from "./lib/types";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
+  let veilEl: HTMLElement | undefined = $state();
   let dragTimer: ReturnType<typeof setTimeout> | undefined;
   let retrying = $state(false);
   let shortcutsOpen = $state(false);
@@ -48,10 +50,22 @@
     return !!e.dataTransfer && Array.from(e.dataTransfer.types).includes("Files");
   }
 
+  // The specimen card leans toward the pointer; updated at most once per frame.
+  const tilt = rafThrottle((x: number, y: number) => {
+    if (!veilEl) return;
+    const nx = (x / window.innerWidth - 0.5) * 2;
+    const ny = (y / window.innerHeight - 0.5) * 2;
+    veilEl.style.setProperty("--ry", `${(nx * 6).toFixed(2)}deg`);
+    veilEl.style.setProperty("--rx", `${(-ny * 5).toFixed(2)}deg`);
+    veilEl.style.setProperty("--tx", `${(nx * 10).toFixed(1)}px`);
+    veilEl.style.setProperty("--ty", `${(ny * 8).toFixed(1)}px`);
+  });
+
   function onDragOver(e: DragEvent) {
     if (!hasFiles(e)) return;
     e.preventDefault();
     if (app.config?.vaultPath) dragging = true;
+    if (!reducedMotion()) tilt(e.clientX, e.clientY);
     clearTimeout(dragTimer);
     dragTimer = setTimeout(() => (dragging = false), 180);
   }
@@ -377,13 +391,13 @@
 <div class="content">
 {#if !app.initialized}
   <div class="boot">
-    <div class="boot-mark"><Logo size={56} /></div>
+    <div class="boot-mark"><Logo size={56} animate /></div>
     <span class="spinner"></span>
     <p>{t("boot.opening")}</p>
   </div>
 {:else if app.initError}
   <div class="boot boot-error">
-    <div class="boot-mark"><Logo size={56} /></div>
+    <div class="boot-mark"><Logo size={56} animate /></div>
     <h1 class="display">{t("boot.failed")}</h1>
     <p class="error-text">{app.initError}</p>
     <button class="btn btn-primary" onclick={retry} disabled={retrying}>
@@ -468,11 +482,15 @@
 {/if}
 
 {#if dragging}
-  <div class="drag-veil" aria-hidden="true">
-    <div class="drag-card">
-      <Icon name="upload" size={26} />
-      <strong>{t("drag.title")}</strong>
-      <span>{t("drag.sub")}</span>
+  <div class="drag-veil" aria-hidden="true" bind:this={veilEl}>
+    <div class="drag-sheet"></div>
+    <div class="drag-stage">
+      <div class="drag-card">
+        <span class="drag-leaf"><Icon name="leaf" size={22} /></span>
+        <strong>{t("drag.title")}</strong>
+        <span class="drag-sub">{t("drag.sub")}</span>
+        <span class="drag-hint">{t("drag.hint")}</span>
+      </div>
     </div>
   </div>
 {/if}
@@ -556,34 +574,83 @@
     pointer-events: none;
     animation: fade-in var(--t-fast) var(--ease-out);
   }
+  /* A dashed sheet of paper laid over the window: drop anywhere on it. */
+  .drag-sheet {
+    position: absolute;
+    inset: 14px;
+    border: 1.5px dashed var(--border-hover);
+    border-radius: var(--radius-lg);
+    animation: sheet-in var(--t-enter) var(--ease-spring) backwards;
+  }
+  .drag-stage {
+    animation: pop-in var(--t-enter) var(--ease-spring) backwards;
+  }
+  /* The "pressed specimen": a card that leans toward the pointer. */
   .drag-card {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 6px;
-    padding: 36px 48px;
+    padding: 30px 44px 26px;
     border-radius: var(--radius-lg);
     background: var(--surface);
-    border: 1px dashed var(--border-hover);
-    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border-strong);
+    box-shadow: var(--shadow);
     color: var(--text-soft);
     text-align: center;
-    animation: pop-in var(--t-med) var(--ease-out);
+    transform: perspective(900px) translate3d(var(--tx, 0px), var(--ty, 0px), 0)
+      rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)) rotate(-1.2deg);
+    transition: transform var(--t-fast) var(--ease-out);
+    will-change: transform;
   }
-  .drag-card :global(svg) {
-    color: var(--text);
+  .drag-leaf {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
     margin-bottom: 6px;
+    border-radius: var(--radius);
+    background: var(--c-sage-soft);
+    color: var(--leaf);
+  }
+  .drag-leaf :global(svg) {
+    transform-origin: 50% 100%;
+    animation: sway 2.6s var(--ease-in-out) infinite alternate;
   }
   .drag-card strong {
     font-family: var(--font-display);
     font-size: var(--fs-xl);
     font-weight: 500;
     letter-spacing: -0.02em;
+    line-height: 1.1;
     color: var(--text);
   }
-  .drag-card span {
+  .drag-sub {
     font-size: var(--fs-sm);
     color: var(--muted);
+  }
+  .drag-hint {
+    margin-top: 8px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-strong);
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+
+  @keyframes sheet-in {
+    from {
+      opacity: 0;
+      transform: scale(0.985);
+    }
+  }
+  @keyframes sway {
+    from {
+      transform: rotate(-4deg);
+    }
+    to {
+      transform: rotate(4deg);
+    }
   }
 
   @keyframes fade-in {

@@ -2,7 +2,8 @@
   // The Herbarium mark, drawn from docs/brand/icon-*.svg. Its colours come
   // from the --logo-* tokens in app.css, so it follows the light or dark
   // theme. Below 48 px it uses the simplified leaf, like the PNG icons.
-  let { size = 28 }: { size?: number } = $props();
+  // `animate` grows the leaf and draws its veins once on mount (under 900ms).
+  let { size = 28, animate = false }: { size?: number; animate?: boolean } = $props();
 
   const uid = $props.id();
   const full = $derived(size >= 48);
@@ -15,7 +16,7 @@
   );
 </script>
 
-<svg class="logo" width={size} height={size} viewBox="0 0 1024 1024" aria-hidden="true">
+<svg class="logo" class:animate width={size} height={size} viewBox="0 0 1024 1024" aria-hidden="true">
   <defs>
     <linearGradient id="{uid}-bg" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" style="stop-color: var(--logo-bg-top)" />
@@ -31,11 +32,13 @@
   <!-- About one pixel at sidebar size: the light tile would melt into cream surfaces. -->
   <rect x="18" y="18" width="988" height="988" rx="212" fill="none" stroke="var(--logo-edge)" stroke-width="36" />
   <g transform="translate(500 532) rotate(45) scale(1.06) translate(-512 -512)">
-    <path d={blade} fill="url(#{uid}-leaf)" />
-    <g clip-path="url(#{uid}-blade)" fill="none" stroke="var(--logo-vein)" stroke-width={full ? 15 : 34} stroke-linecap="round">
-      {#each veins as d (d)}<path {d} />{/each}
+    <g class="plant">
+      <path d={blade} fill="url(#{uid}-leaf)" />
+      <g clip-path="url(#{uid}-blade)" fill="none" stroke="var(--logo-vein)" stroke-width={full ? 15 : 34} stroke-linecap="round">
+        {#each veins as d, n (d)}<path class="vein" pathLength="1" style:--n={Math.floor(n / 2)} {d} />{/each}
+      </g>
+      <path class="vein midrib" pathLength="1" d={full ? "M512 205V930" : "M512 240V905"} stroke="var(--logo-vein)" stroke-width={full ? 22 : 44} stroke-linecap="round" />
     </g>
-    <path d={full ? "M512 205V930" : "M512 240V905"} stroke="var(--logo-vein)" stroke-width={full ? 22 : 44} stroke-linecap="round" />
   </g>
   {#if full}
     <path d="M246 818l32 21-32 21" fill="none" stroke="var(--logo-chevron)" stroke-width="15" stroke-linecap="round" stroke-linejoin="round" />
@@ -46,5 +49,30 @@
   .logo {
     display: block;
     flex: none;
+  }
+
+  .animate .plant {
+    transform-box: fill-box;
+    transform-origin: 50% 100%;
+    animation: grow 560ms var(--ease-spring) backwards;
+  }
+  .animate .vein {
+    stroke-dasharray: 1;
+    animation: draw 420ms var(--ease-out) calc(220ms + var(--n, 0) * 60ms) backwards;
+  }
+  .animate .midrib {
+    animation-delay: 120ms;
+  }
+
+  @keyframes grow {
+    from {
+      opacity: 0;
+      transform: scale(0.55);
+    }
+  }
+  @keyframes draw {
+    from {
+      stroke-dashoffset: 1;
+    }
   }
 </style>
