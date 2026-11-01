@@ -206,7 +206,7 @@
   }
 
   /** Grid and list trade places by crossfading; the leaving one stops taking clicks. */
-  function swap(node: Element, { duration = 160 }: { duration?: number } = {}) {
+  function swap(_node: Element, { duration = 160 }: { duration?: number } = {}) {
     return {
       duration: reducedMotion() ? 0 : duration,
       css: (t: number) => `opacity: ${t}; pointer-events: none`,
