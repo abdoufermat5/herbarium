@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { slide, fade } from "svelte/transition";
+  import { flip } from "svelte/animate";
+  import { cubicOut } from "svelte/easing";
   import { api } from "../lib/api";
   import { reloadPages, toast, errorMessage } from "../lib/state.svelte";
   import { confirmAction } from "../lib/confirm.svelte";
@@ -8,6 +11,7 @@
   import { timeAgo, plural } from "../lib/format";
   import { reveal } from "../lib/reveal";
   import Icon from "../lib/Icon.svelte";
+  import Illustration from "../lib/Illustration.svelte";
 
   let entries = $state<TrashEntry[]>([]);
   let loading = $state(true);
@@ -130,38 +134,45 @@
       </div>
     {:else if entries.length === 0}
       <div class="empty">
-        <span class="empty-icon"><Icon name="trash-2" size={20} /></span>
+        <div class="empty-art"><Illustration name="empty-pot" size={110} /></div>
         <strong>{t("trash.empty")}</strong>
         <span>{t("trash.emptyHint")}</span>
       </div>
     {:else}
       <ul class="rows">
         {#each entries as entry (entry.id)}
-          <li class="entry" use:reveal>
-            <div class="body">
-              <span class="title">{titleOf(entry)}</span>
-              <span class="meta">
-                <span class="loc"><Icon name="folder" size={11} />{folderOf(entry)}</span>
-                <span class="when">{t("trash.deleted", { when: timeAgo(entry.deletedAt) })}</span>
-              </span>
-            </div>
-            <div class="actions">
-              <button
-                class="btn btn-sm"
-                disabled={busyId !== null || emptying}
-                onclick={() => restore(entry)}
-              >
-                <Icon name="refresh-cw" size={12} />
-                {busyId === entry.id ? t("trash.restoring") : t("trash.restore")}
-              </button>
-              <button
-                class="btn btn-danger btn-sm"
-                disabled={busyId !== null || emptying}
-                onclick={() => purge(entry)}
-              >
-                <Icon name="trash-2" size={12} />
-                {t("trash.purge")}
-              </button>
+          <li
+            class="entry"
+            use:reveal
+            animate:flip={{ duration: 180, easing: cubicOut }}
+            out:slide={{ duration: 180, easing: cubicOut }}
+          >
+            <div class="row" out:fade={{ duration: 140 }}>
+              <div class="body">
+                <span class="title">{titleOf(entry)}</span>
+                <span class="meta">
+                  <span class="loc"><Icon name="folder" size={11} />{folderOf(entry)}</span>
+                  <span class="when">{t("trash.deleted", { when: timeAgo(entry.deletedAt) })}</span>
+                </span>
+              </div>
+              <div class="actions">
+                <button
+                  class="btn btn-sm"
+                  disabled={busyId !== null || emptying}
+                  onclick={() => restore(entry)}
+                >
+                  <Icon name="refresh-cw" size={12} />
+                  {busyId === entry.id ? t("trash.restoring") : t("trash.restore")}
+                </button>
+                <button
+                  class="btn btn-danger btn-sm"
+                  disabled={busyId !== null || emptying}
+                  onclick={() => purge(entry)}
+                >
+                  <Icon name="trash-2" size={12} />
+                  {t("trash.purge")}
+                </button>
+              </div>
             </div>
           </li>
         {/each}
@@ -227,6 +238,10 @@
     background: var(--surface);
     overflow: hidden;
   }
+  .empty-art {
+    margin-bottom: 8px;
+    color: var(--text-soft);
+  }
   .error-text {
     max-width: 460px;
     color: var(--danger);
@@ -234,13 +249,16 @@
     overflow-wrap: anywhere;
   }
   .entry {
+    overflow: hidden;
+  }
+  .entry + .entry {
+    border-top: 1px solid var(--border);
+  }
+  .row {
     display: flex;
     align-items: center;
     gap: 16px;
     padding: 14px 18px;
-  }
-  .entry + .entry {
-    border-top: 1px solid var(--border);
   }
   .body {
     min-width: 0;
@@ -277,7 +295,7 @@
   }
 
   @media (max-width: 620px) {
-    .entry {
+    .row {
       flex-direction: column;
       align-items: stretch;
     }
