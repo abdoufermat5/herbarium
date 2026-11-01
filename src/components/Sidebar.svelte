@@ -1562,7 +1562,8 @@
     opacity: var(--ind-on, 0);
     pointer-events: none;
   }
-  .has-ind[data-ready] > .slide-ind {
+  /* `data-ready` is set by the action, so Svelte can't see it in the markup. */
+  .has-ind:global([data-ready]) > .slide-ind {
     transition:
       transform var(--t-med) var(--ease-out),
       opacity var(--t-fast) var(--ease-out);
