@@ -45,10 +45,17 @@
 </svg>
 
 <style>
+  /* Previews are drawn in the background; one that arrives later fades in over its placeholder. */
   .mini {
     display: block;
     width: 100%;
     height: 100%;
+    animation: mini-in var(--t-med) var(--ease-out) backwards;
+  }
+  @keyframes mini-in {
+    from {
+      opacity: 0;
+    }
   }
   .media {
     fill: currentColor;
