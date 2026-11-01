@@ -204,7 +204,7 @@
         <span
           class="tab-indicator"
           aria-hidden="true"
-          style={`--x: ${tabIndicator.x}px; --w: ${tabIndicator.width}px`}
+          style={`--x: ${tabIndicator.x}px; --w: ${tabIndicator.width}`}
         ></span>
         {#each TABS as tab (tab.id)}
           <button
@@ -444,18 +444,18 @@
   .tabs::-webkit-scrollbar {
     display: none;
   }
-  /* One sliding element marks the active tab, instead of a border per button. */
+  /* One sliding element marks the active tab, instead of a border per button.
+     A 1px line scaled to the tab's width keeps the motion on `transform`. */
   .tab-indicator {
     position: absolute;
     left: 0;
     bottom: -1px;
-    width: var(--w, 0);
+    width: 1px;
     height: 2px;
     background: var(--leaf);
-    transform: translateX(var(--x, 0));
-    transition:
-      transform var(--t-med) var(--ease-out),
-      width var(--t-med) var(--ease-out);
+    transform: translateX(var(--x, 0px)) scaleX(var(--w, 0));
+    transform-origin: left center;
+    transition: transform var(--t-med) var(--ease-out);
   }
   .tab {
     flex: none;
