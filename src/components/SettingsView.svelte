@@ -33,11 +33,36 @@
   ];
 
   let scroller: HTMLDivElement | undefined = $state();
+  let tabsEl: HTMLDivElement | undefined = $state();
+  /** Position of the active tab, in the tabs' own scrolled coordinates. */
+  let tabIndicator = $state({ x: 0, width: 0 });
+
+  function measureTabs() {
+    if (!tabsEl) return;
+    const active = tabsEl.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!active) return;
+    tabIndicator = { x: active.offsetLeft, width: active.offsetWidth };
+  }
+
+  // Language and panel width both move the tabs; remeasure after either changes.
+  $effect(() => {
+    app.settingsTab;
+    i18n.locale;
+    requestAnimationFrame(measureTabs);
+  });
 
   function pickTab(tab: SettingsTab) {
     app.settingsTab = tab;
     scroller?.scrollTo({ top: 0 });
   }
+
+  onMount(() => {
+    const ro = new ResizeObserver(() => measureTabs());
+    if (tabsEl) ro.observe(tabsEl);
+    // Geist may finish loading after mount, changing every label's width.
+    void document.fonts?.ready.then(() => measureTabs());
+    return () => ro.disconnect();
+  });
 
   /** Arrow keys move between tabs, as in any tab list. */
   function onTabKey(e: KeyboardEvent) {
@@ -175,7 +200,12 @@
   <div class="settings-inner">
     <header class="head">
       <h1 class="display">{t("settings.title")}</h1>
-      <div class="tabs" role="tablist" aria-label={t("settings.title")} tabindex="-1" onkeydown={onTabKey}>
+      <div class="tabs" role="tablist" aria-label={t("settings.title")} tabindex="-1" onkeydown={onTabKey} bind:this={tabsEl}>
+        <span
+          class="tab-indicator"
+          aria-hidden="true"
+          style={`--x: ${tabIndicator.x}px; --w: ${tabIndicator.width}px`}
+        ></span>
         {#each TABS as tab (tab.id)}
           <button
             id={`settings-tab-${tab.id}`}
@@ -193,6 +223,7 @@
       </div>
     </header>
 
+    {#key app.settingsTab}
     <div id="settings-panel" class="panel" role="tabpanel" aria-labelledby={`settings-tab-${app.settingsTab}`}>
     {#if app.settingsTab === "general"}
     <SettingsSection id="settings-appearance" title={t("settings.appearance")}>
@@ -369,6 +400,7 @@
 
     {/if}
     </div>
+    {/key}
 
     <p class="save-hint"><Icon name="check" size={14} />{t("settings.saved")}</p>
   </div>
@@ -400,6 +432,7 @@
     font-size: var(--fs-3xl);
   }
   .tabs {
+    position: relative;
     display: flex;
     gap: 2px;
     overflow-x: auto;
@@ -410,6 +443,19 @@
   }
   .tabs::-webkit-scrollbar {
     display: none;
+  }
+  /* One sliding element marks the active tab, instead of a border per button. */
+  .tab-indicator {
+    position: absolute;
+    left: 0;
+    bottom: -1px;
+    width: var(--w, 0);
+    height: 2px;
+    background: var(--leaf);
+    transform: translateX(var(--x, 0));
+    transition:
+      transform var(--t-med) var(--ease-out),
+      width var(--t-med) var(--ease-out);
   }
   .tab {
     flex: none;
@@ -435,7 +481,6 @@
   }
   .tab[aria-selected="true"] {
     color: var(--text);
-    border-bottom-color: var(--leaf);
   }
   .tab:focus-visible {
     outline: 2px solid var(--leaf);
@@ -447,6 +492,13 @@
     flex-direction: column;
     gap: 36px;
     min-width: 0;
+    animation: panel-in 180ms var(--ease-out);
+  }
+  @keyframes panel-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
   }
   .save-hint {
     display: flex;

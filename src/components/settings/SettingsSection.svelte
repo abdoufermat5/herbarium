@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Snippet } from "svelte";
-  import { reveal } from "../../lib/reveal";
 
   let {
     id,
@@ -10,15 +9,21 @@
   }: { id: string; title: string; note?: string; children: Snippet } = $props();
 </script>
 
-<section aria-labelledby={id} use:reveal>
-  <h2 {id} class="eyebrow">{title}</h2>
+<section aria-labelledby={id}>
+  <h2 {id}>{title}</h2>
   <div class="card rows">{@render children()}</div>
   {#if note}<p class="note">{note}</p>{/if}
 </section>
 
 <style>
   h2 {
-    margin-bottom: 12px;
+    margin-bottom: 10px;
+    font-family: var(--font-display);
+    font-size: var(--fs-lg);
+    font-weight: 500;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    color: var(--text);
   }
   .rows {
     display: flex;
