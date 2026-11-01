@@ -21,8 +21,10 @@
   const EDGE = 8;
 
   let menuEl: HTMLDivElement | undefined = $state();
-  let left = $state(0);
-  let top = $state(0);
+  let left = $state<number | null>(null);
+  let top = $state<number | null>(null);
+  // The menu grows out of the pointer: flipped sides pivot on the opposite edge.
+  const origin = $derived(`${left !== null && left < x ? "right" : "left"} ${top !== null && top < y ? "bottom" : "top"}`);
   let highlightedIndex = $state(-1);
   const returnFocus = document.activeElement as HTMLElement | null;
 
@@ -122,8 +124,9 @@
   aria-label={ariaLabel}
   aria-orientation="vertical"
   tabindex="-1"
-  style:left="{left}px"
-  style:top="{top}px"
+  style:left="{left ?? x}px"
+  style:top="{top ?? y}px"
+  style:transform-origin={origin}
   bind:this={menuEl}
   onkeydown={onKeyDown}
   oncontextmenu={(e) => e.preventDefault()}

@@ -427,6 +427,7 @@ body,
   }
 }
 
+/* A physical keycap: raised face, thicker bottom edge. */
 .kbd {
   display: inline-flex;
   align-items: center;
@@ -434,10 +435,11 @@ body,
   min-width: 20px;
   height: 20px;
   padding: 0 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xs);
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
   background: var(--raised);
-  color: var(--muted);
+  color: var(--text-soft);
   font-family: var(--mono);
   font-size: var(--fs-2xs);
   line-height: 1;
@@ -741,24 +743,33 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  animation: menu-in var(--t-med) var(--ease-out);
+  /* Grows out of the trigger: origin follows the side it opens from. */
+  transform-origin: top left;
+  animation: menu-in var(--t-fast) var(--ease-out);
 }
 
 .dropdown-menu.align-right {
   left: auto;
   right: 0;
+  transform-origin: top right;
 }
 
 .dropdown-menu.drop-up {
   top: auto;
   bottom: calc(100% + 6px);
+  transform-origin: bottom left;
 }
 
-/* Shared by every popover: Select, DropdownMenu */
+.dropdown-menu.drop-up.align-right {
+  transform-origin: bottom right;
+}
+
+/* Shared by every popover: Select, DropdownMenu, ContextMenu. Seen constantly,
+   so quick and without bounce; exits are instant. */
 @keyframes menu-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: scale(0.97);
   }
 }
 
@@ -776,8 +787,8 @@ textarea {
   cursor: pointer;
   text-align: left;
   transition:
-    background-color var(--t-fast) var(--ease-out),
-    color var(--t-fast) var(--ease-out);
+    background-color 100ms var(--ease-out),
+    color 100ms var(--ease-out);
   user-select: none;
 }
 

@@ -215,7 +215,7 @@
   @keyframes confirm-pop {
     from {
       opacity: 0;
-      transform: translateY(8px) scale(0.98);
+      transform: translateY(6px);
     }
   }
 
