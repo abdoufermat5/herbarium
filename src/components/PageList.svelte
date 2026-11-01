@@ -1,5 +1,14 @@
+<script lang="ts" module>
+  /** The cascading entrance plays once per session; coming back to the list just shows it. */
+  let entered = false;
+</script>
+
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
+  import { flip } from "svelte/animate";
+  import { fade, fly } from "svelte/transition";
+  import { backOut, cubicIn, cubicOut } from "svelte/easing";
+  import { Tween } from "svelte/motion";
   import {
     app,
     visiblePages,
@@ -22,13 +31,15 @@
   import { api } from "../lib/api";
   import type { BulkError, PageMeta } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
-  import { reveal } from "../lib/reveal";
+  import Illustration from "../lib/Illustration.svelte";
+  import { reducedMotion } from "../lib/motion";
+  import VitalityLeaf from "./VitalityLeaf.svelte";
   import { folderLook, tagColor } from "../lib/appearance";
   import Miniature from "./Miniature.svelte";
   import Select from "./Select.svelte";
   import ContextMenu from "./ContextMenu.svelte";
   import type { DropdownMenuItem } from "./DropdownMenu.svelte";
-  import { dueInfo, fmtDuration, plural } from "../lib/format";
+  import { dueInfo, fmtDuration, plural, startOfToday } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
 
   /** Search hits carry an optional `[match]`-marked snippet on top of the page meta. */
@@ -134,6 +145,111 @@
   onDestroy(() => {
     clearTimeout(timer);
   });
+
+  /* ------------------------------------------------------------ choreography */
+
+  /* Cards enter in a short cascade the first time the list shows and whenever a
+     folder or tag filter changes. Anything else that adds a card (typing in the
+     search, loading more) only fades it in, and a layout switch crossfades the
+     whole grid instead. The mode is read once, when each card mounts. */
+  let entryMode: "stagger" | "fresh" = entered ? "fresh" : "stagger";
+  let quiet = false;
+  let entryTimer: ReturnType<typeof setTimeout> | undefined;
+  let quietTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function armCascade() {
+    entryMode = "stagger";
+    clearTimeout(entryTimer);
+    entryTimer = setTimeout(() => {
+      entryMode = "fresh";
+      entered = true;
+    }, 900);
+  }
+
+  // First cards of the session: cascade them, then settle.
+  $effect(() => {
+    if (!entered && shown.length > 0) armCascade();
+  });
+
+  let filterKey: string | null = null;
+  $effect.pre(() => {
+    const key = `${app.folderFilter ?? ""}\u0000${app.tagFilter ?? ""}`;
+    if (filterKey !== null && key !== filterKey) armCascade();
+    filterKey = key;
+  });
+
+  let layoutSeen = app.layout;
+  $effect.pre(() => {
+    const layout = app.layout;
+    if (layout === layoutSeen) return;
+    layoutSeen = layout;
+    quiet = true;
+    clearTimeout(quietTimer);
+    quietTimer = setTimeout(() => (quiet = false), 400);
+  });
+
+  /** Marks a card as it mounts; later re-renders of the same card never replay it. */
+  function enter(node: HTMLElement, index: number) {
+    if (quiet) return;
+    if (entryMode === "stagger") {
+      node.style.setProperty("--i", String(Math.min(index, 10)));
+      node.classList.add("enter");
+    } else {
+      node.classList.add("fresh");
+    }
+  }
+
+  /** Cards slide to their new place on reorder; a very large list just snaps. */
+  const flipMs = $derived(shown.length > 100 || reducedMotion() ? 0 : 220);
+  function glide(node: Element, pos: { from: DOMRect; to: DOMRect }) {
+    return flip(node, pos, { duration: flipMs, easing: cubicOut });
+  }
+
+  /** Grid and list trade places by crossfading; the leaving one stops taking clicks. */
+  function swap(node: Element, { duration = 160 }: { duration?: number } = {}) {
+    return {
+      duration: reducedMotion() ? 0 : duration,
+      css: (t: number) => `opacity: ${t}; pointer-events: none`,
+    };
+  }
+
+  const barIn = () => ({ y: 28, duration: reducedMotion() ? 0 : 300, easing: backOut });
+  const barOut = () => ({ y: 20, duration: reducedMotion() ? 0 : 160, easing: cubicIn });
+
+  // The count eases between values instead of jumping, but never counts up from zero on load.
+  const countTween = new Tween(0, { easing: cubicOut });
+  $effect(() => {
+    const n = pages.length;
+    const from = untrack(() => countTween.current);
+    void countTween.set(n, { duration: from === 0 || reducedMotion() ? 0 : 220 });
+  });
+
+  onDestroy(() => {
+    clearTimeout(entryTimer);
+    clearTimeout(quietTimer);
+  });
+
+  /* ------------------------------------------------------------ search marks */
+
+  /** Words worth highlighting: free terms, not `tag:x` filters or `-excluded` words. */
+  const termRe = $derived.by(() => {
+    const terms = [...app.search.matchAll(/"([^"]+)"|(\S+)/g)]
+      .map((m) => m[1] ?? m[2])
+      .filter((w) => w && !w.startsWith("-") && !/^[a-z]+:/i.test(w))
+      .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    if (terms.length === 0) return null;
+    terms.sort((a, b) => b.length - a.length);
+    return new RegExp(`(${terms.join("|")})`, "gi");
+  });
+
+  function markParts(text: string): Array<{ text: string; mark: boolean }> {
+    if (!searching || !termRe) return [{ text, mark: false }];
+    // The pattern's one capture group puts every match at an odd index.
+    return text
+      .split(termRe)
+      .map((s, i) => ({ text: s, mark: i % 2 === 1 }))
+      .filter((part) => part.text);
+  }
 
   function onSearch() {
     clearTimeout(timer);
@@ -359,7 +475,118 @@
     flush();
     return parts;
   }
+
+  /* ------------------------------------------------------- quick actions, keys */
+
+  const label = (p: PageMeta) => p.title || t("common.untitled");
+
+  /** Cards due today read amber, earlier than today rose, later muted. */
+  function dueTone(next: number | null | undefined): "rose" | "amber" | "muted" {
+    if (next == null) return "muted";
+    const today = startOfToday();
+    if (next < today) return "rose";
+    return next < today + 86_400_000 ? "amber" : "muted";
+  }
+
+  async function scheduleOne(id: string, minutes: number) {
+    try {
+      await api.scheduleReview(id, minutes);
+      toast(t("list.scheduled", { count: 1 }), "success");
+      await reloadPages(true);
+    } catch (e) {
+      console.error(e);
+      toast(t("list.scheduleFailed", { detail: errorMessage(e) }), "error");
+    }
+  }
+
+  function openScheduleMenu(at: { x: number; y: number }, p: Row) {
+    if (app.review.presets.length === 0) return;
+    menu = {
+      ...at,
+      items: [
+        { header: true, label: t("list.scheduleLabel") },
+        ...app.review.presets.map((m) => ({
+          id: `in-${m}`,
+          label: fmtDuration(m),
+          icon: "calendar-clock" as const,
+          onclick: () => void scheduleOne(p.id, m),
+        })),
+      ],
+    };
+  }
+
+  /** Nearest card in a direction: along the sequence for left/right, by column across rows for up/down. */
+  function neighbour(cards: HTMLElement[], from: number, dir: "up" | "down" | "left" | "right"): HTMLElement | undefined {
+    if (dir === "left") return cards[from - 1];
+    if (dir === "right") return cards[from + 1];
+    const step = dir === "down" ? 1 : -1;
+    const here = cards[from].getBoundingClientRect();
+    const cx = here.left + here.width / 2;
+    let rowTop: number | null = null;
+    let best: HTMLElement | undefined;
+    let bestGap = Infinity;
+    for (let i = from + step; i >= 0 && i < cards.length; i += step) {
+      const r = cards[i].getBoundingClientRect();
+      if (Math.abs(r.top - here.top) < 4) continue;
+      if (rowTop === null) rowTop = r.top;
+      else if (Math.abs(r.top - rowTop) >= 4) break;
+      const gap = Math.abs(r.left + r.width / 2 - cx);
+      if (gap < bestGap) {
+        bestGap = gap;
+        best = cards[i];
+      }
+    }
+    return best;
+  }
+
+  /** Keys on a focused card: arrows move between cards, X selects, S schedules, Delete trashes. */
+  function onCardKey(e: KeyboardEvent, p: Row) {
+    const target = e.target as HTMLElement;
+    if (!target.classList.contains("open-overlay") || e.ctrlKey || e.metaKey || e.altKey) return;
+    const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[e.key] as
+      | "up"
+      | "down"
+      | "left"
+      | "right"
+      | undefined;
+    if (dir) {
+      const grid = (e.currentTarget as HTMLElement).parentElement;
+      const cards = [...(grid?.querySelectorAll<HTMLElement>(".open-overlay") ?? [])];
+      const next = neighbour(cards, cards.indexOf(target), dir);
+      e.preventDefault();
+      next?.focus();
+    } else if (e.key.toLowerCase() === "x" && !e.shiftKey) {
+      e.preventDefault();
+      toggleSelect(p.id, false);
+    } else if (e.key.toLowerCase() === "s" && !e.shiftKey) {
+      e.preventDefault();
+      const r = target.getBoundingClientRect();
+      openScheduleMenu({ x: r.left + 24, y: r.bottom }, p);
+    } else if (e.key === "Delete") {
+      e.preventDefault();
+      void deletePages([p.id]);
+    } else if (e.key === "Escape" && selected.size > 0) {
+      e.stopPropagation();
+      clearSelection();
+    }
+  }
+
+  function onWindowKey(e: KeyboardEvent) {
+    if (e.defaultPrevented || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+    if (e.key.toLowerCase() !== "a" || pages.length === 0) return;
+    const el = e.target as HTMLElement | null;
+    if (el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName))) return;
+    if (document.querySelector('[aria-modal="true"]')) return;
+    e.preventDefault();
+    selected = new Set(pages.map((p) => p.id));
+  }
 </script>
+
+<svelte:window onkeydown={onWindowKey} />
+
+{#snippet marked(text: string)}
+  {#each markParts(text) as part, i (i)}{#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+{/snippet}
 
 <section class="pane" aria-label={t("list.label")}>
   <div class="inner">
@@ -373,7 +600,7 @@
           <span class="spinner" aria-hidden="true"></span>
         {/if}
         {#if !(app.busy && app.pages.length === 0)}
-          <span class="count">{plural(pages.length, "page")}</span>
+          <span class="count">{plural(Math.round(countTween.current), "page")}</span>
         {/if}
         {#if filtersActive}
           <button type="button" class="btn btn-ghost btn-sm" onclick={clearFilters}>
@@ -482,11 +709,220 @@
       </div>
     {/if}
 
+
+    {#if app.busy && app.pages.length === 0}
+      <div class="grid" class:list={app.layout === "list"} aria-hidden="true">
+        {#each Array(6) as _, i (i)}
+          <div class="skel"></div>
+        {/each}
+      </div>
+    {:else if app.loadError && pages.length === 0}
+      <div class="empty">
+        <span class="empty-icon danger"><Icon name="info" size={20} /></span>
+        <strong>{t("list.loadFailed")}</strong>
+        <span class="detail">{app.loadError}</span>
+        <button type="button" class="btn btn-sm" onclick={() => void reloadPages()}>
+          {t("list.retry")}
+        </button>
+      </div>
+    {:else if pages.length === 0}
+      <div class="empty" in:fade={{ duration: reducedMotion() ? 0 : 160 }}>
+        <Illustration
+          name={app.search ? "magnifier-leaf" : filtersActive ? "empty-pot" : "seedling"}
+          size={112}
+          animate
+        />
+        <strong>
+          {app.search
+            ? t("list.noMatch", { query: app.search })
+            : filtersActive
+              ? t("list.emptyFilter")
+              : t("list.empty")}
+        </strong>
+        <span>
+          {app.search
+            ? t("list.noMatchHint")
+            : filtersActive
+              ? t("list.emptyFilterHint")
+              : t("list.emptyHint")}
+        </span>
+        <div class="empty-actions">
+          {#if app.search}
+            <button type="button" class="btn btn-sm" onclick={clearSearch}>{t("list.clearSearch")}</button>
+          {/if}
+          {#if filtersActive}
+            <button type="button" class="btn btn-sm" onclick={clearFilters}>{t("list.clearFilters")}</button>
+          {:else if !app.search}
+            <button type="button" class="btn btn-primary btn-sm" onclick={() => (app.importOpen = true)}>
+              <Icon name="plus" size={12} />
+              {t("list.importPage")}
+              <kbd class="kbd">I</kbd>
+            </button>
+          {/if}
+        </div>
+      </div>
+    {:else}
+      <div class="stage">
+        {#key app.layout}
+          <div
+            class="grid"
+            class:list={app.layout === "list"}
+            class:selecting={selected.size > 0}
+            in:swap
+            out:swap
+          >
+            {#each shown as p, i (p.id)}
+              {@const due = dueInfo(p.nextReview)}
+              {@const tone = dueTone(p.nextReview)}
+              {@const selectedRow = selected.has(p.id)}
+              <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+              <article
+                class="page"
+                class:selected={selectedRow}
+                use:enter={i}
+                animate:glide
+                draggable="true"
+                ondragstart={(e) => onDragStart(e, p)}
+                oncontextmenu={(e) => openPageMenu(e, p)}
+                onkeydown={(e) => onCardKey(e, p)}
+              >
+                <button
+                  type="button"
+                  class="open-overlay"
+                  aria-label={label(p)}
+                  onclick={(e) => onOpenPage(e, p.id)}
+                ></button>
+                {#if app.layout === "grid"}
+                  <div class="preview" class:no-preview={!app.previews[p.id]} data-color={folderLook(p.folder).color} aria-hidden="true">
+                    <div class="preview-inner">
+                      {#if app.previews[p.id]}
+                        <Miniature digest={app.previews[p.id]} />
+                      {:else if p.ext?.look?.icon}
+                        <span class="placeholder-emoji">{p.ext.look.icon}</span>
+                      {:else}
+                        <Icon name="leaf" size={22} />
+                      {/if}
+                    </div>
+                  </div>
+                {/if}
+                <div class="page-open">
+                  <span class="thumb" data-color={folderLook(p.folder).color}>
+                    {#if p.ext?.look?.icon}<span class="thumb-emoji">{p.ext.look.icon}</span>{:else}<Icon name="leaf" size={15} />{/if}
+                  </span>
+                  <span class="page-body">
+                    <span class="page-title">{@render marked(label(p))}</span>
+                    {#if searching && p.snippet}
+                      <span class="note snippet">
+                        {#each snippetParts(p.snippet) as part, j (j)}
+                          {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
+                        {/each}
+                      </span>
+                    {:else if p.note}
+                      <span class="note">{@render marked(p.note)}</span>
+                    {/if}
+                    {#if app.layout === "grid" || p.folder || p.tags.length > 0}
+                      <span class="meta">
+                        {#if p.folder}
+                          <button
+                            type="button"
+                            class="loc chip-link"
+                            style:color={folderLook(p.folder).color ? `var(--c-${folderLook(p.folder).color})` : undefined}
+                            title={t("list.showFolder", { folder: p.folder })}
+                            onclick={() => void showFolder(p.folder!)}
+                          >
+                            <Icon name="folder" size={11} />{p.folder}
+                          </button>
+                        {/if}
+                        {#each p.tags.slice(0, 3) as tag (tag)}
+                          <button
+                            type="button"
+                            class="chip chip-muted chip-link"
+                            data-color={tagColor(tag)}
+                            title={t("list.showTag", { tag })}
+                            onclick={() => void showTag(tag)}
+                            oncontextmenu={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              app.lookEdit = { kind: "tag", key: tag };
+                            }}
+                          >
+                            {tag}
+                          </button>
+                        {/each}
+                        {#if p.tags.length > 3}
+                          <span class="chip chip-muted">+{p.tags.length - 3}</span>
+                        {/if}
+                        {#if app.layout === "grid"}
+                          <span class="leaf-slot"><VitalityLeaf meta={p} size={16} /></span>
+                        {/if}
+                      </span>
+                    {/if}
+                  </span>
+                </div>
+                <span class="page-side">
+                  <label class="check">
+                    <input
+                      type="checkbox"
+                      class="cbx"
+                      checked={selectedRow}
+                      onclick={(e) => toggleSelect(p.id, e.shiftKey)}
+                      aria-label={t("list.select", { title: label(p) })}
+                    />
+                  </label>
+                  {#if app.layout === "list"}
+                    <span class="leaf-col"><VitalityLeaf meta={p} size={16} /></span>
+                  {/if}
+                  <span class="due-slot">
+                    {#if due}
+                      <span
+                        class="chip due"
+                        class:chip-muted={tone === "muted"}
+                        data-color={tone === "muted" ? undefined : tone}
+                      >
+                        {due.label}
+                      </span>
+                    {/if}
+                  </span>
+                </span>
+                <span class="quick">
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-icon"
+                    aria-label={t("list.scheduleFor", { title: label(p) })}
+                    title={`${t("list.schedule")} (S)`}
+                    aria-haspopup="menu"
+                    disabled={app.review.presets.length === 0}
+                    onclick={(e) => openScheduleMenu(anchor(e), p)}
+                  >
+                    <Icon name="calendar-clock" size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-icon"
+                    aria-label={t("list.moreFor", { title: label(p) })}
+                    title={t("list.menu")}
+                    aria-haspopup="menu"
+                    onclick={(e) => openPageMenu(e, p)}
+                  >
+                    <Icon name="dots-three" size={14} />
+                  </button>
+                </span>
+              </article>
+            {/each}
+          </div>
+        {/key}
+      </div>
+      {#if shown.length < pages.length}
+        <div class="more" bind:this={sentinel} aria-hidden="true"></div>
+      {/if}
+    {/if}
+
     {#if selectedIds.length > 0}
-      <div class="bulk" role="group" aria-label={t("list.bulk")}>
+      <div class="bulk" role="group" aria-label={t("list.bulk")} in:fly={barIn()} out:fly={barOut()}>
         <label class="bulk-all">
           <input
             type="checkbox"
+            class="cbx"
             bind:this={selectAllEl}
             checked={allSelected}
             onchange={toggleAll}
@@ -547,168 +983,6 @@
         </div>
       </div>
     {/if}
-
-    {#if app.busy && app.pages.length === 0}
-      <div class="grid" class:list={app.layout === "list"} aria-hidden="true">
-        {#each Array(6) as _, i (i)}
-          <div class="skel"></div>
-        {/each}
-      </div>
-    {:else if app.loadError && pages.length === 0}
-      <div class="empty">
-        <span class="empty-icon danger"><Icon name="info" size={20} /></span>
-        <strong>{t("list.loadFailed")}</strong>
-        <span class="detail">{app.loadError}</span>
-        <button type="button" class="btn btn-sm" onclick={() => void reloadPages()}>
-          {t("list.retry")}
-        </button>
-      </div>
-    {:else if pages.length === 0}
-      <div class="empty">
-        <span class="empty-icon">
-          <Icon name={app.search ? "search" : "files"} size={20} />
-        </span>
-        <strong>
-          {app.search
-            ? t("list.noMatch", { query: app.search })
-            : filtersActive
-              ? t("list.emptyFilter")
-              : t("list.empty")}
-        </strong>
-        <span>
-          {app.search
-            ? t("list.noMatchHint")
-            : filtersActive
-              ? t("list.emptyFilterHint")
-              : t("list.emptyHint")}
-        </span>
-        {#if app.search}
-          <button type="button" class="btn btn-sm" onclick={clearSearch}>{t("list.clearSearch")}</button>
-        {:else if filtersActive}
-          <button type="button" class="btn btn-sm" onclick={clearFilters}>{t("list.clearFilters")}</button>
-        {:else}
-          <button type="button" class="btn btn-primary btn-sm" onclick={() => (app.importOpen = true)}>
-            <Icon name="plus" size={12} />
-            {t("list.importPage")}
-          </button>
-        {/if}
-      </div>
-    {:else}
-      <div class="grid" class:list={app.layout === "list"} class:selecting={selected.size > 0}>
-        {#each shown as p (p.id)}
-          {@const due = dueInfo(p.nextReview)}
-          {@const selectedRow = selected.has(p.id)}
-          <article
-            class="page"
-            class:selected={selectedRow}
-            use:reveal
-            draggable="true"
-            ondragstart={(e) => onDragStart(e, p)}
-            oncontextmenu={(e) => openPageMenu(e, p)}
-          >
-            <button
-              type="button"
-              class="open-overlay"
-              aria-label={p.title || t("common.untitled")}
-              onclick={(e) => onOpenPage(e, p.id)}
-            ></button>
-            {#if app.layout === "grid"}
-              <div class="preview" class:no-preview={!app.previews[p.id]} data-color={folderLook(p.folder).color} aria-hidden="true">
-                {#if app.previews[p.id]}
-                  <Miniature digest={app.previews[p.id]} />
-                {:else if p.ext?.look?.icon}
-                  <span class="placeholder-emoji">{p.ext.look.icon}</span>
-                {:else}
-                  <Icon name="leaf" size={22} />
-                {/if}
-              </div>
-            {/if}
-            <div class="page-open">
-              <span class="thumb" data-color={folderLook(p.folder).color}>
-                {#if p.ext?.look?.icon}<span class="thumb-emoji">{p.ext.look.icon}</span>{:else}<Icon name="leaf" size={15} />{/if}
-              </span>
-              <span class="page-body">
-                <span class="page-title">{p.title || t("common.untitled")}</span>
-                {#if searching && p.snippet}
-                  <span class="note snippet">
-                    {#each snippetParts(p.snippet) as part, i (i)}
-                      {#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}
-                    {/each}
-                  </span>
-                {:else if p.note}
-                  <span class="note">{p.note}</span>
-                {/if}
-                {#if p.folder || p.tags.length > 0}
-                  <span class="meta">
-                    {#if p.folder}
-                      <button
-                        type="button"
-                        class="loc chip-link"
-                        style:color={folderLook(p.folder).color ? `var(--c-${folderLook(p.folder).color})` : undefined}
-                        title={t("list.showFolder", { folder: p.folder })}
-                        onclick={() => void showFolder(p.folder!)}
-                      >
-                        <Icon name="folder" size={11} />{p.folder}
-                      </button>
-                    {/if}
-                    {#each p.tags.slice(0, 3) as tag (tag)}
-                      <button
-                        type="button"
-                        class="chip chip-muted chip-link"
-                        data-color={tagColor(tag)}
-                        title={t("list.showTag", { tag })}
-                        onclick={() => void showTag(tag)}
-                        oncontextmenu={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          app.lookEdit = { kind: "tag", key: tag };
-                        }}
-                      >
-                        {tag}
-                      </button>
-                    {/each}
-                    {#if p.tags.length > 3}
-                      <span class="chip chip-muted">+{p.tags.length - 3}</span>
-                    {/if}
-                  </span>
-                {/if}
-              </span>
-            </div>
-            <span class="page-side">
-              <label class="check">
-                <input
-                  type="checkbox"
-                  checked={selectedRow}
-                  onclick={(e) => toggleSelect(p.id, e.shiftKey)}
-                  aria-label={t("list.select", { title: p.title || t("common.untitled") })}
-                />
-              </label>
-              {#if due}
-                <span
-                  class="chip due"
-                  class:chip-warn={due.hot && !due.overdue}
-                  class:chip-danger={due.overdue}
-                  class:chip-muted={!due.hot && !due.overdue}
-                >
-                  {due.label}
-                </span>
-              {/if}
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm btn-icon del"
-                aria-label={t("list.delete", { title: p.title || t("common.untitled") })}
-                onclick={() => void deletePages([p.id])}
-              >
-                <Icon name="trash-2" size={14} />
-              </button>
-            </span>
-          </article>
-        {/each}
-      </div>
-      {#if shown.length < pages.length}
-        <div class="more" bind:this={sentinel} aria-hidden="true"></div>
-      {/if}
-    {/if}
   </div>
 </section>
 
@@ -763,6 +1037,7 @@
   .count {
     font-family: var(--mono);
     font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
   }
 
   .toolbar {
@@ -860,27 +1135,25 @@
   }
 
   /* ---- Bulk selection toolbar ---- */
+  /* Floats at the bottom of the pane while pages are selected. */
   .bulk {
+    position: sticky;
+    bottom: 16px;
+    z-index: 5;
     display: flex;
     align-items: center;
     gap: 10px;
     flex-wrap: wrap;
     padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
     background: var(--surface);
+    box-shadow: var(--shadow);
   }
   .bulk-all,
   .check {
     display: inline-flex;
     align-items: center;
-  }
-  .bulk-all input,
-  .check input {
-    width: 15px;
-    height: 15px;
-    accent-color: var(--leaf);
-    cursor: pointer;
   }
   .bulk-count {
     font-size: var(--fs-sm);
@@ -895,7 +1168,7 @@
     margin-left: auto;
   }
   .tag-input input {
-    width: 160px;
+    width: 124px;
     padding: 4px 8px;
     font-size: var(--fs-sm);
     background: var(--surface);
@@ -913,10 +1186,17 @@
   }
 
   /* ---- Grid: bento cards ---- */
+  /* Grid and list sit in the same cell so a layout switch can crossfade them. */
+  .stage {
+    display: grid;
+  }
   .grid {
+    grid-area: 1 / 1;
+    min-width: 0;
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 16px;
+    align-content: start;
   }
 
   .more {
@@ -933,14 +1213,39 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
+    box-shadow: none;
     transition:
       border-color var(--t-med) var(--ease-out),
       box-shadow var(--t-med) var(--ease-out),
-      background var(--t-med) var(--ease-out);
+      background var(--t-med) var(--ease-out),
+      transform var(--t-med) var(--ease-out);
   }
   .page:hover {
     border-color: var(--border-hover);
     box-shadow: var(--shadow);
+  }
+  .grid:not(.list) .page:hover {
+    transform: translateY(-2px);
+  }
+
+  /* First load and filter changes cascade in; any other new card only fades. */
+  .page:global(.enter) {
+    animation: card-in var(--t-enter) var(--ease-out) backwards;
+    animation-delay: calc(var(--i, 0) * 40ms);
+  }
+  .page:global(.fresh) {
+    animation: card-fade var(--t-fast) var(--ease-out) backwards;
+  }
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+  }
+  @keyframes card-fade {
+    from {
+      opacity: 0;
+    }
   }
   .page.selected {
     border-color: var(--leaf);
@@ -1023,11 +1328,17 @@
     overflow: hidden;
     overflow-wrap: anywhere;
   }
-  .snippet mark {
-    background: var(--leaf-soft);
+  /* Matched search terms: tinted without touching metrics, so lines never reflow. */
+  mark {
+    background: var(--warn-soft);
     color: var(--text);
     border-radius: 2px;
-    padding: 0 1px;
+    padding: 0;
+    box-shadow:
+      0 0 0 1px var(--warn-soft),
+      inset 0 -1px 0 var(--warn-border);
+    -webkit-box-decoration-break: clone;
+    box-decoration-break: clone;
   }
   .meta {
     display: flex;
@@ -1093,26 +1404,102 @@
   .selecting .check {
     opacity: 1;
   }
-  .grid:not(.list) .page-side .due,
-  .grid:not(.list) .page-side .del {
-    background: color-mix(in srgb, var(--surface) 88%, transparent);
-    backdrop-filter: blur(4px);
+
+  /* Checkbox: the tick springs in. */
+  .cbx {
+    appearance: none;
+    -webkit-appearance: none;
+    position: relative;
+    width: 15px;
+    height: 15px;
+    margin: 0;
+    border: 1px solid var(--border-input);
+    border-radius: 4px;
+    background: var(--surface);
+    cursor: pointer;
+    transition:
+      background var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out);
+  }
+  .cbx:hover {
+    border-color: var(--border-input-hover);
+  }
+  .cbx:checked,
+  .cbx:indeterminate {
+    background: var(--leaf);
+    border-color: var(--leaf);
+  }
+  .cbx::after {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    background: var(--on-accent);
+    -webkit-mask: var(--tick) center / 11px no-repeat;
+    mask: var(--tick) center / 11px no-repeat;
+    --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M232.49 80.49l-128 128a12 12 0 0 1-17 0l-56-56a12 12 0 1 1 17-17L96 183 215.51 63.51a12 12 0 0 1 17 17Z'/%3E%3C/svg%3E");
+    transform: scale(0);
+    transition: transform 300ms var(--ease-spring);
+  }
+  .cbx:checked::after,
+  .cbx:indeterminate::after {
+    transform: scale(1);
+  }
+  .cbx:indeterminate::after {
+    --tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Cpath d='M228 128a12 12 0 0 1-12 12H40a12 12 0 0 1 0-24h176a12 12 0 0 1 12 12Z'/%3E%3C/svg%3E");
   }
 
-  .del {
+  /* Due chips: rose when overdue, amber when due today, muted otherwise. */
+  .due {
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  .due-slot {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .leaf-slot {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    pointer-events: auto;
+  }
+  .leaf-col {
+    width: 20px;
+    display: grid;
+    place-items: center;
+  }
+
+  /* Quick actions rise in over the preview's corner on hover or focus. */
+  .quick {
+    position: absolute;
+    z-index: 2;
+    right: 8px;
+    top: 84px;
+    display: flex;
+    gap: 4px;
     opacity: 0;
+    transform: translateY(3px);
+    pointer-events: none;
     transition:
       opacity var(--t-fast) var(--ease-out),
-      background var(--t-fast) var(--ease-out),
-      color var(--t-fast) var(--ease-out);
+      transform var(--t-fast) var(--ease-out);
   }
-  .page:hover .del,
-  .page:focus-within .del,
-  .page.selected .del {
+  .page:hover .quick,
+  .page:focus-within .quick {
     opacity: 1;
+    transform: none;
+    pointer-events: auto;
   }
-  .del:hover {
-    color: var(--danger);
+  .quick .btn {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-soft);
+  }
+  .quick .btn:hover:not(:disabled) {
+    background: var(--sunken);
+    color: var(--text);
   }
 
   /* ---- List: document rows separated by hairlines ---- */
@@ -1165,9 +1552,23 @@
     margin-top: 2px;
     padding-top: 0;
   }
+  .list .loc {
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+  }
   .list .page-side {
     position: static;
     flex: none;
+    gap: 10px;
+    padding-right: 4px;
+  }
+  .list .due-slot {
+    width: 124px;
+  }
+  .list .quick {
+    position: static;
+    flex: none;
+    transform: none;
     padding-right: 8px;
   }
 
@@ -1210,12 +1611,22 @@
   .list .preview {
     display: none;
   }
+  /* The frame clips; the picture inside eases up a hair when the card is hovered. */
+  .preview-inner {
+    width: 100%;
+    height: 100%;
+    transition: transform var(--t-med) var(--ease-out);
+  }
+  .grid:not(.list) .page:hover .preview-inner {
+    transform: scale(1.02);
+  }
   .preview.no-preview {
-    display: grid;
-    place-items: center;
     background: var(--sunken);
     color: var(--muted);
-    opacity: 0.9;
+  }
+  .no-preview .preview-inner {
+    display: grid;
+    place-items: center;
   }
   .preview.no-preview[data-color] {
     background: var(--chip-wash);
@@ -1224,5 +1635,22 @@
   .placeholder-emoji {
     font-size: 30px;
     line-height: 1;
+  }
+  .empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .empty-actions .btn {
+    margin-top: 0;
+  }
+  .empty-actions .kbd {
+    margin-left: 2px;
+    background: transparent;
+    border-color: currentColor;
+    color: inherit;
+    opacity: 0.6;
   }
 </style>
