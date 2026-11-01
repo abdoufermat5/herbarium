@@ -60,13 +60,19 @@ function mcpClient(vault) {
 }
 
 /**
- * Tags, a reading path and a spread of review states, so every vitality level
- * and the due queue show up. Review dates are written into the sidecars, then
- * the vault is rescanned.
+ * Tags, three reading paths at different stages, and a spread of review
+ * states, so every vitality level, the due queue and every tree size show up.
+ * Review dates are written into the sidecars, then the vault is rescanned.
  */
 async function seed(mcp, vault) {
   for (const p of PAGES) await mcp.call("pages.update", { id: p.id, tags: p.tags });
   await mcp.call("paths.create", { name: "Networking basics", pages: ["dns", "tcp-handshake", "http-caching"] });
+  await mcp.call("paths.create", { name: "Rust from the ground up", pages: ["ownership", "lifetimes", "traits"] });
+  await mcp.call("paths.create", {
+    name: "Life, cell by cell",
+    pages: ["enzymes", "photosynthesis", "mitosis", "binary-search", "big-o"],
+  });
+  for (const id of ["dns", "ownership", "lifetimes", "traits", "enzymes", "photosynthesis"]) markRead(vault, id);
   for (const id of ["big-o", "mitosis", "french-revolution", "color-contrast", "photosynthesis", "tcp-handshake", "dns"]) {
     await mcp.call("review.complete", { id, grade: "good" });
   }
@@ -95,6 +101,21 @@ async function seed(mcp, vault) {
     writeFileSync(file, JSON.stringify(meta, null, 2));
   }
   await mcp.call("vault.rescan").catch(() => {});
+}
+
+/** What the core's `reads.mark` does: `.herbarium/reads.json` keeps `{ last, count }` per page. */
+function markRead(vault, id) {
+  const file = join(vault, ".herbarium", "reads.json");
+  let reads = {};
+  try {
+    reads = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    mkdirSync(join(vault, ".herbarium"), { recursive: true });
+  }
+  const read = { last: Date.now(), count: (reads[id]?.count ?? 0) + 1 };
+  reads[id] = read;
+  writeFileSync(file, JSON.stringify(reads));
+  return read;
 }
 
 /** Every page sidecar (`*.json` next to a `.html`) under the vault. */
@@ -157,6 +178,8 @@ export function webPreview() {
           if (url.pathname === "/__preview/vault") return send(200, "application/json", JSON.stringify({ path: vault }));
           if (url.pathname === "/__preview/op" && req.method === "POST") {
             const { name, args } = await body(req);
+            // `reads.mark` is UI-only, so the MCP server lacks it: keep reads.json here.
+            if (name === "reads.mark") return send(200, "application/json", JSON.stringify(markRead(vault, args.id)));
             return send(200, "application/json", JSON.stringify(await mcp.call(name, args) ?? null));
           }
           const page = url.pathname.match(/^\/__preview\/page\/([^/]+)/);

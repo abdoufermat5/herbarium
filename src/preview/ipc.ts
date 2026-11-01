@@ -55,7 +55,6 @@ async function op(name: string, args: Record<string, unknown> = {}): Promise<unk
       return { local: {}, personal: {}, shared: {} };
     case "storage.write":
     case "storage.clear":
-    case "reads.mark":
       return null;
     case "review.configure":
     case "network.configure":
