@@ -1659,10 +1659,10 @@
           disabled={saving || pageGone}
           title={t("read.session.skipHint")}
         >
-          <kbd class="kbd">S</kbd>{t("read.session.skip")}
+          <kbd class="kbd">S</kbd><span class="lbl">{t("read.session.skip")}</span>
         </button>
         <button class="btn btn-xs btn-ghost" onclick={exitSession} title={t("read.session.exitHint")}>
-          <kbd class="kbd">Esc</kbd>{t("read.session.exit")}
+          <kbd class="kbd">Esc</kbd><span class="lbl">{t("read.session.exit")}</span>
         </button>
       </div>
     {:else if !app.focusMode}
@@ -2233,6 +2233,12 @@
     }
     .review-bar .rb-sep {
       display: none;
+    }
+    .session-bar .lbl {
+      display: none;
+    }
+    .grade {
+      min-width: 74px;
     }
   }
 

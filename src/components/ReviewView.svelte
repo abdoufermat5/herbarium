@@ -56,7 +56,7 @@
         return;
       }
       const start = performance.now();
-      let frame = requestAnimationFrame(function step(now) {
+      let frame: number = requestAnimationFrame(function step(now) {
         const k = Math.min(1, (now - start) / 500);
         shown = from + (to - from) * (1 - Math.pow(1 - k, 3));
         if (k < 1) frame = requestAnimationFrame(step);
