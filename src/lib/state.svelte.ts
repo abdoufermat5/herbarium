@@ -7,6 +7,7 @@ import { navigate } from "./navigation.svelte";
 import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
 import type {
+import { vitality, type VitalityLevel } from "./vitality";
   BulkError,
   BulkUpdateResult,
   Config,
@@ -17,6 +18,7 @@ import type {
   PreviewDigest,
   ReviewSettings,
   ReviewStats,
+  ReviewGrade,
   SavedSearch,
   TagCount,
 } from "./types";
@@ -551,7 +553,7 @@ export function resetWorkspace() {
   pendingFiles.files = [];
   pendingFiles.folder = undefined;
   pendingFiles.allowCdn = undefined;
-  sessionSkipped.clear();
+  resetSession();
 }
 
 /**
@@ -846,8 +848,9 @@ const sessionSkipped = new Set<string>();
 /** Open the first due page in the reader and keep advancing as pages are completed. */
 export async function startReviewSession(): Promise<boolean> {
   const ok = await go(async () => {
-    sessionSkipped.clear();
-    const first = (await api.reviewToday())[0];
+    resetSession();
+    const queue = await api.reviewToday();
+    const first = queue[0];
     if (!first) {
       toast(t("toast.reviewEmpty"));
       return;
@@ -857,15 +860,119 @@ export async function startReviewSession(): Promise<boolean> {
   });
   return ok && app.reviewSession;
 }
+/** A vitality reading as it was at one moment: enough to redraw a leaf. */
+export type VitalitySnapshot = Pick<PageMeta, "lastReview" | "nextReview" | "ext"> & { at: number };
+
+/** One graded page: how it was doing before the grade and after it. */
+export interface SessionEntry {
+  id: string;
+  title: string;
+  grade: ReviewGrade;
+  before: VitalityLevel;
+  after: VitalityLevel;
+  beforeSnapshot: VitalitySnapshot;
+  afterSnapshot: VitalitySnapshot;
+}
+
+/** What the completion screen shows, frozen when the queue runs out. */
+export interface SessionSummary {
+  graded: number;
+  skipped: number;
+  counts: Record<ReviewGrade, number>;
+  durationMs: number;
+  entries: SessionEntry[];
+  /** Pages whose vitality rose by at least one level (seeds are not plants yet). */
+  recovered: SessionEntry[];
+}
+
+const emptyCounts = (): Record<ReviewGrade, number> => ({ again: 0, hard: 0, good: 0, easy: 0 });
+
+/** Running session figures, read by the reader's HUD; `summary` is set once it ends. */
+export const session = $state({
+  startedAt: 0,
+  /** Due pages when the session started; the denominator of the progress bar. */
+  total: 0,
+  graded: 0,
+  skipped: 0,
+  counts: emptyCounts(),
+  entries: [] as SessionEntry[],
+  summary: null as SessionSummary | null,
+});
+
+/** Health order: a later level is a healthier plant. Seeds have no rank. */
+const HEALTH: Partial<Record<VitalityLevel, number>> = { wilting: 0, thirsty: 1, healthy: 2, thriving: 3 };
+
+function snapshot(meta: PageMeta, at: number): VitalitySnapshot {
+  return {
+    lastReview: meta.lastReview,
+    nextReview: meta.nextReview,
+    ext: meta.ext?.review ? { review: meta.ext.review } : undefined,
+    at,
+  };
+}
+
+function resetSession() {
+  sessionSkipped.clear();
+  session.startedAt = Date.now();
+  session.total = 0;
+  session.graded = 0;
+  session.skipped = 0;
+  session.counts = emptyCounts();
+  session.entries = [];
+  session.summary = null;
+}
+
+/** Count one grade in the running session. `before` is the page as it was when opened. */
+export function recordGrade(before: PageMeta, after: PageMeta, grade: ReviewGrade) {
+  const at = Date.now();
+  session.graded++;
+  session.counts[grade]++;
+  session.entries.push({
+    id: after.id,
+    title: after.title,
+    grade,
+    before: vitality(before, at).level,
+    after: vitality(after, at).level,
+    beforeSnapshot: snapshot(before, at),
+    afterSnapshot: snapshot(after, at),
+  });
+}
+
+function summarize(): SessionSummary {
+  const recovered = session.entries.filter((e) => {
+    const was = HEALTH[e.before];
+    const now = HEALTH[e.after];
+    return was != null && now != null && now > was;
+  });
+  return {
+    graded: session.graded,
+    skipped: session.skipped,
+    counts: { ...session.counts },
+    durationMs: Date.now() - session.startedAt,
+    entries: [...session.entries],
+    recovered,
+  };
+}
+
 
 /**
  * Advance the session to the next due page. `skipId` is a page to leave due
  * but not offer again this session (skipping never touches its schedule). When
- * nothing is left the session ends on the review view. Resolves true when
- * another page was opened.
+ * nothing is left the session ends: on the completion screen when pages were
+ * graded, else on the review view. Resolves true when another page was opened.
  */
 export async function nextReviewPage(skipId?: string): Promise<boolean> {
-  if (skipId) sessionSkipped.add(skipId);
+  if (skipId && !sessionSkipped.has(skipId)) {
+    sessionSkipped.add(skipId);
+    session.skipped++;
+  }
+    // The queue is capped by a setting; the statistics count every due page.
+    const dueTotal = await api
+      .reviewStats()
+      .then((s) => s.dueTotal)
+      .catch(() => 0);
+    session.total = Math.max(dueTotal, queue.length);
+    session.startedAt = Date.now();
   const ok = await go(async () => {
     const due = await api.reviewToday();
     const next = due.find((p) => !sessionSkipped.has(p.id) && p.id !== app.readId);
@@ -877,7 +984,11 @@ export async function nextReviewPage(skipId?: string): Promise<boolean> {
     app.reviewSession = false;
     app.readId = null;
     app.view = "review";
-    toast(t("toast.reviewSessionDone"), "success");
+    if (session.graded > 0) {
+      session.summary = summarize();
+    } else {
+      toast(t("toast.reviewSessionDone"), "success");
+    }
     void refreshAll();
   });
   return ok && app.reviewSession;
