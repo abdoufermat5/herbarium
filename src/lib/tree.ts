@@ -8,6 +8,11 @@
 //
 // Geometry lives in a 90 x 100 viewBox (aspect 0.9), ground at y = 90.
 
+import { growSkeleton } from "./treegen/skeleton";
+import { projectSkeleton } from "./treegen/project";
+import { circlePath, clusterPaths, leafPath, smoothPath } from "./treegen/draw";
+import { makeRng } from "./treegen/rng";
+
 export type TreeDetail = "full" | "mini";
 export type TreeStage = "seed" | "sprout" | "sapling" | "young" | "mature";
 export type TreeKind = "sun" | "ground" | "seed" | "branch" | "mound" | "leaf" | "petals" | "heart";
@@ -78,38 +83,12 @@ export function treeProgress(read: number, total: number): number {
 export const isGrown = (el: Pick<TreeElement, "threshold"> & Pick<Partial<TreeElement>, "hideAt">, progress: number) =>
   el.threshold <= progress + EPS && (el.hideAt === undefined || progress < el.hideAt);
 
-// ---------------------------------------------------------------- PRNG
-
-function xmur3(str: string): () => number {
-  let h = 1779033703 ^ str.length;
-  for (let i = 0; i < str.length; i++) {
-    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
-    h = (h << 13) | (h >>> 19);
-  }
-  return () => {
-    h = Math.imul(h ^ (h >>> 16), 2246822507);
-    h = Math.imul(h ^ (h >>> 13), 3266489909);
-    return (h ^= h >>> 16) >>> 0;
-  };
-}
-
-function mulberry32(a: number): () => number {
-  return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 // ---------------------------------------------------------------- geometry helpers
 
 type P = [number, number];
 
 const n = (x: number) => Math.round(x * 10) / 10;
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
-const circ = (cx: number, cy: number, r: number) =>
-  `M${n(cx - r)} ${n(cy)}a${n(r)} ${n(r)} 0 1 0 ${n(2 * r)} 0a${n(r)} ${n(r)} 0 1 0 ${n(-2 * r)} 0Z`;
 
 /** A quadratic Bézier with cached length. */
 interface Curve {
@@ -149,31 +128,6 @@ function curve(a: P, b: P, bow: number, lift: number): Curve {
     (a[1] + b[1]) / 2 + (dx / len) * bow * len - lift * len,
   ];
   return { a, c, b, len };
-}
-
-/** One teardrop leaf from `o`, pointing at `ang`, length L, half-width w. */
-function leaf(o: P, ang: number, L: number, w: number): string {
-  const dx = Math.cos(ang);
-  const dy = Math.sin(ang);
-  const px = -dy;
-  const py = dx;
-  const x = o[0];
-  const y = o[1];
-  const lx = dx * L;
-  const ly = dy * L;
-  const wx = px * w;
-  const wy = py * w;
-  // control points at 25% (full width) and 80% (70% width) along the leaf, mirrored
-  const ax = lx * 0.25;
-  const ay = ly * 0.25;
-  const bx = lx * 0.8;
-  const by = ly * 0.8;
-  const hx = wx * 0.7;
-  const hy = wy * 0.7;
-  return (
-    `M${n(x)} ${n(y)}C${n(x + ax + wx)} ${n(y + ay + wy)} ${n(x + bx + hx)} ${n(y + by + hy)} ${n(x + lx)} ${n(y + ly)}` +
-    `C${n(x + bx - hx)} ${n(y + by - hy)} ${n(x + ax - wx)} ${n(y + ay - wy)} ${n(x)} ${n(y)}Z`
-  );
 }
 
 // ---------------------------------------------------------------- drafts
@@ -222,7 +176,7 @@ interface Crown {
 }
 
 function makeCrown(seed: string): Crown {
-  const rnd = mulberry32(xmur3(`herbarium/${seed}`)());
+  const rnd = makeRng(`herbarium/${seed}`);
   const R = (a: number, b: number) => a + (b - a) * rnd();
   const baseX = 45 + R(-5, 5);
   const trunkH = R(22, 31);
@@ -288,13 +242,15 @@ function finish(drafts: Draft[], baseX: number, limbs: { x: number; y: number }[
 // ---------------------------------------------------------------- full detail
 
 function buildFull(seed: string): Geometry {
-  const cr = makeCrown(seed);
-  const { rnd, baseX, cx, cy, rx, ry, trunk } = cr;
-  const R = (a: number, b: number) => a + (b - a) * rnd();
+  const skel = growSkeleton(seed);
+  const proj = projectSkeleton(skel);
+  const baseX = proj.baseX;
   const drafts: Draft[] = [];
+  /** Leaf clusters, kept whole so the element budget can drop non-tip ones. */
+  const groups: { drafts: Draft[]; tip: boolean }[] = [];
   let count = 0;
-  const add = (d: Omit<Draft, "n" | "depth" | "w" | "tone"> & Partial<Pick<Draft, "depth" | "w" | "tone">>) =>
-    drafts.push({
+  const add = (d: Omit<Draft, "n" | "depth" | "w" | "tone"> & Partial<Pick<Draft, "depth" | "w" | "tone">>) => {
+    const draft: Draft = {
       kind: d.kind,
       layer: d.layer,
       d: d.d,
@@ -307,7 +263,10 @@ function buildFull(seed: string): Geometry {
       hideAt: d.hideAt,
       limb: d.limb,
       n: count++,
-    });
+    };
+    drafts.push(draft);
+    return draft;
+  };
 
   // Ground: an ink line, a soil mound, and the seed beneath.
   const gx = clamp(baseX - 30, 3, 27);
@@ -322,152 +281,170 @@ function buildFull(seed: string): Geometry {
   });
   add({ kind: "seed", layer: LAYER.ground, d: `M${n(baseX - 1.4)} ${GROUND + 4}a2 1.3 0 1 0 4 0a2 1.3 0 1 0 -4 0Z`, w: 1, g: -3, base: true, hideAt: EPS });
 
-  // Sprout: a short stem and a pair of seed leaves, there from the start.
-  add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, 0, 0.3), depth: 0, w: 1.5, g: -2, base: true, hideAt: EPS });
-  const sp = qpt(trunk, 0.3);
-  const stan = qtan(trunk, 0.3);
-  const sa = Math.atan2(stan[1], stan[0]);
-  add({ kind: "leaf", layer: LAYER.front, d: leaf(sp, sa - 0.95, 4.6, 1.7), tone: 3, g: -2, base: true, hideAt: EPS });
-  add({ kind: "leaf", layer: LAYER.front, d: leaf(sp, sa + 0.8, 4.2, 1.6), tone: 2, g: -2, base: true, hideAt: EPS });
+  // Sprout: the foot of the 3D trunk and a pair of seed leaves, there from the start.
+  const trunkPoints = proj.branches[0].points;
+  const cut = Math.min(trunkPoints.length, Math.max(2, Math.ceil(trunkPoints.length * 0.3)));
+  const sprout = trunkPoints.slice(0, cut);
+  add({ kind: "branch", layer: LAYER.branch, d: smoothPath(sprout), depth: 0, w: 1.5, g: -2, base: true, hideAt: EPS });
+  const sp = sprout[sprout.length - 1];
+  const sa = Math.atan2(sp.y - sprout[sprout.length - 2].y, sp.x - sprout[sprout.length - 2].x);
+  add({ kind: "leaf", layer: LAYER.front, d: leafPath(sp.x, sp.y, sa - 0.95, 4.6, 1.7), tone: 3, g: -2, base: true, hideAt: EPS });
+  add({ kind: "leaf", layer: LAYER.front, d: leafPath(sp.x, sp.y, sa + 0.8, 4.2, 1.6), tone: 2, g: -2, base: true, hideAt: EPS });
 
-  // Limbs fan out across the crown; wide ones leave the trunk lower. They are
-  // needed before the trunk: a segment rises only once the limbs below it start.
-  const nL = 4 + Math.floor(rnd() * 3);
-  interface Limb { th: number; t: number }
-  const limbs: Limb[] = [];
-  for (let i = 0; i < nL; i++) {
-    const th = -1.15 + (2.3 * (i + 0.5)) / nL + R(-0.12, 0.12);
-    limbs.push({ th, t: clamp(1 - 0.5 * Math.abs(Math.sin(th)) * R(0.75, 1), 0.5, 1) });
-  }
-  limbs.sort((a, b) => a.t - b.t);
-  const below = (t: number) => limbs.reduce((k, L) => k + (L.t < t ? 1 : 0), 0);
-
-  // Trunk: six tapering segments. Segments 0..2 come first; higher ones appear
-  // just before the limbs that attach above them, so the trunk rises as it goes.
-  const SEG = 6;
-  for (let k = 0; k < SEG; k++) {
+  // Trunk: three contiguous segments of the projected trunk, sharing endpoints.
+  const trunkRadii = proj.branches[0].radii;
+  const splitA = Math.max(1, Math.round(trunkPoints.length / 3));
+  const splitB = Math.max(splitA + 1, Math.round((2 * trunkPoints.length) / 3));
+  [
+    [0, splitA],
+    [splitA, splitB],
+    [splitB, trunkPoints.length - 1],
+  ].forEach(([s, e], k) => {
+    const mid = Math.min((s + e) >> 1, trunkRadii.length - 1);
     add({
       kind: "branch",
       layer: LAYER.branch,
-      d: qsub(trunk, k / SEG, (k + 1) / SEG),
+      d: smoothPath(trunkPoints.slice(s, e + 1)),
       depth: 0,
-      w: 2.9 - k * 0.18,
-      g: 0.5 + below(k / SEG),
+      w: clamp(trunkRadii[mid] * 0.85, 0.35, 3.0),
+      g: 0.5 + k * 0.15,
+    });
+  });
+
+  // Leaf clusters: tone and layer from depth (z) and the upper-left light.
+  let zMin = Infinity;
+  let zMax = -Infinity;
+  for (const b of proj.branches) {
+    for (const p of b.points) {
+      if (p.z < zMin) zMin = p.z;
+      if (p.z > zMax) zMax = p.z;
+    }
+  }
+  for (const l of proj.leaves) {
+    if (l.z < zMin) zMin = l.z;
+    if (l.z > zMax) zMax = l.z;
+  }
+  const zSpan = zMax - zMin || 1;
+  const leafCluster = (l: (typeof proj.leaves)[number], g: number, tip: boolean) => {
+    const zN = clamp((l.z - zMin) / zSpan, 0, 1);
+    const nx = clamp((l.x - 45) / 45, -1, 1);
+    const ny = clamp((l.y - 50) / 45, -1, 1);
+    const light = clamp(0.55 - 0.28 * nx - 0.22 * ny, 0, 1);
+    const layer = zN < 0.2 ? LAYER.back : LAYER.front;
+    let tone = 3;
+    if (zN < 0.2) tone = zN < 0.08 ? 0 : 1;
+    else if (light < 0.3) tone = 2;
+    else if (light > 0.72 && zN > 0.7) tone = 4;
+    const depth = clamp(l.level, 1, 3);
+    const out = clusterPaths(l.x, l.y, l.angle, l.size).map((d, p) =>
+      add({ kind: "leaf", layer, d, depth, tone, g: g + 0.00001 * p, limb: l.limb }),
+    );
+    groups.push({ drafts: out, tip });
+  };
+
+  // Growth windows alternate sides so partial trees stay balanced. Projected y
+  // grows downward, so larger y (lower limbs) goes first; sides use the limb
+  // tip, since every foot sits close to the trunk.
+  const tipX: number[] = [];
+  skel.branches.forEach((b, i) => {
+    if (b.level !== 1 || b.limb < 0) return;
+    const points = proj.branches[i].points;
+    tipX[b.limb] = points[points.length - 1].x;
+  });
+  const byHeight = proj.limbs.map((_, j) => j).sort((a, b) => proj.limbs[b].y - proj.limbs[a].y || a - b);
+  const leftSide = byHeight.filter((j) => tipX[j] < 45);
+  const rightSide = byHeight.filter((j) => tipX[j] >= 45);
+  const growth: number[] = [];
+  let takeLeft = byHeight.length > 0 && tipX[byHeight[0]] < 45;
+  while (leftSide.length > 0 || rightSide.length > 0) {
+    const side = takeLeft ? leftSide : rightSide;
+    const pick = side.length > 0 ? side.shift() : (takeLeft ? rightSide : leftSide).shift();
+    if (pick === undefined) break;
+    growth.push(pick);
+    takeLeft = !takeLeft;
+  }
+  const slot: number[] = [];
+  growth.forEach((j, at) => (slot[j] = at));
+
+  // Each limb grows in its own [g0, g0 + 1) window. Its tip cluster comes first,
+  // so a visible deep branch always has a leaf in the same limb.
+  for (let j = 0; j < proj.limbs.length; j++) {
+    const g0 = 1 + slot[j];
+    const tip = proj.leaves.find((l) => l.tip && l.limb === j);
+    if (tip) leafCluster(tip, g0 + 0.001, true);
+    let k = 0;
+    skel.branches.forEach((b, i) => {
+      if (b.limb !== j) return;
+      const g = clamp(g0 + 0.02 + k * 0.006, g0 + 0.001, g0 + 0.97);
+      k++;
+      const pb = proj.branches[i];
+      const depth = clamp(b.level, 0, 3);
+      const last = pb.points.length - 1;
+      if (b.level <= 1 && pb.points.length >= 4) {
+        const m = Math.max(1, Math.floor(last / 2));
+        for (const [s, e] of [[0, m], [m, last]] as const) {
+          add({
+            kind: "branch",
+            layer: LAYER.branch,
+            d: smoothPath(pb.points.slice(s, e + 1)),
+            depth,
+            w: clamp(pb.radii[Math.min((s + e) >> 1, pb.radii.length - 1)] * 0.85, 0.35, 3.0),
+            g,
+            limb: j,
+          });
+        }
+      } else {
+        add({
+          kind: "branch",
+          layer: LAYER.branch,
+          d: smoothPath(pb.points),
+          depth,
+          w: clamp(pb.radii[last >> 1] * 0.85, 0.35, 3.0),
+          g,
+          limb: j,
+        });
+      }
+      let li = 0;
+      for (const l of proj.leaves) {
+        if (l.tip || l.parent !== i || l.limb !== j) continue;
+        leafCluster(l, g + 0.001 * (li + 1), false);
+        li++;
+      }
     });
   }
 
-  const spawn = (parent: Curve, t: number, side: number, frac: number, depth: number, g: number, limb: number) => {
-    const p = qpt(parent, t);
-    const tn = qtan(parent, t);
-    const ang = Math.atan2(tn[1], tn[0]) + side * R(0.5, 0.95);
-    const len = parent.len * frac * R(0.85, 1.15);
-    let tx = p[0] + Math.cos(ang) * len;
-    let ty = p[1] + Math.sin(ang) * len;
-    tx += (cx - tx) * 0.1;
-    ty += (cy - ty) * 0.1 - len * 0.12;
-    for (let k = 0; k < 3; k++) {
-      const ex = (tx - cx) / (rx * 1.02);
-      const ey = (ty - cy) / (ry * 1.02);
-      if (ex * ex + ey * ey <= 1) break;
-      tx = cx + (tx - cx) * 0.88;
-      ty = cy + (ty - cy) * 0.88;
-    }
-    const q = curve(p, [tx, ty], R(-0.16, 0.16) * (side > 0 ? 1 : -1), 0.02);
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 1), depth, w: depth === 2 ? 0.85 : 0.6, g, limb });
-    return { q, g };
-  };
-
-  // Foliage: layered clusters of three leaves. A cluster is drafted right after
-  // the branch it sits on, so a limb can never be a bare twig.
-  const scale = R(0.88, 1.18);
-  const anchors: P[] = [];
-  const cluster = (p: P, ang: number, g: number, scatter: number, limb: number) => {
-    const x = p[0] + R(-scatter, scatter);
-    const y = p[1] + R(-scatter, scatter);
-    const out = Math.atan2(y - cy, x - cx);
-    let a = Math.atan2(Math.sin(ang) + Math.sin(out), Math.cos(ang) + Math.cos(out)) + R(-0.5, 0.5);
-    if (y > GROUND - 14) a = -Math.PI / 2 + R(-0.9, 0.9);
-    const L = R(8, 11.5) * scale;
-    const w = L * R(0.32, 0.42);
-    const spread = R(0.6, 1.0);
-    const o: P = [x, y];
-    const d = leaf(o, a - spread, L * R(0.8, 1), w) + leaf(o, a, L * R(0.9, 1.08), w) + leaf(o, a + spread, L * R(0.8, 1), w);
-    // Light from the upper left: lower and right clusters sit darker.
-    const v = clamp(((y - (cy - ry)) / (2 * ry)) * 0.6 + ((x - cx) / rx * 0.5 + 0.5) * 0.4, 0, 1);
-    const inner = 1 - Math.hypot((x - cx) / rx, (y - cy) / ry);
-    const back = rnd() < 0.3 + clamp(inner, 0, 1) * 0.45;
-    if (back) {
-      add({ kind: "leaf", layer: LAYER.back, d, tone: rnd() < 0.1 ? 1 : 0, g, limb });
-    } else {
-      add({ kind: "leaf", layer: LAYER.front, d, tone: v < 0.34 ? 2 : v > 0.62 && rnd() < 0.3 ? 4 : 3, g, limb });
-    }
-    return [x, y] as P;
-  };
-  const dress = (q: Curve, g: number, limb: number) => {
-    const tn = qtan(q, 1);
-    const ang = Math.atan2(tn[1], tn[0]);
-    let k = 1;
-    anchors.push(cluster(qpt(q, 1), ang, g + 0.001 * k++, 1.8, limb));
-    anchors.push(cluster(qpt(q, 0.7), ang, g + 0.001 * k++, 2.4, limb));
-    if (rnd() < 0.6) cluster(qpt(q, 0.4), ang, g + 0.001 * k++, 3, limb);
-    if (rnd() < 0.5) cluster(qpt(q, 0.95), ang, g + 0.001 * k++, 4.5, limb);
-  };
-
-  // Each limb is one self-contained growth group: its two segments, a tuft of
-  // leaves at its tip, then each child branch dressed with leaves, then that
-  // child's twigs dressed the same way, then the next child. Everything stays
-  // inside [g0, g0 + 0.9), so a limb never shows a bare twig: its leaves share
-  // its growth window.
-  const limbBase: { x: number; y: number }[] = [];
-  limbs.forEach((L, j) => {
-    const g0 = 1 + j;
-    const A = qpt(trunk, L.t);
-    limbBase.push({ x: A[0], y: A[1] });
-    const sθ = Math.sin(L.th);
-    const cθ = Math.cos(L.th);
-    const rr = R(0.62, 0.88);
-    const tx = cx + rx * sθ * rr + R(-2, 2);
-    const ty = cy - ry * cθ * rr * 0.92 + (cr.style === 3 ? ry * 0.5 * cθ ** 6 : 0) + R(-2, 2);
-    const q = curve(A, [tx, ty], R(-0.17, 0.17), 0.1);
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 0.5), depth: 1, w: 1.5, g: g0, limb: j });
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0.5, 1), depth: 1, w: 1.2, g: g0 + 0.01, limb: j });
-    // The limb is dressed at its tip as it appears, so no page boundary can ever
-    // leave a freshly started limb standing as a bare twig.
-    dress(q, g0 + 0.01, j);
-    let side = rnd() < 0.5 ? 1 : -1;
-    for (let c = 0; c < 3; c++) {
-      side = -side;
-      const gc = g0 + 0.02 + c * 0.28 + R(0, 0.004);
-      const child = spawn(q, [0.4, 0.66, 0.92][c], side, 0.42, 2, gc, j);
-      dress(child.q, gc, j);
-      for (let w = 0; w < 2; w++) {
-        side = -side;
-        const gw = gc + 0.02 + w * 0.02;
-        const twig = spawn(child.q, w === 0 ? 0.5 : 0.86, side, 0.45, 3, gw, j);
-        dress(twig.q, gw, j);
-      }
-    }
-  });
-
-  // The last limb keeps its last six leaves for the final page.
-  const lastLimb = limbs.length - 1;
-  const leaves = drafts.filter((d) => d.kind === "leaf" && d.limb === lastLimb).sort((a, b) => a.g - b.g || a.n - b.n);
-  for (const l of leaves.slice(-6)) l.mature = true;
-
-  // Maturity: one offset sun disc and a handful of quiet blossoms.
+  // Maturity: one offset sun disc and a handful of quiet blossoms. A separate
+  // stream keeps blossom choices out of the skeleton's determinism.
+  const bloom = makeRng(`herbarium/bloom/${seed}`);
+  const R = (a: number, b: number) => a + (b - a) * bloom();
+  const { left, top, right, bottom } = proj.bounds;
+  const cx = (left + right) / 2;
+  const cy = (top + bottom) / 2;
+  const rx = Math.max(1, (right - left) / 2);
+  const ry = Math.max(1, (bottom - top) / 2);
   const sr = R(14, 18);
-  const sideSun = rnd() < 0.5 ? -1 : 1;
+  const sideSun = bloom() < 0.5 ? -1 : 1;
   const sx = clamp(cx + sideSun * rx * 0.5, sr + 2, TREE_W - sr - 2);
   const sy = clamp(cy - ry * 0.3, sr + 2, 60);
-  add({ kind: "sun", layer: LAYER.sun, d: circ(sx, sy, sr), g: 20, mature: true });
+  add({ kind: "sun", layer: LAYER.sun, d: circlePath(sx, sy, sr), g: 20, mature: true });
   // Few and never crowded: candidates closer than 6 units to a kept blossom
   // are dropped, so the crown keeps its calm instead of filling with pinwheels.
-  const nB = 7 + Math.floor(rnd() * 5);
+  const nB = 7 + Math.floor(bloom() * 5);
+  // Stay inside the element budget: drop whole non-tip clusters, never a limb tip.
+  for (let gi = groups.length - 1; gi >= 0 && drafts.length + nB * 2 > 400; gi--) {
+    const group = groups[gi];
+    if (group.tip) continue;
+    for (const draft of group.drafts) {
+      const at = drafts.indexOf(draft);
+      if (at >= 0) drafts.splice(at, 1);
+    }
+  }
   const spots: P[] = [];
   for (let tries = 0; tries < 30 && spots.length < nB; tries++) {
-    const a = anchors[Math.floor(rnd() * anchors.length)];
-    const bx = a[0] + R(-3, 3);
-    const by = a[1] + R(-3, 3);
+    const a = proj.leaves[Math.floor(bloom() * proj.leaves.length)];
+    if (!a) break;
+    const bx = a.x + R(-3, 3);
+    const by = a.y + R(-3, 3);
     if (spots.some(([px, py]) => Math.hypot(px - bx, py - by) < 6)) continue;
     spots.push([bx, by]);
   }
@@ -477,12 +454,12 @@ function buildFull(seed: string): Geometry {
     let d = "";
     for (let i = 0; i < 5; i++) {
       const t = rot + (i * Math.PI * 2) / 5;
-      d += circ(bx + Math.cos(t) * pr * 1.05, by + Math.sin(t) * pr * 1.05, pr);
+      d += circlePath(bx + Math.cos(t) * pr * 1.05, by + Math.sin(t) * pr * 1.05, pr);
     }
     add({ kind: "petals", layer: LAYER.bloom, d, w: 0.35, g: 21 + k * 0.01, mature: true });
-    add({ kind: "heart", layer: LAYER.bloom, d: circ(bx, by, pr * 0.45), g: 21.005 + k * 0.01, mature: true });
+    add({ kind: "heart", layer: LAYER.bloom, d: circlePath(bx, by, pr * 0.45), g: 21.005 + k * 0.01, mature: true });
   });
-  return finish(drafts, baseX, limbBase);
+  return finish(drafts, proj.baseX, proj.limbs);
 }
 
 // ---------------------------------------------------------------- mini detail
@@ -521,7 +498,7 @@ function buildMini(seed: string): Geometry {
   });
   add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, 0, 0.4), w: 5, g: -2, base: true, hideAt: EPS });
   const sp = qpt(trunk, 0.4);
-  add({ kind: "leaf", layer: LAYER.front, d: circ(sp[0] + 3, sp[1] - 1, 4.2), tone: 3, g: -2, base: true, hideAt: EPS });
+  add({ kind: "leaf", layer: LAYER.front, d: circlePath(sp[0] + 3, sp[1] - 1, 4.2), tone: 3, g: -2, base: true, hideAt: EPS });
 
   add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, 0, 1), w: 6.5, g: 0 });
   const nL = 2 + Math.floor(rnd() * 3);
@@ -544,7 +521,7 @@ function buildMini(seed: string): Geometry {
     add({
       kind: "leaf",
       layer: LAYER.back,
-      d: circ(cx + Math.cos(a) * rx * 0.55, cy + 0.1 * ry + Math.sin(a) * ry * 0.5, m * R(0.58, 0.72)),
+      d: circlePath(cx + Math.cos(a) * rx * 0.55, cy + 0.1 * ry + Math.sin(a) * ry * 0.5, m * R(0.58, 0.72)),
       tone: k % 3 === 1 ? 1 : 0,
       g: 0.5 + k * 0.05,
     });
@@ -555,7 +532,7 @@ function buildMini(seed: string): Geometry {
     add({
       kind: "leaf",
       layer: LAYER.front,
-      d: circ(T[0] + R(-3, 3), T[1] + R(-2, 4), m * R(0.34, 0.46)),
+      d: circlePath(T[0] + R(-3, 3), T[1] + R(-2, 4), m * R(0.34, 0.46)),
       tone: k % 2 ? 3 : 2,
       g: 0.8 + k * 0.1,
     });
@@ -566,8 +543,8 @@ function buildMini(seed: string): Geometry {
     const T = tops[k % tops.length];
     const bx = T[0] + R(-3, 3) + (k ? 4 : -4);
     const by = T[1] + R(-4, 1);
-    add({ kind: "petals", layer: LAYER.bloom, d: circ(bx, by, 3.2), w: 0.9, g: 20 + k, mature: true });
-    add({ kind: "heart", layer: LAYER.bloom, d: circ(bx, by, 1.4), g: 20.5 + k, mature: true });
+    add({ kind: "petals", layer: LAYER.bloom, d: circlePath(bx, by, 3.2), w: 0.9, g: 20 + k, mature: true });
+    add({ kind: "heart", layer: LAYER.bloom, d: circlePath(bx, by, 1.4), g: 20.5 + k, mature: true });
   }
   return finish(drafts, baseX, limbBase);
 }
