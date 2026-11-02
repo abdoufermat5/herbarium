@@ -203,7 +203,7 @@
       onlimbclick(page);
       return;
     }
-    if (page === -1) return;
+    if (raw === "-1") return;
     const near = nearest(e.clientX, e.clientY);
     if (near >= 0) onlimbclick(near);
   };
