@@ -222,6 +222,9 @@ test("desktop: a new user's first session", { skip: unavailable ?? false }, asyn
     assert.ok(Date.now() - t < 500, "the window stays responsive");
     await app.click("Import", ".foot .btn-primary");
     await app.waitFor(() => vaultPages(vault).some((p) => p.meta.title === "Big pasted table"), "the big page imported", 60000);
+    // The dialog now keeps a success screen open; close it before moving on.
+    await app.click("Done", ".success-actions button");
+    await app.waitFor(() => app.exec(() => !document.querySelector("[role=dialog][aria-modal=true]")), "the import dialog closed");
   });
 
   await step("settings", async () => {
