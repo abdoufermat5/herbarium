@@ -26,6 +26,7 @@
     inFolder,
     movePages,
     openPage,
+    openPathView,
     pendingFiles,
     refreshAll,
     reloadPages,
@@ -34,6 +35,7 @@
     toast,
   } from "../lib/state.svelte";
   import { api } from "../lib/api";
+  import { pathGrowth } from "../lib/grove";
   import Icon from "../lib/Icon.svelte";
   import Logo from "../lib/Logo.svelte";
   import { modKey, vaultLabels, vaultName as nameOf } from "../lib/format";
@@ -1213,17 +1215,33 @@
                 autofocus
               />
             {:else}
-              <button
+              {@const g = pathGrowth(path.id)}
+              <div
                 class="nav-item path-head"
-                aria-expanded={openPaths.has(path.id)}
-                title={path.description || path.name}
-                onclick={() => togglePathOpen(path.id)}
+                class:active={app.view === "path" && app.pathView === path.id && !app.readId}
+                role="presentation"
                 oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
               >
-                <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
-                <span class="nav-label ellipsis">{path.name}</span>
-                <span class="count">{path.pages.length}</span>
-              </button>
+                <button
+                  class="path-chev"
+                  aria-expanded={openPaths.has(path.id)}
+                  aria-label={path.name}
+                  onclick={() => togglePathOpen(path.id)}
+                >
+                  <span class="chev" class:open={openPaths.has(path.id)}><Icon name="chevron-right" size={10} /></span>
+                </button>
+                <button
+                  class="path-name"
+                  title={path.description || path.name}
+                  onclick={() => void openPathView(path.id)}
+                >
+                  <!--PATHTREE-->
+                  <span class="nav-label ellipsis">{path.name}</span>
+                  <span class="count" class:grown={g.mature} title={g.mature ? t("paths.view.fullyGrown") : undefined}>
+                    {g.read}/{g.total}
+                  </span>
+                </button>
+              </div>
             {/if}
             {#if openPaths.has(path.id)}
               <div class="path-pages">
@@ -1240,6 +1258,9 @@
                   >
                     <span class="path-num">{i + 1}</span>
                     <span class="nav-label ellipsis">{title ?? pageId}</span>
+                    {#if app.pathProgress[path.id]?.read.includes(pageId)}
+                      <span class="path-read" title={t("paths.view.readMark")}><Icon name="check" size={10} /></span>
+                    {/if}
                   </button>
                 {:else}
                   <p class="path-empty">{t("paths.empty")}</p>
@@ -1802,15 +1823,59 @@
 
   /* ------------------------------------------------------- reading paths */
 
+  .path-head {
+    padding: 0;
+    gap: 0;
+    cursor: default;
+  }
+  .path-chev {
+    flex: none;
+    align-self: stretch;
+    display: grid;
+    place-items: center;
+    width: 22px;
+    border-radius: var(--radius-xs);
+    color: var(--muted);
+  }
+  .path-chev:hover {
+    color: var(--text);
+  }
+  .path-name {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    align-self: stretch;
+    padding: 3px 8px 3px 2px;
+    border-radius: var(--radius-xs);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+  }
+  .path-chev:focus-visible,
+  .path-name:focus-visible {
+    outline: 2px solid var(--accent-ring);
+    outline-offset: -2px;
+  }
   .path-head .chev {
     width: 16px;
-    color: var(--muted);
+    color: inherit;
   }
   .count {
     flex: none;
     font-family: var(--mono);
     font-size: var(--fs-2xs);
     color: var(--muted);
+  }
+  .count.grown {
+    color: var(--c-sage);
+  }
+  .path-read {
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--c-sage);
   }
   .path-pages {
     position: relative;
