@@ -1,10 +1,27 @@
 <script lang="ts">
   // The tree that a reading path grows. Geometry comes from lib/tree.ts (one
-  // mature model, thresholded); this component only shows the elements whose
-  // threshold has been reached and animates the ones that just crossed it.
+  // mature model, thresholded); this component shows the elements whose
+  // threshold has been reached and animates only what just crossed it.
+  //
+  // Growth is animated per limb group, never per element: a growth step is a
+  // handful of animations no matter how many shapes it brings in. Branches keep
+  // their draw-in only for small steps. Everything is CSS (one-shot, no idle
+  // animation) and honours prefers-reduced-motion.
+  //
   // Viewbox is 90 x 100, so the rendered width is 0.9 x `size`.
-  // Growth is CSS-only (one-shot animations); nothing here ever runs idle.
-  import { LAYER_COUNT, TREE_ASPECT, TREE_H, TREE_W, growTree, isGrown, treeProgress, treeStage, type TreeDetail, type TreeElement } from "../lib/tree";
+  import {
+    LAYER,
+    LAYER_COUNT,
+    TREE_ASPECT,
+    TREE_H,
+    TREE_W,
+    growTree,
+    isGrown,
+    treeProgress,
+    treeStage,
+    type TreeDetail,
+    type TreeElement,
+  } from "../lib/tree";
   import { t } from "../lib/i18n.svelte";
 
   let {
@@ -33,10 +50,21 @@
     growOnMount?: boolean;
   } = $props();
 
-  interface Item {
-    el: TreeElement;
-    fresh: boolean;
+  /** A run of sibling shapes that appears together: one animation for the run. */
+  interface Band {
+    key: string;
+    /** Stagger, by limb order. */
     delay: number;
+    /** Limb attachment point on the trunk: the band springs in from there. */
+    x: number;
+    y: number;
+    items: TreeElement[];
+  }
+  interface LayerView {
+    /** Settled shapes drawn before and after the fresh run of this paint layer. */
+    before: TreeElement[];
+    fresh: Band[];
+    after: TreeElement[];
   }
 
   const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -47,6 +75,7 @@
   const mature = $derived(stage === "mature");
   const name = $derived(label ?? t(`tree.stage.${stage}`));
   const clickable = $derived(detail === "full" && !!onlimbclick);
+  const moving = $derived(animate && !reduced);
 
   // The plant grows taller as pages are read. At progress 0 only the seed is
   // there, so it keeps its natural size; from then on the trunk starts short
@@ -59,21 +88,56 @@
   let shownProgress = -1;
   let shownModel: unknown = null;
 
-  const GROW_MS = 600; // spread of the stagger; each element then takes <= 500ms
+  const STAGGER_MS = 90; // between limb groups
+  const DRAW_MAX = 40; // fresh branches still worth their own draw-in
 
-  const layers = $derived.by(() => {
+  const view = $derived.by(() => {
     const m = model;
     const p = progress;
-    const from = !animate || reduced ? p : shownModel === m && shownProgress >= 0 ? shownProgress : growOnMount && shownProgress < 0 ? 0 : p;
-    const span = Math.max(p - from, 1e-9);
-    const out: Item[][] = Array.from({ length: LAYER_COUNT }, () => []);
+    const from = !moving ? p : shownModel === m && shownProgress >= 0 ? shownProgress : growOnMount && shownProgress < 0 ? 0 : p;
+
+    // Which limbs grow in this step: the stagger follows their order.
+    const limbs: number[] = [];
+    for (const el of m.elements) {
+      const fresh = isGrown(el, p) && el.threshold > from + 1e-9;
+      if (fresh && !limbs.includes(el.limb)) limbs.push(el.limb);
+    }
+    limbs.sort((a, b) => a - b);
+    const rank = new Map(limbs.map((l, i) => [l, i]));
+
+    const out: LayerView[] = Array.from({ length: LAYER_COUNT }, () => ({ before: [], fresh: [], after: [] }));
     for (const el of m.elements) {
       if (!isGrown(el, p)) continue;
-      const fresh = el.threshold > from + 1e-9;
-      const delay = fresh ? Math.round(GROW_MS * Math.min(1, (el.threshold - from) / span) * 0.85 + 100 * el.seq) : 0;
-      out[el.layer].push({ el, fresh, delay });
+      const layer = out[el.layer];
+      if (el.threshold <= from + 1e-9) {
+        (layer.fresh.length ? layer.after : layer.before).push(el);
+        continue;
+      }
+      const last = layer.fresh[layer.fresh.length - 1];
+      if (last && last.items[0].limb === el.limb) {
+        last.items.push(el);
+        continue;
+      }
+      // Base art, the trunk and the blossoms hang off no limb: they spring in
+      // from the foot of the tree.
+      const base = el.limb >= 0 ? m.limbs[el.limb] : undefined;
+      layer.fresh.push({
+        key: `${el.layer}:${el.limb}:${el.i}`,
+        delay: STAGGER_MS * (rank.get(el.limb) ?? 0),
+        x: Math.round((base ? base.x : m.baseX) * 10) / 10,
+        y: Math.round((base ? base.y : m.ground) * 10) / 10,
+        items: [el],
+      });
     }
     return out;
+  });
+
+  // A big step (a first visit to a mature path) would fire hundreds of draw-ins;
+  // past a few dozen the groups carry the motion alone.
+  const draw = $derived.by(() => {
+    let n = 0;
+    for (const layer of view) for (const band of layer.fresh) for (const el of band.items) if (el.kind === "branch") n++;
+    return n > 0 && n <= DRAW_MAX;
   });
 
   $effect(() => {
@@ -88,16 +152,45 @@
     const page = target ? Number(target.getAttribute("data-p")) : -1;
     if (page >= 0) onlimbclick(page);
   };
-  const hits = $derived(clickable ? layers[3].filter((i) => i.el.page >= 0) : []);
+  const hits = $derived(
+    clickable ? model.elements.filter((el) => el.layer === LAYER.branch && el.page >= 0 && isGrown(el, progress)) : [],
+  );
 </script>
+
+{#snippet elem(el: TreeElement, fresh: boolean)}
+  <path
+    class="e {el.kind} t{el.tone} d{el.depth}"
+    class:dim={dim(el.page)}
+    class:lit={highlight != null && el.page === highlight}
+    class:draw={fresh && draw && el.kind === "branch"}
+    d={el.d}
+    stroke-width={el.w || undefined}
+    pathLength={el.kind === "branch" ? 1 : undefined}
+    data-p={el.page}
+  />
+{/snippet}
+
+{#snippet paint(l: number)}
+  <g>
+    {#each view[l].before as el (el.i)}{@render elem(el, false)}{/each}
+  </g>
+  {#each view[l].fresh as band (band.key)}
+    <g class="grow" style:--d="{band.delay}ms" style:--ox="{band.x}px" style:--oy="{band.y}px">
+      {#each band.items as el (el.i)}{@render elem(el, true)}{/each}
+    </g>
+  {/each}
+  <g>
+    {#each view[l].after as el (el.i)}{@render elem(el, false)}{/each}
+  </g>
+{/snippet}
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <svg
   class="tree {detail}"
   class:mature
-  class:animated={animate && !reduced}
-  class:mount={animate && !reduced && growOnMount}
-  class:hover-rustle={detail === "full" && animate && !reduced}
+  class:animated={moving}
+  class:mount={moving && growOnMount}
+  class:hover-rustle={detail === "full" && moving}
   class:clickable
   width={size * TREE_ASPECT}
   height={size}
@@ -113,75 +206,20 @@
   onclick={clickable ? hit : undefined}
 >
   <title>{name}</title>
-  {#each [0, 1] as layer (layer)}
-    <g>
-      {#each layers[layer] as it (it.el.i)}
-        <path
-          class="e {it.el.kind}"
-          class:fresh={it.fresh}
-          class:dim={dim(it.el.page)}
-          d={it.el.d}
-          stroke-width={it.el.w || undefined}
-          style:--d={it.fresh ? `${it.delay}ms` : undefined}
-        />
-      {/each}
-    </g>
-  {/each}
+  {@render paint(0)}
+  {@render paint(1)}
   <g class="plant">
-    {#each [2, 3] as layer (layer)}
-      <g>
-        {#each layers[layer] as it (it.el.i)}
-          <path
-            class="e {it.el.kind} t{it.el.tone} d{it.el.depth}"
-            class:fresh={it.fresh}
-            class:dim={dim(it.el.page)}
-            class:lit={highlight != null && it.el.page === highlight}
-            d={it.el.d}
-            stroke-width={it.el.w || undefined}
-            pathLength={it.el.kind === "branch" ? 1 : undefined}
-            data-p={it.el.page}
-            style:--d={it.fresh ? `${it.delay}ms` : undefined}
-          />
-        {/each}
-      </g>
-    {/each}
+    {@render paint(2)}
+    {@render paint(3)}
   </g>
-  {#each [4] as layer (layer)}
-    <g>
-      {#each layers[layer] as it (it.el.i)}
-        <path
-          class="e {it.el.kind} t{it.el.tone} d{it.el.depth}"
-          class:fresh={it.fresh}
-          class:dim={dim(it.el.page)}
-          d={it.el.d}
-          stroke-width={it.el.w || undefined}
-          style:--d={it.fresh ? `${it.delay}ms` : undefined}
-        />
-      {/each}
-    </g>
-  {/each}
+  {@render paint(4)}
   <g class="plant">
-    {#each [5, 6] as layer (layer)}
-      <g>
-        {#each layers[layer] as it (it.el.i)}
-          <path
-            class="e {it.el.kind} t{it.el.tone} d{it.el.depth}"
-            class:fresh={it.fresh}
-            class:dim={dim(it.el.page)}
-            class:lit={highlight != null && it.el.page === highlight}
-            d={it.el.d}
-            stroke-width={it.el.w || undefined}
-            pathLength={it.el.kind === "branch" ? 1 : undefined}
-            data-p={it.el.page}
-            style:--d={it.fresh ? `${it.delay}ms` : undefined}
-          />
-        {/each}
-      </g>
-    {/each}
+    {@render paint(5)}
+    {@render paint(6)}
     {#if hits.length}
       <g class="hits">
-        {#each hits as it (it.el.i)}
-          <path class="hit" d={it.el.d} data-p={it.el.page} />
+        {#each hits as el (el.i)}
+          <path class="hit" d={el.d} data-p={el.page} />
         {/each}
       </g>
     {/if}
@@ -269,6 +307,7 @@
   .mini .leaf {
     stroke-width: 1;
   }
+
   /* blossoms: a wash of rose with a warm heart, quiet enough to read as flowers */
   .petals {
     fill: var(--c-rose-soft);
@@ -295,60 +334,32 @@
     cursor: pointer;
   }
 
-  /* growth: one-shot, only on elements that just appeared */
-  .fresh {
-    animation-duration: 500ms;
-    animation-delay: var(--d, 0ms);
-    animation-fill-mode: backwards;
+  /* growth: one one-shot animation per limb group, none per shape */
+  .grow {
+    transform-box: view-box;
+    transform-origin: var(--ox) var(--oy);
+    animation: grow-in var(--t-slow) var(--ease-out) var(--d, 0ms) backwards;
   }
-  .branch.fresh {
+  .grow .draw {
     stroke-dasharray: 1;
-    animation-name: draw;
-    animation-timing-function: var(--ease-out);
+    animation: draw var(--t-slow) var(--ease-out) var(--d, 0ms) backwards;
   }
-  .leaf.fresh,
-  .petals.fresh,
-  .heart.fresh,
-  .sun.fresh {
-    transform-box: fill-box;
-    transform-origin: center;
-    animation-name: pop;
-    animation-timing-function: var(--ease-spring);
-  }
-  .sun.fresh {
-    animation-duration: 700ms;
-    animation-name: rise;
-    animation-timing-function: var(--ease-out);
+  @keyframes grow-in {
+    from {
+      opacity: 0;
+      transform: scale(0.82);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
   @keyframes draw {
     from {
       stroke-dashoffset: 1;
-      opacity: 0;
-    }
-    2% {
-      opacity: 1;
     }
     to {
       stroke-dashoffset: 0;
-      opacity: 1;
-    }
-  }
-  @keyframes pop {
-    from {
-      transform: scale(0);
-    }
-    to {
-      transform: scale(1);
-    }
-  }
-  @keyframes rise {
-    from {
-      transform: scale(0.6);
-      opacity: 0;
-    }
-    to {
-      transform: scale(1);
-      opacity: 1;
     }
   }
 
