@@ -52,6 +52,7 @@ const MAX_SCALE = 1.8;
 const BASE_MIN = 36;
 const BASE_MAX = 54;
 const LEAF_PROBE = 4;
+const LEAF_MARGIN = 0.5;
 const MIN_DIR = 0.5;
 const EPS = 1e-6;
 
@@ -74,8 +75,9 @@ function rotate([x, y, z]: V3): Rotated {
 
 /**
  * Flatten a 3D skeleton into the 90 x 100 viewBox with a fixed orthographic
- * camera. Branch points and leaf centres are fitted with leaf clearance, the
- * crown is centred and the trunk foot kept in the middle band of the ground.
+ * camera. Branch points are fitted as centres while each leaf anchor reserves
+ * its cluster length, so the fitted crown keeps leaf clearance; the crown is
+ * centred and the trunk foot kept in the middle band of the ground.
  */
 export function projectSkeleton(skel: Skeleton): Projection {
   const rotatedBranches = skel.branches.map((b) => b.points.map(rotate));
@@ -94,7 +96,13 @@ export function projectSkeleton(skel: Skeleton): Projection {
     if (p.y > maxY) maxY = p.y;
   };
   for (const points of rotatedBranches) for (const p of points) track(p);
-  for (const p of rotatedLeaves) track(p);
+  // A leaf anchor is its cluster centre, so reserve the cluster length on both
+  // axes; fitting centres alone lets a mature crown overflow the viewBox.
+  rotatedLeaves.forEach((p, i) => {
+    const s = skel.leaves[i].size + LEAF_MARGIN;
+    track({ x: p.x - s, y: p.y - s, z: p.z });
+    track({ x: p.x + s, y: p.y + s, z: p.z });
+  });
 
   const empty = minX === Infinity;
   if (empty) {
