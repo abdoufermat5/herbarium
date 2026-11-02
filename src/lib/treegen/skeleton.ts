@@ -5,7 +5,6 @@ const GOLDEN = 2.39996;
 const MAX_BRANCHES = 70;
 const MAX_LEAVES = 76;
 const MIN_LEAVES = 68;
-const CACHE_MAX = 256;
 const TILT_MIN = 0.6981317;
 const TILT_MAX = 1.134464;
 const TROPISM_GAIN = 0.022;
@@ -277,16 +276,6 @@ function build(seed: string): Skeleton {
   };
 }
 
-const cache = new Map<string, Skeleton>();
-
 export function growSkeleton(seed: string): Skeleton {
-  const cached = cache.get(seed);
-  if (cached) return cached;
-  const skeleton = build(seed);
-  if (cache.size >= CACHE_MAX) {
-    const oldest = cache.keys().next();
-    if (!oldest.done) cache.delete(oldest.value);
-  }
-  cache.set(seed, skeleton);
-  return skeleton;
+  return build(seed);
 }
