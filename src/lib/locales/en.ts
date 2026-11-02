@@ -305,6 +305,7 @@ export const en = {
   "palette.folders": "Folders",
   "palette.tags": "Tags",
   "palette.switchVault": "Switch to {name}",
+  "palette.openPath": "Open path: {name}",
   "palette.searching": "Searching…",
 
   "list.label": "Pages",

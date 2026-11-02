@@ -304,6 +304,7 @@ export const fr: Record<MessageKey, string> = {
   "palette.folders": "Dossiers",
   "palette.tags": "Tags",
   "palette.switchVault": "Ouvrir le coffre {name}",
+  "palette.openPath": "Ouvrir le parcours : {name}",
   "palette.searching": "Recherche…",
 
   "list.label": "Pages",

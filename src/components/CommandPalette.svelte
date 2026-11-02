@@ -11,6 +11,7 @@
     reloadPages,
     rescanVault,
     openPage,
+    openPathView,
     goView,
     goAll,
     showFolder,
@@ -28,7 +29,9 @@
   import { confirmAction } from "../lib/confirm.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { fmtDuration, modKey, vaultLabels, vaultName } from "../lib/format";
+  import { pathGrowth } from "../lib/grove";
   import Icon from "../lib/Icon.svelte";
+  import PathTree from "./PathTree.svelte";
   import VitalityLeaf from "./VitalityLeaf.svelte";
   import type { IconName } from "../lib/icons";
   import type { PageMeta, ReviewGrade, SearchHit } from "../lib/types";
@@ -43,6 +46,8 @@
     icon: IconName;
     /** Present on page results, drawn as a leaf showing how well it is remembered. */
     page?: PageMeta;
+    /** Present on reading path commands, drawn as a mini tree. */
+    tree?: { seed: string; read: number; total: number };
     run: () => void | Promise<unknown>;
   }
 
@@ -319,6 +324,17 @@
         run: () => setLayout(app.layout === "grid" ? "list" : "grid"),
       },
     ];
+    for (const path of app.paths) {
+      const growth = pathGrowth(path.id);
+      list.push({
+        key: `path-${path.id}`,
+        group,
+        label: t("palette.openPath", { name: path.name }),
+        icon: "tree-structure",
+        tree: { seed: path.id, read: growth.read, total: growth.total },
+        run: () => openPathView(path.id),
+      });
+    }
     if (app.folderFilter || app.tagFilter) {
       list.push({
         key: "clear-filters",
@@ -594,7 +610,16 @@
           }}
         >
           <span class="p-icon">
-            {#if item.page}
+            {#if item.tree}
+              <PathTree
+                seed={item.tree.seed}
+                read={item.tree.read}
+                total={item.tree.total}
+                size={16}
+                detail="mini"
+                animate={false}
+              />
+            {:else if item.page}
               <VitalityLeaf meta={item.page} size={14} />
             {:else}
               <Icon name={item.icon} size={15} />
