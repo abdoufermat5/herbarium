@@ -29,6 +29,7 @@
   import Toasts from "./components/Toasts.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import ShortcutsDialog from "./components/ShortcutsDialog.svelte";
+  import PlantPathDialog from "./components/PlantPathDialog.svelte";
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import Logo from "./lib/Logo.svelte";
@@ -386,7 +387,7 @@
 
 <div
   class="window"
-  inert={app.importOpen || app.paletteOpen || !!app.ai || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}
+  inert={app.importOpen || app.paletteOpen || !!app.ai || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending || !!app.plant}
 >
 <TitleBar />
 <div class="content">
@@ -463,6 +464,12 @@
 {#if app.importOpen}
   <div inert={app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
     <ImportDialog />
+  </div>
+{/if}
+
+{#if app.plant}
+  <div inert={app.paletteOpen || !!confirmState.pending || !!folderPickerState.pending}>
+    <PlantPathDialog />
   </div>
 {/if}
 
