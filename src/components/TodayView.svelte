@@ -15,10 +15,12 @@
   import { i18n, t, LOCALES, type MessageKey } from "../lib/i18n.svelte";
   import type { PageMeta, ReviewStats, TodaySummary } from "../lib/types";
   import { vitality, type VitalityLevel } from "../lib/vitality";
+  import { pathGrowth } from "../lib/grove";
   import { reveal } from "../lib/reveal";
   import Icon from "../lib/Icon.svelte";
   import Illustration from "../lib/Illustration.svelte";
   import PageIcon from "./PageIcon.svelte";
+  import PathTree from "./PathTree.svelte";
   import VitalityLeaf from "./VitalityLeaf.svelte";
 
   let summary = $state<TodaySummary | null>(null);
@@ -159,6 +161,7 @@
         s.day = { row: 3, span: 6 };
       }
     }
+
     return s;
   });
 
@@ -430,18 +433,24 @@
             <h2 class="eyebrow">{t("today.continue")}</h2>
             <ul class="list">
               {#each summary.continue as c (c.pathId)}
+                {@const growth = pathGrowth(c.pathId)}
                 <li>
-                  <button class="row two" onclick={() => void openInPath(c.pathId, c.page.id)}>
-                    <span class="line"><PageIcon page={c.page} /><span class="ellipsis">{c.page.title}</span></span>
-                    <span class="meta">
-                      <span class="ellipsis">{c.pathName}</span>
-                      <span class="progress" aria-hidden="true">
-                        <span
-                          class="progress-fill"
-                          style={`transform: scaleX(${c.total > 0 ? c.position / c.total : 0})`}
-                        ></span>
+                  <button class="row with-tree" onclick={() => void openInPath(c.pathId, c.page.id)}>
+                    <span class="row-tree" aria-hidden="true">
+                      <PathTree detail="mini" size={24} seed={c.pathId} read={growth.read} total={growth.total} animate={false} />
+                    </span>
+                    <span class="row-text">
+                      <span class="line"><PageIcon page={c.page} /><span class="ellipsis">{c.page.title}</span></span>
+                      <span class="meta">
+                        <span class="ellipsis">{c.pathName}</span>
+                        <span class="progress" aria-hidden="true">
+                          <span
+                            class="progress-fill"
+                            style={`transform: scaleX(${c.total > 0 ? c.position / c.total : 0})`}
+                          ></span>
+                        </span>
+                        <span class="mono">{c.position + 1}/{c.total}</span>
                       </span>
-                      <span class="mono">{c.position + 1}/{c.total}</span>
                     </span>
                   </button>
                 </li>
@@ -786,6 +795,23 @@
     flex-direction: column;
     align-items: stretch;
     gap: 3px;
+  }
+  .row.with-tree {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+  .row-tree {
+    display: flex;
+    align-items: center;
+    flex: none;
+  }
+  .row-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
   }
   .line {
     display: flex;
