@@ -966,9 +966,6 @@
     color: var(--text-soft);
     font-size: var(--fs-sm);
     cursor: pointer;
-    transition:
-      border-color var(--t-fast) var(--ease-out),
-      background var(--t-fast) var(--ease-out);
   }
   .grove-more:hover {
     border-color: var(--border-hover);
