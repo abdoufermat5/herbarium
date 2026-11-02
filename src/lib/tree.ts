@@ -39,8 +39,6 @@ export interface TreeElement {
   limb: number;
   /** Hidden again once progress reaches this value (the sprout parts). */
   hideAt?: number;
-  /** Growth order 0..1, used to stagger the grow-in animation. */
-  seq: number;
 }
 
 export interface TreeModel {
@@ -88,6 +86,8 @@ export const isGrown = (el: Pick<TreeElement, "threshold"> & Pick<Partial<TreeEl
 type P = [number, number];
 
 const n = (x: number) => Math.round(x * 10) / 10;
+/** Stroke width rounded to 2 decimals. */
+const w2 = (x: number) => Math.round(x * 100) / 100;
 const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 
 /** A quadratic Bézier with cached length. */
@@ -164,9 +164,6 @@ export const GROUND = 90;
 
 interface Crown {
   baseX: number;
-  forkX: number;
-  trunkH: number;
-  style: number;
   cx: number;
   cy: number;
   rx: number;
@@ -203,21 +200,24 @@ function makeCrown(seed: string): Crown {
     ox = (lean >= 0 ? 1 : -1) * R(5, 9);
   }
   rx = Math.min(rx * 1.08, 39);
-  ry = Math.min(ry * 1.38,(GROUND - trunkH - 5) / 1.5);
+  ry = Math.min(ry * 1.38, (GROUND - trunkH - 5) / 1.5);
   const forkX = baseX + lean;
   const cx = clamp(forkX + ox, rx + 4, TREE_W - rx - 4);
   const cy = GROUND - trunkH - ry * 0.5;
   const trunk = curve([baseX, GROUND], [forkX, GROUND - trunkH], R(-0.12, 0.12), 0);
-  return { baseX, forkX, trunkH, style, cx, cy, rx, ry, trunk, rnd };
+  return { baseX, cx, cy, rx, ry, trunk, rnd };
 }
 
 function finish(drafts: Draft[], baseX: number, limbs: { x: number; y: number }[]): Geometry {
   const base = drafts.filter((d) => d.base);
   const grow = drafts.filter((d) => !d.base).sort((a, b) => a.g - b.g || a.n - b.n);
   const K = grow.filter((d) => !d.mature).length;
+  // The sprout parts hide at half the first growth threshold, so they are gone
+  // as soon as the tree starts to grow instead of lingering at EPS.
+  const sproutHide = K > 0 ? 0.5 / (K + 1) : EPS;
   let r = 0;
   const out: Omit<TreeElement, "page">[] = [];
-  const push = (d: Draft, threshold: number, seq: number) =>
+  const push = (d: Draft, threshold: number) =>
     out.push({
       i: 0,
       kind: d.kind,
@@ -228,12 +228,10 @@ function finish(drafts: Draft[], baseX: number, limbs: { x: number; y: number }[
       tone: d.tone,
       threshold,
       limb: d.limb ?? -1,
-      hideAt: d.hideAt,
-      seq,
+      hideAt: d.hideAt === EPS ? sproutHide : d.hideAt,
     });
-  for (const d of base) push(d, 0, 0);
-  const last = Math.max(1, grow.length - 1);
-  grow.forEach((d, idx) => push(d, d.mature ? 1 : ++r / (K + 1), idx / last));
+  for (const d of base) push(d, 0);
+  grow.forEach((d) => push(d, d.mature ? 1 : ++r / (K + 1)));
   out.sort((a, b) => a.layer - b.layer); // stable: growth order kept inside a layer
   out.forEach((e, i) => (e.i = i));
   return { baseX, ground: GROUND, limbs, elements: out };
@@ -246,8 +244,6 @@ function buildFull(seed: string): Geometry {
   const proj = projectSkeleton(skel);
   const baseX = proj.baseX;
   const drafts: Draft[] = [];
-  /** Leaf clusters, kept whole so the element budget can drop non-tip ones. */
-  const groups: { drafts: Draft[]; tip: boolean }[] = [];
   let count = 0;
   const add = (d: Omit<Draft, "n" | "depth" | "w" | "tone"> & Partial<Pick<Draft, "depth" | "w" | "tone">>) => {
     const draft: Draft = {
@@ -306,7 +302,7 @@ function buildFull(seed: string): Geometry {
       layer: LAYER.branch,
       d: smoothPath(trunkPoints.slice(s, e + 1)),
       depth: 0,
-      w: clamp(trunkRadii[mid] * 0.85, 0.35, 3.0),
+      w: w2(clamp(trunkRadii[mid] * 0.85, 0.35, 3.0)),
       g: 0.5 + k * 0.15,
     });
   });
@@ -325,7 +321,7 @@ function buildFull(seed: string): Geometry {
     if (l.z > zMax) zMax = l.z;
   }
   const zSpan = zMax - zMin || 1;
-  const leafCluster = (l: (typeof proj.leaves)[number], g: number, tip: boolean) => {
+  const leafCluster = (l: (typeof proj.leaves)[number], g: number) => {
     const zN = clamp((l.z - zMin) / zSpan, 0, 1);
     const nx = clamp((l.x - 45) / 45, -1, 1);
     const ny = clamp((l.y - 50) / 45, -1, 1);
@@ -334,12 +330,11 @@ function buildFull(seed: string): Geometry {
     let tone = 3;
     if (zN < 0.2) tone = zN < 0.08 ? 0 : 1;
     else if (light < 0.3) tone = 2;
-    else if (light > 0.72 && zN > 0.7) tone = 4;
+    else if (light > 0.8 && zN > 0.8) tone = 4;
     const depth = clamp(l.level, 1, 3);
-    const out = clusterPaths(l.x, l.y, l.angle, l.size).map((d, p) =>
+    clusterPaths(l.x, l.y, l.angle, l.size).forEach((d, p) =>
       add({ kind: "leaf", layer, d, depth, tone, g: g + 0.00001 * p, limb: l.limb }),
     );
-    groups.push({ drafts: out, tip });
   };
 
   // Growth windows alternate sides so partial trees stay balanced. Projected y
@@ -366,51 +361,58 @@ function buildFull(seed: string): Geometry {
   const slot: number[] = [];
   growth.forEach((j, at) => (slot[j] = at));
 
-  // Each limb grows in its own [g0, g0 + 1) window. Its tip cluster comes first,
-  // so a visible deep branch always has a leaf in the same limb.
-  for (let j = 0; j < proj.limbs.length; j++) {
-    const g0 = 1 + slot[j];
-    const tip = proj.leaves.find((l) => l.tip && l.limb === j);
-    if (tip) leafCluster(tip, g0 + 0.001, true);
-    let k = 0;
-    skel.branches.forEach((b, i) => {
-      if (b.limb !== j) return;
-      const g = clamp(g0 + 0.02 + k * 0.006, g0 + 0.001, g0 + 0.97);
-      k++;
-      const pb = proj.branches[i];
-      const depth = clamp(b.level, 0, 3);
-      const last = pb.points.length - 1;
-      if (b.level <= 1 && pb.points.length >= 4) {
-        const m = Math.max(1, Math.floor(last / 2));
-        for (const [s, e] of [[0, m], [m, last]] as const) {
-          add({
-            kind: "branch",
-            layer: LAYER.branch,
-            d: smoothPath(pb.points.slice(s, e + 1)),
-            depth,
-            w: clamp(pb.radii[Math.min((s + e) >> 1, pb.radii.length - 1)] * 0.85, 0.35, 3.0),
-            g,
-            limb: j,
-          });
-        }
-      } else {
+  // Add one branch of limb `j` plus the leaf clusters growing from it.
+  const addBranch = (j: number, i: number, g: number) => {
+    const pb = proj.branches[i];
+    const b = skel.branches[i];
+    const depth = clamp(b.level, 0, 3);
+    const last = pb.points.length - 1;
+    if (b.level <= 1 && pb.points.length >= 4) {
+      const m = Math.max(1, Math.floor(last / 2));
+      for (const [s, e] of [[0, m], [m, last]] as const) {
         add({
           kind: "branch",
           layer: LAYER.branch,
-          d: smoothPath(pb.points),
+          d: smoothPath(pb.points.slice(s, e + 1)),
           depth,
-          w: clamp(pb.radii[last >> 1] * 0.85, 0.35, 3.0),
+          w: w2(clamp(pb.radii[Math.min((s + e) >> 1, pb.radii.length - 1)] * 0.85, 0.35, 3.0)),
           g,
           limb: j,
         });
       }
-      let li = 0;
-      for (const l of proj.leaves) {
-        if (l.tip || l.parent !== i || l.limb !== j) continue;
-        leafCluster(l, g + 0.001 * (li + 1), false);
-        li++;
-      }
+    } else {
+      add({
+        kind: "branch",
+        layer: LAYER.branch,
+        d: smoothPath(pb.points),
+        depth,
+        w: w2(clamp(pb.radii[last >> 1] * 0.85, 0.35, 3.0)),
+        g,
+        limb: j,
+      });
+    }
+    let li = 0;
+    for (const l of proj.leaves) {
+      if (l.tip || l.parent !== i || l.limb !== j) continue;
+      leafCluster(l, g + 0.001 * (li + 1));
+      li++;
+    }
+  };
+
+  // Each limb grows in its own [g0, g0 + 1) window. Its level-1 branch comes
+  // first so the tip cluster sits on wood; the remaining branches follow well
+  // after it, so a visible deep branch always has a leaf in the same limb.
+  for (let j = 0; j < proj.limbs.length; j++) {
+    const g0 = 1 + slot[j];
+    const own: number[] = [];
+    skel.branches.forEach((b, i) => {
+      if (b.limb === j) own.push(i);
     });
+    const first = own.shift();
+    if (first !== undefined) addBranch(j, first, g0 + 0.001);
+    const tip = proj.leaves.find((l) => l.tip && l.limb === j);
+    if (tip) leafCluster(tip, g0 + 0.002);
+    own.forEach((i, k) => addBranch(j, i, g0 + 0.02 + k * 0.006));
   }
 
   // Maturity: one offset sun disc and a handful of quiet blossoms. A separate
@@ -429,16 +431,7 @@ function buildFull(seed: string): Geometry {
   add({ kind: "sun", layer: LAYER.sun, d: circlePath(sx, sy, sr), g: 20, mature: true });
   // Few and never crowded: candidates closer than 6 units to a kept blossom
   // are dropped, so the crown keeps its calm instead of filling with pinwheels.
-  const nB = 7 + Math.floor(bloom() * 5);
-  // Stay inside the element budget: drop whole non-tip clusters, never a limb tip.
-  for (let gi = groups.length - 1; gi >= 0 && drafts.length + nB * 2 > 400; gi--) {
-    const group = groups[gi];
-    if (group.tip) continue;
-    for (const draft of group.drafts) {
-      const at = drafts.indexOf(draft);
-      if (at >= 0) drafts.splice(at, 1);
-    }
-  }
+  const nB = 6 + Math.floor(bloom() * 3);
   const spots: P[] = [];
   for (let tries = 0; tries < 30 && spots.length < nB; tries++) {
     const a = proj.leaves[Math.floor(bloom() * proj.leaves.length)];
@@ -553,7 +546,7 @@ function buildMini(seed: string): Geometry {
 
 const geometry = new Map<string, Geometry>();
 const models = new Map<string, TreeModel>();
-const CACHE_MAX = 256;
+const CACHE_MAX = 96;
 
 function remember<V>(map: Map<string, V>, key: string, value: V): V {
   if (map.size >= CACHE_MAX) map.delete(map.keys().next().value as string);
@@ -566,10 +559,15 @@ function remember<V>(map: Map<string, V>, key: string, value: V): V {
  * per (seed, total, detail); the same arguments return the same object.
  */
 export function growTree(seed: string, total: number, detail: TreeDetail = "full"): TreeModel {
-  const t = Math.max(0, Math.floor(total));
+  const t = Number.isFinite(total) ? Math.max(0, Math.floor(total)) : 0;
   const key = `${detail}|${t}|${seed}`;
   const hit = models.get(key);
-  if (hit) return hit;
+  if (hit) {
+    // Refresh recency so the map behaves as an LRU, not FIFO.
+    models.delete(key);
+    models.set(key, hit);
+    return hit;
+  }
   const gkey = `${detail}|${seed}`;
   const geo = geometry.get(gkey) ?? remember(geometry, gkey, detail === "mini" ? buildMini(seed) : buildFull(seed));
   const pages = Math.max(t, 1);
