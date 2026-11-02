@@ -754,7 +754,7 @@
   function onWindowKey(e: KeyboardEvent) {
     if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
     if (e.key.toLowerCase() !== "p") return;
-    if (app.readId || app.importOpen || app.paletteOpen || app.ai || app.plant) return;
+    if (app.readId || app.importOpen || app.paletteOpen || app.ai || app.plant || menu) return;
     if (document.querySelector('[aria-modal="true"]')) return;
     const el = e.target as HTMLElement | null;
     if (
