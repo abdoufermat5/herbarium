@@ -15,6 +15,7 @@
   import GraphView from "./components/GraphView.svelte";
   import SettingsView from "./components/SettingsView.svelte";
   import TrashView from "./components/TrashView.svelte";
+  import PathView from "./components/PathView.svelte";
   import ReadView from "./components/ReadView.svelte";
   import ImportDialog from "./components/ImportDialog.svelte";
   import AiImportDialog from "./components/AiImportDialog.svelte";
@@ -424,6 +425,8 @@
         <SettingsView />
       {:else if app.view === "trash"}
         <TrashView />
+      {:else if app.view === "path"}
+        <PathView />
       {:else}
         <PageList />
       {/if}

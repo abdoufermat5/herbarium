@@ -147,7 +147,7 @@
         </div>
 
         {#if rows.length > 0}
-          <ol class="trail" aria-label={t("paths.view.trail")} onkeydown={onTrailKey}>
+          <ol class="trail" aria-label={t("paths.view.trail")}>
             {#each rows as r (r.pageId)}
               <li class="step {r.state}" use:reveal>
                 <button
@@ -157,6 +157,7 @@
                   aria-current={r.state === "next" ? "step" : undefined}
                   title={r.state === "missing" ? t("paths.missing") : undefined}
                   onclick={() => open(r.pageId)}
+                  onkeydown={onTrailKey}
                   onmouseenter={() => (highlight = r.i)}
                   onmouseleave={() => (highlight = null)}
                   onfocus={() => (highlight = r.i)}
