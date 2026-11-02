@@ -158,7 +158,7 @@ export const en = {
   "settings.editor": "Editor",
   "settings.editor.font": "Font",
   "settings.editor.fontHint": "Typeface for the HTML source.",
-  "settings.editor.fontApp": "Geist Mono",
+  "settings.editor.fontApp": "App mono",
   "settings.editor.fontSystem": "System monospace",
   "settings.editor.size": "Font size",
   "settings.editor.sizeHint": "Size of the source text.",

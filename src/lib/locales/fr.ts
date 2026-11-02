@@ -157,7 +157,7 @@ export const fr: Record<MessageKey, string> = {
   "settings.editor": "Éditeur",
   "settings.editor.font": "Police",
   "settings.editor.fontHint": "Police du code source HTML.",
-  "settings.editor.fontApp": "Geist Mono",
+  "settings.editor.fontApp": "Mono de l'application",
   "settings.editor.fontSystem": "Monospace du système",
   "settings.editor.size": "Taille de police",
   "settings.editor.sizeHint": "Taille du texte source.",
