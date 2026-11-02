@@ -97,20 +97,31 @@
   --shadow-lg: 0 1px 2px rgba(0, 0, 0, 0.03), 0 12px 32px rgba(0, 0, 0, 0.05);
 
   /* Type */
-  --font: "Geist Variable", "SF Pro Display", "Helvetica Neue", ui-sans-serif, sans-serif;
-  --font-display: "Newsreader Variable", "Iowan Old Style", Georgia, serif;
-  --mono: "Geist Mono Variable", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
-  --fs-2xs: 11px;
-  --fs-xs: 12px;
-  --fs-sm: 13px;
-  --fs-base: 14px;
-  --fs-md: 15px;
-  --fs-lg: 19px;
-  --fs-xl: 22px;
-  --fs-2xl: 24px;
-  --fs-3xl: 30px;
-  --fs-4xl: 40px;
-  --fs-5xl: 52px;
+  --font: "Geist Variable", "Geist", "SF Pro Display", "Helvetica Neue", ui-sans-serif, sans-serif;
+  --font-display: "Newsreader Variable", "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "Geist Mono Variable", "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  /* Per-style variation axes, wired onto body / .display / mono below. */
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.02em;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  /* Multiplier for display faces with a small x-height (Caveat, Special Elite). */
+  --display-size-adjust: 1;
+  /* One control for every text size; see Settings → Appearance. */
+  --fs-scale: 1;
+  --fs-2xs: calc(11px * var(--fs-scale));
+  --fs-xs: calc(12px * var(--fs-scale));
+  --fs-sm: calc(13px * var(--fs-scale));
+  --fs-base: calc(14px * var(--fs-scale));
+  --fs-md: calc(15px * var(--fs-scale));
+  --fs-lg: calc(19px * var(--fs-scale));
+  --fs-xl: calc(22px * var(--fs-scale));
+  --fs-2xl: calc(24px * var(--fs-scale));
+  --fs-3xl: calc(30px * var(--fs-scale));
+  --fs-4xl: calc(40px * var(--fs-scale));
+  --fs-5xl: calc(52px * var(--fs-scale));
 
   /* Motion — quiet */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -137,6 +148,153 @@
   --z-popover: 60;
   --z-overlay: 70;
   --z-toast: 80;
+}
+
+/* ============ Type styles ============ */
+
+/* Chosen in Settings → Appearance. `:root[data-type]` follows the document;
+   the bare `[data-type]` lets each specimen card show its own style while the
+   rest of the app keeps another. Every block sets all the type variables:
+   custom properties inherit, so a card inside another style must reset them. */
+
+:root[data-type="herbarium"],
+[data-type="herbarium"] {
+  --font: "Geist Variable", "Geist", "SF Pro Display", "Helvetica Neue", ui-sans-serif, sans-serif;
+  --font-display: "Newsreader Variable", "Newsreader", "Iowan Old Style", Georgia, serif;
+  --mono: "Geist Mono Variable", "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.02em;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="storybook"],
+[data-type="storybook"] {
+  --font: "Nunito Variable", "Nunito", "Avenir Next", ui-sans-serif, sans-serif;
+  --font-display: "Fraunces Variable", "Fraunces", "Iowan Old Style", Georgia, serif;
+  --mono: "Geist Mono Variable", "Geist Mono", "SF Mono", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: 'SOFT' 100, 'WONK' 1;
+  --font-mono-settings: normal;
+  --display-tracking: -0.02em;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="fieldnotes"],
+[data-type="fieldnotes"] {
+  --font: "Shantell Sans Variable", "Shantell Sans", "Comic Sans MS", ui-sans-serif, sans-serif;
+  --font-display: "Caveat Variable", "Caveat", "Bradley Hand", cursive;
+  --mono: "Victor Mono Variable", "Victor Mono", ui-monospace, monospace;
+  --font-ui-settings: 'INFM' 60;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: 0;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  --display-size-adjust: 1.12;
+}
+
+:root[data-type="casual"],
+[data-type="casual"] {
+  --font: "Recursive Variable", "Recursive", ui-sans-serif, sans-serif;
+  --font-display: "Recursive Variable", "Recursive", ui-sans-serif, sans-serif;
+  --mono: "Recursive Variable", "Recursive", ui-monospace, monospace;
+  --font-ui-settings: 'CASL' 1, 'MONO' 0;
+  --font-display-settings: 'CASL' 1;
+  --font-mono-settings: 'MONO' 1, 'CASL' 0.5;
+  --display-tracking: -0.02em;
+  --display-weight: 750;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="poster"],
+[data-type="poster"] {
+  --font: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Bricolage Grotesque", ui-sans-serif, sans-serif;
+  --mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.03em;
+  --display-weight: 800;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="library"],
+[data-type="library"] {
+  --font: "Literata Variable", "Literata", Georgia, serif;
+  --font-display: "EB Garamond Variable", "EB Garamond", Georgia, serif;
+  --mono: "Courier Prime", "Courier New", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.02em;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="typewriter"],
+[data-type="typewriter"] {
+  --font: "Courier Prime", "Courier New", ui-monospace, monospace;
+  --font-display: "Special Elite", "Courier Prime", "Courier New", monospace;
+  --mono: "Courier Prime", "Courier New", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: 0;
+  --display-weight: 400;
+  --display-leading: 1.1;
+  --display-size-adjust: 1.08;
+}
+
+:root[data-type="arcade"],
+[data-type="arcade"] {
+  --font: "Space Grotesk Variable", "Space Grotesk", ui-sans-serif, sans-serif;
+  --font-display: "Pixelify Sans Variable", "Pixelify Sans", "Courier New", monospace;
+  --mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: 0;
+  --display-weight: 500;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="playground"],
+[data-type="playground"] {
+  --font: "Playpen Sans Variable", "Playpen Sans", "Comic Sans MS", ui-sans-serif, sans-serif;
+  --font-display: "Baloo 2 Variable", "Baloo 2", ui-rounded, ui-sans-serif, sans-serif;
+  --mono: "Victor Mono Variable", "Victor Mono", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.02em;
+  --display-weight: 700;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
+}
+
+:root[data-type="legible"],
+[data-type="legible"] {
+  --font: "Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Next", ui-sans-serif, sans-serif;
+  --font-display: "Atkinson Hyperlegible Next Variable", "Atkinson Hyperlegible Next", ui-sans-serif, sans-serif;
+  --mono: "Atkinson Hyperlegible Mono Variable", "Atkinson Hyperlegible Mono", ui-monospace, monospace;
+  --font-ui-settings: normal;
+  --font-display-settings: normal;
+  --font-mono-settings: normal;
+  --display-tracking: -0.01em;
+  --display-weight: 700;
+  --display-leading: 1.1;
+  --display-size-adjust: 1;
 }
 
 /* ============ Dark theme ============ */
@@ -235,6 +393,8 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
+  font-variation-settings: var(--font-ui-settings);
+  font-size-adjust: from-font;
   font-size: var(--fs-base);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -368,13 +528,24 @@ body,
 
 /* ============ Typography ============ */
 
+/* Mono text reads the style's mono voices (Recursive's MONO axis, for one). */
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--mono);
+  font-variation-settings: var(--font-mono-settings);
+}
+
 /* Editorial serif for page-level headings */
 .display {
   font-family: var(--font-display);
-  font-weight: 500;
+  font-variation-settings: var(--font-display-settings);
+  font-weight: var(--display-weight);
   font-optical-sizing: auto;
-  letter-spacing: -0.025em;
-  line-height: 1.1;
+  font-size: calc(1em * var(--display-size-adjust));
+  letter-spacing: var(--display-tracking);
+  line-height: var(--display-leading);
   color: var(--text);
 }
 
@@ -382,6 +553,7 @@ body,
 .eyebrow {
   font-size: var(--fs-2xs);
   font-weight: 500;
+  font-variation-settings: var(--font-ui-settings);
   line-height: 1.4;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -442,6 +614,7 @@ body,
   background: var(--raised);
   color: var(--text-soft);
   font-family: var(--mono);
+  font-variation-settings: var(--font-mono-settings);
   font-size: var(--fs-2xs);
   line-height: 1;
 }
@@ -541,6 +714,7 @@ body,
   min-height: 24px;
   padding: 2px 7px;
   font-family: var(--mono);
+  font-variation-settings: var(--font-mono-settings);
   font-size: var(--fs-2xs);
   gap: 4px;
   border-radius: var(--radius-xs);
@@ -659,6 +833,7 @@ body,
   background: var(--warn-soft);
   color: var(--warn);
   font-family: var(--mono);
+  font-variation-settings: var(--font-mono-settings);
   font-size: var(--fs-2xs);
   font-weight: 500;
 }
@@ -865,10 +1040,11 @@ textarea {
 
 .empty strong {
   font-family: var(--font-display);
-  font-weight: 500;
+  font-variation-settings: var(--font-display-settings);
+  font-weight: var(--display-weight);
   font-size: var(--fs-2xl);
-  letter-spacing: -0.02em;
-  line-height: 1.2;
+  letter-spacing: var(--display-tracking);
+  line-height: var(--display-leading);
   color: var(--text);
 }
 

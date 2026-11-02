@@ -10,6 +10,17 @@
           t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
         document.documentElement.dataset.theme = t;
       } catch (e) {}
+      // The type style and text size live in the prefs blob; read them before
+      // the first paint so a reload never flashes the default fonts. Invalid
+      // values are ignored and fixed by the prefs loader in main.ts.
+      try {
+        var p = JSON.parse(localStorage.getItem("herbarium.prefs") || "{}") || {};
+        var styles = ["herbarium", "storybook", "fieldnotes", "casual", "poster", "library", "typewriter", "arcade", "playground", "legible"];
+        if (styles.indexOf(p.typeStyle) !== -1) document.documentElement.dataset.type = p.typeStyle;
+        var scales = [0.92, 1, 1.08, 1.16];
+        if (scales.indexOf(p.textScale) !== -1)
+          document.documentElement.style.setProperty("--fs-scale", String(p.textScale));
+      } catch (e) {}
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Herbarium</title>

@@ -3,6 +3,9 @@
 // field is validated on load so a stale or hand-edited value falls back to its
 // default instead of breaking the UI.
 
+import { applyTypography, TEXT_SCALES, TYPE_STYLE_IDS } from "./typography";
+import type { TypeStyle } from "./typography";
+
 const KEY = "herbarium.prefs";
 const LAST_IMPORT_KEY = "herbarium.lastImportFolder";
 
@@ -14,6 +17,10 @@ export type EditorFont = "app" | "system";
 export interface Prefs {
   /** Screen shown when the app launches. */
   startView: StartView;
+  /** Font family set for the interface and its headings. */
+  typeStyle: TypeStyle;
+  /** Multiplier on every interface text size. */
+  textScale: number;
   /** Which folder the import dialog starts on. */
   importTarget: ImportTarget;
   /** Open the page details panel whenever the app starts. */
@@ -43,6 +50,8 @@ export interface Prefs {
 
 export const DEFAULT_PREFS: Prefs = {
   startView: "today",
+  typeStyle: "herbarium",
+  textScale: 1,
   importTarget: "browsing",
   detailsOpen: false,
   refreshOnFocus: true,
@@ -83,6 +92,8 @@ function sanitize(raw: unknown): Prefs {
   const d = DEFAULT_PREFS;
   return {
     startView: oneOf(r.startView, ["today", "list", "review"], d.startView),
+    typeStyle: oneOf(r.typeStyle, TYPE_STYLE_IDS, d.typeStyle),
+    textScale: oneOf(r.textScale, TEXT_SCALES, d.textScale),
     importTarget: oneOf(r.importTarget, ["browsing", "root", "last"], d.importTarget),
     detailsOpen: bool(r.detailsOpen, d.detailsOpen),
     refreshOnFocus: bool(r.refreshOnFocus, d.refreshOnFocus),
@@ -118,6 +129,7 @@ export function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
   } catch {
     /* the preference just won't persist */
   }
+  if (key === "typeStyle" || key === "textScale") applyTypography(prefs.typeStyle, prefs.textScale);
 }
 
 /** The folder the last import went to ("" is the vault root). */
