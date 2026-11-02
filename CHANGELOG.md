@@ -14,6 +14,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Hand-drawn illustrations for empty states (library, search, trash, onboarding, caught-up reviews, imports).
 - Keyboard: arrows, X, S and Delete on library cards; R to start a review; Esc dismisses the newest notification.
 - `paths.progress` operation (also an MCP tool): which pages of each reading path have been opened.
+- Ten type styles and four text sizes in Settings → Appearance. Each style brings its own interface, heading and mono fonts — from Herbarium's warm serifs to Storybook, Field notes, Typewriter, Arcade and an easy-reading face — shown live in a specimen picker; the interface text scales from 0.92× to 1.16×. The chosen style is applied before the first paint, so it never flashes.
 
 ### Changed
 - Motion throughout, quiet and quick: the content area rises into place when you change view, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
