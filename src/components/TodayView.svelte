@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { api } from "../lib/api";
   import {
     app,
     errorMessage,
     openInPath,
     openPage,
+    openPathView,
     reloadPages,
     startReviewSession,
     toast,
@@ -15,7 +16,9 @@
   import { i18n, t, LOCALES, type MessageKey } from "../lib/i18n.svelte";
   import type { PageMeta, ReviewStats, TodaySummary } from "../lib/types";
   import { vitality, type VitalityLevel } from "../lib/vitality";
-  import { pathGrowth } from "../lib/grove";
+  import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
+  import { celebrate } from "../lib/celebrate";
+  import { treeStage, type TreeStage } from "../lib/tree";
   import { reveal } from "../lib/reveal";
   import Icon from "../lib/Icon.svelte";
   import Illustration from "../lib/Illustration.svelte";
@@ -120,7 +123,7 @@
 
   /* ------------------------------------------------------------------ grid */
 
-  type CardKey = "review" | "streak" | "garden" | "continue" | "rediscover" | "recent" | "day";
+  type CardKey = "review" | "streak" | "grove" | "garden" | "continue" | "rediscover" | "recent" | "day";
 
   interface CardSlot {
     row: number;
@@ -162,6 +165,14 @@
       }
     }
 
+    // The grove is a band of its own, right under review and streak: every
+    // later card moves down one row, so each row still fills all six columns.
+    if (app.paths.length > 0) {
+      for (const slot of Object.values(s)) {
+        if (slot && slot.row > 1) slot.row += 1;
+      }
+      s.grove = { row: 2, span: 6 };
+    }
     return s;
   });
 
@@ -169,6 +180,87 @@
     const slot = slots[key];
     return slot ? `--row:${slot.row};--span:${slot.span}` : "";
   }
+
+  /* ----------------------------------------------------------------- grove */
+
+  /** Trees that fit on the grove's ground line before it folds the rest. */
+  const GROVE_MAX = 6;
+  /** Height of a grove tree in px; the shared ground sits at 90% of it. */
+  const GROVE_TREE = 112;
+  /** Petals bloom about here: the tree's first growth wave is on screen. */
+  const GROW_MS = 1200;
+
+  interface GroveTree {
+    id: string;
+    name: string;
+    read: number;
+    total: number;
+    mature: boolean;
+    stage: TreeStage;
+  }
+
+  /** Most-read first, then by name, so the grove reads left to right as it grew. */
+  const grove = $derived.by(() => {
+    const all: GroveTree[] = app.paths
+      .map((p) => {
+        const g = pathGrowth(p.id);
+        return {
+          id: p.id,
+          name: p.name,
+          read: g.read,
+          total: g.total,
+          mature: g.mature,
+          stage: treeStage(g.read, g.total),
+        };
+      })
+      .sort((a, b) => {
+        const pa = a.total > 0 ? a.read / a.total : 0;
+        const pb = b.total > 0 ? b.read / b.total : 0;
+        return pb - pa || a.name.localeCompare(b.name);
+      });
+    return {
+      shown: all.slice(0, GROVE_MAX),
+      hidden: Math.max(0, all.length - GROVE_MAX),
+      overflow: all[GROVE_MAX]?.id ?? null,
+    };
+  });
+
+  function openNextGrovePath() {
+    if (grove.overflow) void openPathView(grove.overflow);
+  }
+
+  // One tree may have matured since the last visit: it grows in on arrival and
+  // bursts once. Deciding at mount keeps that moment from replaying on refresh.
+  const momentId = untrack(
+    () => grove.shown.find((tree) => tree.mature && !wasCelebrated(tree.id))?.id ?? null,
+  );
+  let momentEl = $state<HTMLElement | null>(null);
+
+  /** Remember the growing tree's box: the petals burst from its centre. */
+  function trackMoment(node: HTMLElement, id: string) {
+    if (id !== momentId) return;
+    momentEl = node;
+    return {
+      destroy() {
+        if (momentEl === node) momentEl = null;
+      },
+    };
+  }
+
+  // The grove renders after the summary arrives, so the clock starts when its
+  // tree is actually on screen. The cleanup both re-arms on a new tree and
+  // clears the timer if Today is left before the moment lands.
+  $effect(() => {
+    const el = momentEl;
+    const id = momentId;
+    if (!el || !id) return;
+    const timer = setTimeout(() => {
+      const r = el.getBoundingClientRect();
+      void celebrate({ x: r.left + r.width / 2, y: r.top + r.height / 2 });
+      markCelebrated(id);
+    }, GROW_MS);
+    return () => clearTimeout(timer);
+  });
 
   /* ---------------------------------------------------------------- streak */
 
@@ -401,6 +493,45 @@
           </div>
           <p class="longest">{t("today.longestStreak", { count: stats.longestStreak })}</p>
         </section>
+
+        {#if app.paths.length > 0}
+          <section class="card grove" use:reveal style={place("grove")}>
+            <h2 class="eyebrow">{t("today.grove.title")}</h2>
+            <div class="grove-row" style:--grove-tree={`${GROVE_TREE}px`}>
+              {#each grove.shown as tree (tree.id)}
+                <button
+                  class="grove-tree"
+                  aria-label={t("today.grove.open", { name: tree.name })}
+                  title={t("today.grove.open", { name: tree.name })}
+                  onclick={() => void openPathView(tree.id)}
+                >
+                  <span class="grove-art" use:trackMoment={tree.id}>
+                    <PathTree
+                      seed={tree.id}
+                      read={tree.read}
+                      total={tree.total}
+                      size={GROVE_TREE}
+                      detail="full"
+                      label={tree.name}
+                      animate={tree.id === momentId}
+                      growOnMount={tree.id === momentId}
+                    />
+                  </span>
+                  <span class="grove-name ellipsis">{tree.name}</span>
+                  <span class="grove-meta">
+                    <span>{t(`tree.stage.${tree.stage}` as MessageKey)}</span>
+                    <span>{t("today.grove.read", { read: tree.read, total: tree.total })}</span>
+                  </span>
+                </button>
+              {/each}
+              {#if grove.overflow}
+                <button class="grove-more" onclick={openNextGrovePath}>
+                  {t("today.grove.more", { count: grove.hidden })}
+                </button>
+              {/if}
+            </div>
+          </section>
+        {/if}
 
         <section class="card garden" use:reveal style={place("garden")}>
           <h2 class="eyebrow">{t("today.garden")}</h2>
@@ -760,6 +891,88 @@
   .water {
     align-self: flex-start;
     margin-top: auto;
+  }
+
+  /* ---------------------------------------------------------------- grove */
+  .grove-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .grove-tree {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    flex: 1 1 116px;
+    max-width: 200px;
+    margin: 0;
+    padding: 0 8px 8px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  /* One continuous ground line: each tree's segment meets its neighbours'. */
+  .grove-tree::before {
+    content: "";
+    position: absolute;
+    top: calc(var(--grove-tree, 112px) * 0.9);
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: var(--border);
+  }
+  .grove-art {
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    height: var(--grove-tree, 112px);
+    transition: transform var(--t-fast) var(--ease-out);
+  }
+  .grove-tree:hover .grove-art {
+    transform: translateY(-2px);
+  }
+  .grove-name {
+    max-width: 100%;
+    margin-top: 4px;
+    font-size: var(--fs-sm);
+    line-height: 1.35;
+  }
+  .grove-meta {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: 6px;
+    max-width: 100%;
+    margin-top: 2px;
+    font-family: var(--mono);
+    font-size: var(--fs-2xs);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .grove-more {
+    align-self: flex-end;
+    flex: none;
+    margin: 0 8px 10px;
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: none;
+    color: var(--text-soft);
+    font-size: var(--fs-sm);
+    cursor: pointer;
+    transition:
+      border-color var(--t-fast) var(--ease-out),
+      background var(--t-fast) var(--ease-out);
+  }
+  .grove-more:hover {
+    border-color: var(--border-hover);
+    background: var(--raised);
   }
 
   /* ---------------------------------------------------------- reading rows */
