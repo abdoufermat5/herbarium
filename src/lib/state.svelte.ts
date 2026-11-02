@@ -112,6 +112,8 @@ interface AppState {
   pathView: string | null;
   /** The "plant a reading path" dialog, and what it opened with; null when closed. */
   plant: PlantRequest | null;
+  /** A path just planted: its view plays the planting moment once. */
+  justPlanted: string | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
@@ -212,6 +214,7 @@ export const app: AppState = $state({
   pathId: null,
   pathView: null,
   plant: null,
+  justPlanted: null,
   focusMode: false,
   aiImportOpen: false,
   ai: null,
@@ -598,6 +601,7 @@ export function resetWorkspace() {
   app.pathId = null;
   app.pathView = null;
   app.plant = null;
+  app.justPlanted = null;
   app.focusMode = false;
   knownProposals = null;
   app.createRequest = null;
@@ -844,8 +848,16 @@ async function changePath(run: () => Promise<ReadingPath>): Promise<ReadingPath 
   }
 }
 
-export function createPath(name: string, pages: string[] = []) {
-  return changePath(() => api.createPath(name, pages));
+export function createPath(name: string, pages: string[] = [], description = "") {
+  return changePath(() => api.createPath(name, pages, description));
+}
+
+/** Rename, re-describe or reorder an existing path (the full page list, in order). */
+export function savePath(
+  id: string,
+  patch: { name?: string; pages?: string[]; description?: string },
+) {
+  return changePath(() => api.updatePath(id, patch));
 }
 
 export function renamePath(id: string, name: string) {

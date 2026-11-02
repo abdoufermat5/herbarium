@@ -228,12 +228,15 @@ export const api = {
     return op("paths.progress");
   },
 
-  createPath(name: string, pages: string[] = []): Promise<ReadingPath> {
-    return op("paths.create", { name, pages });
+  createPath(name: string, pages: string[] = [], description = ""): Promise<ReadingPath> {
+    return op("paths.create", { name, pages, description });
   },
 
-  /** Rename and/or reorder: `pages` is the full list in its new order. */
-  updatePath(id: string, patch: { name?: string; pages?: string[] }): Promise<ReadingPath> {
+  /** Rename, re-describe and/or reorder: `pages` is the full list in its new order. */
+  updatePath(
+    id: string,
+    patch: { name?: string; pages?: string[]; description?: string },
+  ): Promise<ReadingPath> {
     return op("paths.update", { id, ...patch });
   },
 
