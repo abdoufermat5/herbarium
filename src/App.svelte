@@ -3,7 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi } from "./lib/state.svelte";
+  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi, openPlantPath } from "./lib/state.svelte";
   import { navigate } from "./lib/navigation.svelte";
   import { folderPickerState } from "./lib/folder-picker.svelte";
   import { api } from "./lib/api";
@@ -177,6 +177,16 @@
         input.focus();
         input.select();
       }
+      return;
+    }
+
+    // P plants a reading path from anywhere but the reader (whose keys are its own),
+    // and never under an open menu, which may use letters for type-ahead.
+    if (e.key.toLowerCase() === "p" && !mod && !e.altKey && !e.shiftKey) {
+      if (app.readId || app.importOpen || app.paletteOpen || app.ai || app.plant) return;
+      if (document.querySelector('[role="menu"]')) return;
+      e.preventDefault();
+      openPlantPath();
       return;
     }
 

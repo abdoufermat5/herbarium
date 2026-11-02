@@ -1987,9 +1987,9 @@
             </div>
           </section>
 
-          {#if app.paths.length > 0}
-            <section class="insp-section">
-              <h2 class="eyebrow">{t("paths.title")}</h2>
+          <section class="insp-section">
+            <h2 class="eyebrow">{t("paths.title")}</h2>
+            {#if app.paths.length > 0}
               <ul class="links-list">
                 {#each app.paths as path (path.id)}
                   <li>
@@ -2005,17 +2005,17 @@
                   </li>
                 {/each}
               </ul>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm plant-new"
-                disabled={pageGone}
-                onclick={() => openPlantPath({ pages: [page.meta.id] })}
-              >
-                <Icon name="plus" size={12} />
-                {t("paths.plantNew")}
-              </button>
-            </section>
-          {/if}
+            {/if}
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm plant-new"
+              disabled={pageGone}
+              onclick={() => page && openPlantPath({ pages: [page.meta.id] })}
+            >
+              <Icon name="plus" size={12} />
+              {t("paths.plantNew")}
+            </button>
+          </section>
 
           {#if healthIssues.length > 0}
             <section class="insp-section">

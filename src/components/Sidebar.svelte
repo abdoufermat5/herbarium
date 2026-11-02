@@ -750,25 +750,6 @@
     }
   }
 
-  /** Plain P plants a path from the library; the reader keeps its own keys. */
-  function onWindowKey(e: KeyboardEvent) {
-    if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-    if (e.key.toLowerCase() !== "p") return;
-    if (app.readId || app.importOpen || app.paletteOpen || app.ai || app.plant || menu) return;
-    if (document.querySelector('[aria-modal="true"]')) return;
-    const el = e.target as HTMLElement | null;
-    if (
-      el &&
-      (el instanceof HTMLInputElement ||
-        el instanceof HTMLTextAreaElement ||
-        el instanceof HTMLSelectElement ||
-        el.isContentEditable)
-    )
-      return;
-    e.preventDefault();
-    openPlantPath();
-  }
-
   function pathMenu(e: MouseEvent, id: string, name: string) {
     e.preventDefault();
     menu = {
@@ -1099,8 +1080,6 @@
     <span class="ellipsis">{label}</span>
   </button>
 {/snippet}
-
-<svelte:window onkeydown={onWindowKey} />
 
 <aside class="sidebar" class:resizing bind:this={asideEl}>
   <div class="head">
