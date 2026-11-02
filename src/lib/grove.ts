@@ -25,6 +25,34 @@ export function pathGrowth(pathId: string): PathGrowth {
   return { read, total, mature: total > 0 && read >= total, next };
 }
 
+/**
+ * A readable, unique id for a new reading path, exactly as the backend builds
+ * it (`builtin/paths.rs::new_id`): lowercase ASCII words joined by `-`, at most
+ * 48 characters, then `-2`, `-3`, … until it is free.
+ */
+export function pathSlug(name: string, takenIds: readonly string[] = []): string {
+  let base = "";
+  for (const c of name) {
+    const code = c.codePointAt(0)!;
+    if ((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) {
+      base += c.toLowerCase();
+    } else if (base.length > 0 && !base.endsWith("-")) {
+      base += "-";
+    }
+  }
+  // The backend trims before truncating, so a 48th character may be a dash.
+  const slug = base.replace(/-+$/, "").slice(0, 48) || "path";
+  const taken = new Set(takenIds);
+  if (!taken.has(slug)) return slug;
+  let id = slug;
+  let n = 2;
+  while (taken.has(id)) {
+    id = `${slug}-${n}`;
+    n += 1;
+  }
+  return id;
+}
+
 function key(pathId: string): string {
   return `herbarium.grown:${app.config?.vaultPath ?? ""}:${pathId}`;
 }
