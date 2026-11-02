@@ -17,7 +17,7 @@
     runSearch,
     deleteSavedSearch,
     openInPath,
-    createPath,
+    openPlantPath,
     renamePath,
     deletePath,
     movePageInPath,
@@ -716,8 +716,8 @@
   /* ---------------------------------------------------------- reading paths */
 
   let openPaths = $state<Set<string>>(new Set());
-  /** Inline name field: a new path, or renaming one. */
-  let pathDraft = $state<{ id: string | null; name: string } | null>(null);
+  /** Inline name field while renaming an existing path. */
+  let pathDraft = $state<{ id: string; name: string } | null>(null);
 
   function togglePathOpen(id: string) {
     const next = new Set(openPaths);
@@ -736,12 +736,7 @@
     const name = draft.name.trim();
     pathDraft = null;
     if (!name) return;
-    if (draft.id) {
-      await renamePath(draft.id, name);
-    } else {
-      const path = await createPath(name);
-      if (path) openPaths = new Set([...openPaths, path.id]);
-    }
+    await renamePath(draft.id, name);
   }
 
   function onPathDraftKey(e: KeyboardEvent) {
@@ -755,11 +750,32 @@
     }
   }
 
+  /** Plain P plants a path from the library; the reader keeps its own keys. */
+  function onWindowKey(e: KeyboardEvent) {
+    if (e.defaultPrevented || e.repeat || e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
+    if (e.key.toLowerCase() !== "p") return;
+    if (app.readId || app.importOpen || app.paletteOpen || app.ai || app.plant) return;
+    if (document.querySelector('[aria-modal="true"]')) return;
+    const el = e.target as HTMLElement | null;
+    if (
+      el &&
+      (el instanceof HTMLInputElement ||
+        el instanceof HTMLTextAreaElement ||
+        el instanceof HTMLSelectElement ||
+        el.isContentEditable)
+    )
+      return;
+    e.preventDefault();
+    openPlantPath();
+  }
+
   function pathMenu(e: MouseEvent, id: string, name: string) {
     e.preventDefault();
     menu = {
       ...anchor(e),
       items: [
+        { id: "tend", label: t("paths.plantTend"), icon: "list-checks", onclick: () => openPlantPath({ pathId: id }) },
+        { divider: true },
         { id: "rename", label: t("sidebar.rename"), icon: "file-text", onclick: () => (pathDraft = { id, name }) },
         { id: "delete", label: t("paths.delete"), icon: "trash-2", danger: true, onclick: () => void deletePath(id) },
       ],
@@ -1084,6 +1100,8 @@
   </button>
 {/snippet}
 
+<svelte:window onkeydown={onWindowKey} />
+
 <aside class="sidebar" class:resizing bind:this={asideEl}>
   <div class="head">
     {#if vaults.length > 1}
@@ -1177,12 +1195,9 @@
         <div class="tools">
           <button
             class="tool"
-            title={t("paths.new")}
-            aria-label={t("paths.new")}
-            onclick={() => {
-              if (folded.has("paths")) toggleSection("paths");
-              pathDraft = { id: null, name: "" };
-            }}
+            title={t("paths.plant")}
+            aria-label={t("paths.plant")}
+            onclick={() => openPlantPath()}
           >
             <Icon name="plus" size={13} />
           </button>
@@ -1190,19 +1205,6 @@
       </div>
       {#if !folded.has("paths")}
         <nav class="nav" aria-label={t("sidebar.paths")}>
-          {#if pathDraft && !pathDraft.id}
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              class="path-input"
-              bind:value={pathDraft.name}
-              onkeydown={onPathDraftKey}
-              onblur={() => void commitPathDraft()}
-              placeholder={t("paths.namePlaceholder")}
-              aria-label={t("paths.nameLabel")}
-              maxlength="100"
-              autofocus
-            />
-          {/if}
           {#each app.paths as path (path.id)}
             {#if pathDraft?.id === path.id}
               <!-- svelte-ignore a11y_autofocus -->
@@ -1275,9 +1277,10 @@
               </div>
             {/if}
           {:else}
-            {#if !pathDraft}
-              <p class="path-empty">{t("paths.none")}</p>
-            {/if}
+            <button type="button" class="path-plant-empty" onclick={() => openPlantPath()}>
+              <Icon name="leaf" size={13} />
+              {t("paths.plantFirst")}
+            </button>
           {/each}
         </nav>
       {/if}
@@ -1924,6 +1927,35 @@
     margin: 2px 0 4px 10px;
     font-size: var(--fs-xs);
     color: var(--muted);
+  }
+  .path-plant-empty {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    align-self: flex-start;
+    margin: 2px 0 4px 10px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-xs);
+    background: none;
+    color: var(--text-soft);
+    font-size: var(--fs-xs);
+    line-height: 1.3;
+    text-align: left;
+    cursor: pointer;
+    transition:
+      background var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out),
+      color var(--t-fast) var(--ease-out);
+  }
+  .path-plant-empty:hover {
+    background: var(--raised);
+    border-color: var(--border-strong);
+    color: var(--text);
+  }
+  .path-plant-empty :global(svg) {
+    flex: none;
+    color: var(--c-sage);
   }
 
   /* ------------------------------------------------------ saved searches */

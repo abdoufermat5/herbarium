@@ -137,6 +137,9 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
   { id: "undo", section: "editor", context: "editor", action: "shortcuts.action.undo", keys: [{ mod: "Z" }] },
   { id: "redo", section: "editor", context: "editor", action: "shortcuts.action.redo", keys: [{ mod: "Shift+Z" }, { mod: "Y" }] },
   { id: "find", section: "editor", context: "editor", action: "shortcuts.action.find", keys: [{ mod: "F" }] },
+
+  // Reading paths — Sidebar.svelte window handler (quiet in the reader and in inputs)
+  { id: "plantPath", section: "application", context: "list", action: "shortcuts.action.plantPath", keys: ["P"] },
 ];
 
 /** Render one chord for the current platform and locale. */
