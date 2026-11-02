@@ -4,6 +4,7 @@ import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
 import { i18n, t, LOCALES } from "./i18n.svelte";
 import { navigate } from "./navigation.svelte";
+import { dateFormat } from "./format";
 import { transition } from "./motion";
 import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
@@ -1036,20 +1037,11 @@ export function fmtClock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
-/** One formatter per locale: building one per call cost ~100 ms for the year heatmap. */
-const dayFormats = new Map<string, Intl.DateTimeFormat>();
-
 /** A UTC `YYYY-MM-DD` day as a short locale date, without timezone drift. */
 export function fmtDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
   if (!y || !m || !d) return day;
-  const locale = LOCALES[i18n.locale].bcp47;
-  let format = dayFormats.get(locale);
-  if (!format) {
-    format = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" });
-    dayFormats.set(locale, format);
-  }
-  return format.format(Date.UTC(y, m - 1, d));
+  return dateFormat("utcDay", { month: "short", day: "numeric", timeZone: "UTC" }).format(Date.UTC(y, m - 1, d));
 }
 
 /** "Next: 3 pages tomorrow", from the 14-day forecast (UTC days); a plain note when nothing is scheduled. */

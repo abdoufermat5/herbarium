@@ -28,25 +28,33 @@ export function vaultLabels(paths: string[]): string[] {
   });
 }
 
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+
+/**
+ * A cached `Intl.DateTimeFormat` for the current locale. Building one costs
+ * a fraction of a millisecond, which adds up in lists and heatmaps; `name`
+ * identifies the options.
+ */
+export function dateFormat(name: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+  const locale = LOCALES[i18n.locale].bcp47;
+  const key = `${locale}|${name}`;
+  let format = dateFormats.get(key);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, options);
+    dateFormats.set(key, format);
+  }
+  return format;
+}
+
 export function fmtDate(ms: number | null | undefined): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+  return dateFormat("date", { month: "short", day: "numeric", year: "numeric" }).format(ms);
 }
 
 /** Date with the time of day, for review moments that can be minutes apart. */
 export function fmtDateTime(ms: number | null | undefined): string {
   if (!ms) return "";
-  return new Date(ms).toLocaleString(LOCALES[i18n.locale].bcp47, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  return dateFormat("dateTime", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(ms);
 }
 
 export function timeAgo(ms: number | null | undefined): string {

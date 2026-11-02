@@ -12,7 +12,7 @@
     toast,
     openSettings,
   } from "../lib/state.svelte";
-  import { fmtDate, plural, timeAgo } from "../lib/format";
+  import { dateFormat, fmtDate, plural, timeAgo } from "../lib/format";
   import { i18n, t, LOCALES, type MessageKey } from "../lib/i18n.svelte";
   import type { PageMeta, ReviewStats, TodaySummary } from "../lib/types";
   import { vitality, type VitalityLevel } from "../lib/vitality";
@@ -277,10 +277,7 @@
   }
 
   function weekday(day: string): string {
-    return new Intl.DateTimeFormat(LOCALES[i18n.locale].bcp47, {
-      weekday: "narrow",
-      timeZone: "UTC",
-    }).format(new Date(`${day}T00:00:00Z`));
+    return dateFormat("utcWeekday", { weekday: "narrow", timeZone: "UTC" }).format(new Date(`${day}T00:00:00Z`));
   }
 
   /* ------------------------------------------------------------------ ring */
