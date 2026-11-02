@@ -510,7 +510,12 @@
   });
 </script>
 
-<svelte:window onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerUp} />
+<svelte:window
+  onpointermove={onPointerMove}
+  onpointerup={onPointerUp}
+  onpointercancel={onPointerUp}
+  onblur={() => (drag = null)}
+/>
 
 <div
   class="overlay"
@@ -601,6 +606,7 @@
                   class:chosen={order !== undefined}
                   class:active={i === active}
                   aria-pressed={order !== undefined}
+                  tabindex={i === active || (active < 0 && i === 0) ? 0 : -1}
                   bind:this={rowEls[i]}
                   onclick={() => {
                     active = i;
@@ -962,6 +968,7 @@
   }
   .order {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     line-height: 1;
   }
@@ -973,6 +980,7 @@
     flex: none;
     max-width: 34%;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -1017,8 +1025,11 @@
     border-radius: 0;
     background: transparent;
     font-family: var(--font-display);
-    font-size: var(--fs-2xl);
-    letter-spacing: -0.02em;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-2xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
     color: var(--text);
     outline: none;
     transition: border-color var(--t-fast) var(--ease-out);
@@ -1137,6 +1148,7 @@
     flex: none;
     min-width: 14px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: right;
@@ -1207,12 +1219,18 @@
   .tree-caption {
     margin: 12px 0 0;
     font-family: var(--font-display);
-    font-size: var(--fs-base);
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-base) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
     color: var(--text-soft);
   }
   .tree-meta {
     margin: 4px 0 0;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
