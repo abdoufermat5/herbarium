@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onDestroy, onMount, untrack } from "svelte";
-  import { app, goView, openInPath } from "../lib/state.svelte";
+  import { app, goView, openInPath, openPlantPath } from "../lib/state.svelte";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
   import { treeStage } from "../lib/tree";
@@ -30,15 +30,22 @@
     }),
   );
   const nextTitle = $derived(rows.find((r) => r.pageId === growth.next)?.title ?? null);
+  const firstTitle = $derived(rows[0]?.title ?? rows[0]?.pageId ?? null);
   const stage = $derived(t(`tree.stage.${treeStage(growth.read, growth.total)}` as MessageKey));
 
   // The maturity moment plays once per path: decided when the view opens.
   const playMoment = untrack(() => !!id && pathGrowth(id).mature && !wasCelebrated(id));
   let momentDone = $state(false);
+  let planted = $state(false);
   let stageEl = $state<HTMLElement | null>(null);
   let timer: ReturnType<typeof setTimeout> | undefined;
 
   onMount(() => {
+    // Planting is a discrete act, so it drops once and never celebrates.
+    if (id && app.justPlanted === id) {
+      planted = true;
+      app.justPlanted = null;
+    }
     if (!playMoment || !id) return;
     const pathId = id;
     timer = setTimeout(() => {
@@ -110,30 +117,44 @@
             <span><span class="mono">{growth.read} / {growth.total}</span> {t("paths.view.pagesRead")}</span>
           {/if}
         </p>
-        {#if growth.mature || growth.next}
-          <div class="actions">
+        {#if planted}
+          <div class="planted" role="status">
+            <p class="planted-title display">{t("paths.view.planted")}</p>
+            {#if firstTitle}
+              <p class="planted-body">{t("paths.view.plantedBody", { title: firstTitle })}</p>
+            {/if}
+          </div>
+        {/if}
+        <div class="actions">
+          {#if growth.mature || growth.next}
             <button class="btn btn-primary" onclick={primary}>
               {growth.mature ? t("paths.view.again") : t("paths.view.continue", { title: nextTitle ?? "" })}
             </button>
-          </div>
-        {/if}
+          {/if}
+          <button class="btn" onclick={() => openPlantPath({ pathId: path.id })}>
+            <Icon name="list-checks" size={14} />
+            {t("paths.view.addPages")}
+          </button>
+        </div>
       </header>
 
       <div class="hero">
         <div class="stage" bind:this={stageEl} use:reveal>
           <div class="tree">
-            <PathTree
-              seed={path.id}
-              read={growth.read}
-              total={growth.total}
-              size={360}
-              detail="full"
-              animate
-              growOnMount={playMoment}
-              {highlight}
-              onlimbclick={openIndex}
-              label={path.name}
-            />
+            <span class="tree-seed" class:drop={planted}>
+              <PathTree
+                seed={path.id}
+                read={growth.read}
+                total={growth.total}
+                size={360}
+                detail="full"
+                animate
+                growOnMount={playMoment}
+                {highlight}
+                onlimbclick={openIndex}
+                label={path.name}
+              />
+            </span>
           </div>
           {#if playMoment && momentDone}
             <div class="grown" role="status">
@@ -143,6 +164,9 @@
           {/if}
           {#if rows.length === 0}
             <p class="hint">{t("paths.view.emptyHint")}</p>
+            <button class="btn btn-primary empty-pick" onclick={() => openPlantPath({ pathId: path.id })}>
+              {t("paths.view.pick")}
+            </button>
           {/if}
         </div>
 
@@ -225,6 +249,29 @@
   }
   .actions {
     margin-top: 18px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .planted {
+    margin-top: 14px;
+    animation: planted-in var(--t-enter) var(--ease-out) both;
+  }
+  .planted-title {
+    margin: 0;
+    font-size: var(--fs-2xl);
+    color: var(--c-sage);
+  }
+  .planted-body {
+    margin: 4px 0 0;
+    font-size: var(--fs-sm);
+    color: var(--text-soft);
+  }
+  @keyframes planted-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
   }
 
   .hero {
@@ -256,6 +303,26 @@
   .tree {
     width: min(100%, 360px);
     color: var(--text-soft);
+  }
+  .tree-seed {
+    display: block;
+    transform-origin: 50% 92%;
+  }
+  .tree-seed.drop {
+    animation: seed-drop 420ms var(--ease-spring) both;
+  }
+  @keyframes seed-drop {
+    from {
+      opacity: 0;
+      transform: translateY(-14px) scale(0.9);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+  .empty-pick {
+    margin-top: 10px;
   }
   .grown {
     position: absolute;
@@ -417,7 +484,9 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .grown {
+    .grown,
+    .planted,
+    .tree-seed.drop {
       animation: none;
     }
   }
