@@ -196,7 +196,7 @@
   --display-tracking: 0;
   --display-weight: 500;
   --display-leading: 1.1;
-  --display-size-adjust: 1.12;
+  --display-size-adjust: 1.2;
 }
 
 :root[data-type="casual"],

@@ -245,6 +245,7 @@
   }
   .stage-line .mono {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     color: var(--text-soft);
   }
   .actions {
@@ -336,7 +337,12 @@
   .grown-title {
     margin: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-2xl);
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-2xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
     color: var(--c-sage);
   }
   .grown-body {
@@ -444,6 +450,7 @@
     flex: none;
     min-width: 14px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: right;
