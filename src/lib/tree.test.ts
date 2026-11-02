@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { growTree, isGrown, treeProgress, treeStage, type TreeDetail } from "./tree";
 
 const TOTALS = [1, 2, 3, 7, 40, 500];
@@ -9,10 +9,19 @@ const persistent = (seed: string, total: number, read: number, detail: TreeDetai
 };
 
 describe("growTree", () => {
-  it("is deterministic per seed and differs between seeds", () => {
-    const a = growTree("path-a", 7, "full");
-    expect(JSON.parse(JSON.stringify(growTree("path-a", 7, "full")))).toEqual(JSON.parse(JSON.stringify(a)));
-    const shapes = new Set(["path-a", "path-b", "path-c", "path-d", "path-e"].map((s) => growTree(s, 7).elements.map((e) => e.d).join("|")));
+  it("is deterministic per seed and differs between seeds", async () => {
+    // Dynamic import on purpose: resetModules must re-evaluate the module's caches.
+    const json = async (seed: string) => {
+      vi.resetModules();
+      const fresh = await import("./tree");
+      return JSON.stringify(fresh.growTree(seed, 7, "full"));
+    };
+    expect(await json("path-a")).toBe(await json("path-a"));
+    const shapes = new Set<string>();
+    for (const seed of ["path-a", "path-b", "path-c", "path-d", "path-e"]) {
+      const model = JSON.parse(await json(seed)) as { elements: { d: string }[] };
+      shapes.add(model.elements.map((e) => e.d).join("|"));
+    }
     expect(shapes.size).toBe(5);
   });
 
@@ -58,13 +67,20 @@ describe("growTree", () => {
     for (const e of m.elements) expect(isGrown(e, 1)).toBe(e.hideAt === undefined);
   });
 
-  it("never leaves a visible branch bare at 20% progress", () => {
+  it("never shows a bare deep branch or a detached leaf", () => {
     for (const seed of ["life", "Networking basics", "Rust from the ground up", "x-17"]) {
       for (const total of [3, 5, 8, 12, 40]) {
         const m = growTree(seed, total, "full");
-        const vis = m.elements.filter((e) => isGrown(e, 0.2));
-        const limbsWithLeaves = new Set(vis.filter((e) => e.kind === "leaf").map((e) => e.limb));
-        for (const e of vis) if (e.kind === "branch" && e.depth >= 2) expect(limbsWithLeaves.has(e.limb)).toBe(true);
+        for (let read = 0; read <= total; read++) {
+          const p = treeProgress(read, total);
+          const vis = m.elements.filter((e) => isGrown(e, p));
+          const limbsWithLeaves = new Set(vis.filter((e) => e.kind === "leaf").map((e) => e.limb));
+          const limbsWithWood = new Set(vis.filter((e) => e.kind === "branch" && e.limb >= 0).map((e) => e.limb));
+          for (const e of vis) {
+            if (e.kind === "branch" && e.depth >= 2) expect(limbsWithLeaves.has(e.limb)).toBe(true);
+            if (e.kind === "leaf" && e.limb >= 0) expect(limbsWithWood.has(e.limb)).toBe(true);
+          }
+        }
       }
     }
   });
@@ -83,11 +99,17 @@ describe("growTree", () => {
   });
 
   it("generates within the time budget", () => {
-    let t0 = performance.now();
-    growTree("timing-cold", 500, "full");
-    expect(performance.now() - t0).toBeLessThan(15);
-    t0 = performance.now();
-    growTree("timing-cold", 500, "full");
+    growTree("timing-warm", 500, "full"); // JIT/module warm-up is not the generator's cost
+    const times = ["timing-1", "timing-2", "timing-3", "timing-4", "timing-5"]
+      .map((seed) => {
+        const t0 = performance.now();
+        growTree(seed, 500, "full");
+        return performance.now() - t0;
+      })
+      .sort((a, b) => a - b);
+    expect(times[2]).toBeLessThan(15);
+    const t0 = performance.now();
+    growTree("timing-1", 500, "full");
     expect(performance.now() - t0).toBeLessThan(0.2);
   });
 });
