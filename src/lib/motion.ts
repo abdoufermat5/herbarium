@@ -1,6 +1,5 @@
 // Motion helpers shared by the shell. Everything here degrades to "do the
-// thing instantly": no view transitions in the webview, or reduced motion,
-// means the update simply runs.
+// thing instantly": reduced motion means the update simply runs.
 
 import { tick } from "svelte";
 
@@ -9,56 +8,24 @@ export function reducedMotion(): boolean {
   return typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
-interface ViewTransitionHandle {
-  ready: Promise<void>;
-  finished: Promise<void>;
-  updateCallbackDone: Promise<void>;
-}
-
-type ViewTransitionDocument = Document & {
-  startViewTransition?: (update: () => Promise<void> | void) => ViewTransitionHandle;
-};
-
-// Named regions (sidebar, titlebar, main) only exist while a transition runs:
-// an element with a `view-transition-name` becomes a containing block for its
-// fixed-position descendants, which would break popovers the rest of the time.
-// app.css keys the names off this class.
-const ACTIVE_CLASS = "vt-active";
-let running = 0;
-
 /**
- * Run a state update inside a view transition so the content area crossfades
- * and rises a few pixels, while the sidebar and titlebar stay put. The update
- * runs exactly once either way, and its result (or rejection) is returned, so
- * callers can treat this as a plain `await update()`.
+ * Run a route change, then let the content area rise into place. Enter-only
+ * on purpose: a view transition rasterizes the old and new views to crossfade
+ * them, which cost about 100 ms per navigation; this is one compositor-only
+ * animation (opacity and transform) on the already-rendered `main`. The
+ * sidebar and titlebar are outside it and never move.
  */
 export async function transition(update: () => void | Promise<void>): Promise<void> {
-  const doc = document as ViewTransitionDocument;
-  if (!doc.startViewTransition || reducedMotion()) {
-    await update();
-    return;
-  }
-  const root = document.documentElement;
-  running++;
-  root.classList.add(ACTIVE_CLASS);
-  const done = () => {
-    if (--running === 0) root.classList.remove(ACTIVE_CLASS);
-  };
-  let vt: ViewTransitionHandle;
-  try {
-    vt = doc.startViewTransition.call(doc, async () => {
-      await update();
-      // Let Svelte flush the DOM before the browser captures the "new" state.
-      await tick();
-    });
-  } catch (e) {
-    done();
-    throw e;
-  }
-  // A newer transition skips this one: `ready` then rejects, which is expected.
-  vt.ready.catch(() => undefined);
-  vt.finished.then(done, done);
-  await vt.updateCallbackDone;
+  await update();
+  if (reducedMotion()) return;
+  await tick();
+  document.querySelector<HTMLElement>("main.main")?.animate(
+    [
+      { opacity: 0, transform: "translateY(6px)" },
+      { opacity: 1, transform: "none" },
+    ],
+    { duration: 180, easing: "cubic-bezier(0.16, 1, 0.3, 1)" },
+  );
 }
 
 /** Call `fn` at most once per animation frame with the latest arguments. */

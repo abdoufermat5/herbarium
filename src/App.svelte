@@ -410,7 +410,7 @@
 {:else}
   <div class="shell" class:collapsed={!app.sidebarOpen || (app.focusMode && !!app.readId)}>
     {#if app.sidebarOpen && !(app.focusMode && app.readId)}<Sidebar />{/if}
-    <main class="main" data-vt="main">
+    <main class="main">
       {#if app.readId}
         {#key app.readId}
           <ReadView id={app.readId} />
