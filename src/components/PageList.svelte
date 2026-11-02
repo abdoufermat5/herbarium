@@ -26,6 +26,7 @@
     duplicatePage,
     errorMessage,
     saveSearch,
+    openPlantPath,
     type SortKey,
   } from "../lib/state.svelte";
   import { api } from "../lib/api";
@@ -321,6 +322,12 @@
   function clearSelection() {
     selected = new Set();
     anchorId = null;
+  }
+
+  /** Plant the picked pages in the order they appear in the current list. */
+  function plantSelected() {
+    openPlantPath({ pages: pages.filter((p) => selected.has(p.id)).map((p) => p.id) });
+    clearSelection();
   }
 
   /* ----------------------------------------------------------- page actions */
@@ -931,6 +938,10 @@
         </label>
         <span class="bulk-count">{t("list.selected", { count: selectedIds.length })}</span>
         <div class="bulk-actions">
+          <button type="button" class="btn btn-sm" onclick={plantSelected}>
+            <Icon name="leaf" size={13} />
+            {t("list.bulkPlant")}
+          </button>
           <button type="button" class="btn btn-sm" onclick={() => void movePages(selectedIds)}>
             <Icon name="folder" size={13} />
             {t("list.move")}

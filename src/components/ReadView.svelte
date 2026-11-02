@@ -21,6 +21,7 @@
     goView,
     openPage,
     openInPath,
+    openPlantPath,
     setPageInPath,
     refreshPathProgress,
     openPathView,
@@ -2004,6 +2005,15 @@
                   </li>
                 {/each}
               </ul>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm plant-new"
+                disabled={pageGone}
+                onclick={() => openPlantPath({ pages: [page.meta.id] })}
+              >
+                <Icon name="plus" size={12} />
+                {t("paths.plantNew")}
+              </button>
             </section>
           {/if}
 
@@ -3004,6 +3014,11 @@
     gap: 8px;
     min-width: 0;
     cursor: pointer;
+  }
+
+  .plant-new {
+    align-self: flex-start;
+    margin-top: -4px;
   }
 
   .health {
