@@ -94,6 +94,7 @@
     min-height: 0;
     position: relative;
     overflow: hidden;
+    font-variation-settings: var(--font-mono-settings);
   }
   /* The merge view scrolls as a whole (both sides inside it, kept aligned),
      so it needs a box with a definite height. A percentage of the flex item

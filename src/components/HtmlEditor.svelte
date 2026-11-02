@@ -571,6 +571,7 @@
     background: var(--surface);
     color: var(--text);
     font-family: var(--ed-font, var(--mono));
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--ed-size, 12.5px);
     line-height: var(--ed-lh, 1.6);
     tab-size: var(--ed-tab, 2);

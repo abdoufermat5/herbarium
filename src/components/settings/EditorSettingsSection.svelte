@@ -202,6 +202,7 @@
     border-radius: var(--radius-sm);
     color: var(--text);
     overflow-wrap: anywhere;
+    font-variation-settings: var(--font-mono-settings);
   }
 
   @container settings (max-width: 560px) {
