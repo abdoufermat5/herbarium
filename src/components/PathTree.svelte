@@ -94,9 +94,11 @@
   const STAGGER_MS = 90; // between limb groups
   const DRAW_MAX = 60; // fresh branches still worth their own draw-in
   // Animating an SVG group makes WebKit redraw every path inside it each frame,
-  // so only a step of up to a page or two of the deepest model (about 90 shapes)
-  // gets per-limb motion; a bigger one moves as one svg.
-  const STEP_MAX = 90; // fresh shapes still animated limb by limb
+  // so only a step of up to about two pages of the deepest model gets per-limb
+  // motion; a bigger one moves as one svg. A page-sized step of a short path
+  // stays limb by limb; only a first visit or a mature entrance blooms the
+  // whole svg.
+  const STEP_MAX = 160; // fresh shapes still animated limb by limb
 
   const view = $derived.by(() => {
     const m = model;
@@ -165,14 +167,50 @@
   });
 
   const dim = (page: number) => highlight != null && page !== highlight;
-  const hit = (e: Event) => {
-    if (!onlimbclick) return;
-    const target = (e.target as Element).closest("[data-p]");
-    const page = target ? Number(target.getAttribute("data-p")) : -1;
-    if (page >= 0) onlimbclick(page);
+  let svgEl = $state<SVGSVGElement | null>(null);
+
+  /** The grown limb nearest to a screen point, for clicks that miss every shape. */
+  const nearest = (clientX: number, clientY: number): number => {
+    const svg = svgEl;
+    if (!svg) return -1;
+    let best = -1;
+    let bestD = 14;
+    for (const path of svg.querySelectorAll<SVGPathElement>(".hits path[data-p]")) {
+      const ctm = path.getScreenCTM();
+      if (!ctm) continue;
+      const page = Number(path.getAttribute("data-p"));
+      const len = path.getTotalLength();
+      for (let k = 0; k <= 12; k++) {
+        const p = path.getPointAtLength((len * k) / 12).matrixTransform(ctm);
+        const d = Math.hypot(p.x - clientX, p.y - clientY);
+        if (d < bestD) {
+          bestD = d;
+          best = page;
+        }
+      }
+    }
+    return best;
   };
+
+  const hit = (e: MouseEvent) => {
+    if (!onlimbclick) return;
+    const target = (e.target as Element | null)?.closest?.("[data-p]");
+    const raw = target?.getAttribute("data-p");
+    // The trunk is a growth marker, not a limb; a seed or base shape is not one either.
+    const trunk = !!target?.classList.contains("branch") && target.classList.contains("d0");
+    const page = raw != null ? Number(raw) : -1;
+    if (page >= 0 && !trunk) {
+      onlimbclick(page);
+      return;
+    }
+    if (page === -1) return;
+    const near = nearest(e.clientX, e.clientY);
+    if (near >= 0) onlimbclick(near);
+  };
+  // The wide strokes are geometry proxies only: pointer-events stays off, so a
+  // click always resolves the shape under the pointer first.
   const hits = $derived(
-    clickable ? model.elements.filter((el) => el.layer === LAYER.branch && el.page >= 0 && isGrown(el, progress)) : [],
+    clickable ? model.elements.filter((el) => el.layer === LAYER.branch && el.depth === 1 && el.page >= 0 && isGrown(el, progress)) : [],
   );
 </script>
 
@@ -205,6 +243,7 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <svg
+  bind:this={svgEl}
   class="tree {detail}"
   class:mature
   class:animated={moving}
@@ -272,7 +311,7 @@
   }
   /* aerial perspective: finer wood recedes; inline stroke-width is untouched */
   .branch.d0 {
-    stroke-opacity: 0.98;
+    stroke-opacity: 1;
   }
   .branch.d1 {
     stroke-opacity: 0.94;
@@ -282,9 +321,6 @@
   }
   .branch.d3 {
     stroke-opacity: 0.78;
-  }
-  .branch.d4 {
-    stroke-opacity: 0.68;
   }
   .branch.lit {
     stroke: var(--text);
@@ -349,9 +385,6 @@
   .leaf.d3:not(.dim) {
     opacity: 0.88;
   }
-  .leaf.d4:not(.dim) {
-    opacity: 0.8;
-  }
   .mini .leaf {
     stroke-width: 1;
   }
@@ -368,17 +401,17 @@
     stroke: none;
   }
 
-  /* hit strokes: invisible, wide */
+  /* limb geometry proxies: never the click target, only distance samples */
   .hit {
     fill: none;
     stroke: transparent;
     stroke-width: 7;
     stroke-linecap: round;
-    pointer-events: stroke;
-    cursor: pointer;
+    pointer-events: none;
   }
   .clickable .leaf,
-  .clickable .petals {
+  .clickable .petals,
+  .clickable .branch:not(.d0) {
     cursor: pointer;
   }
 
