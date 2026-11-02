@@ -9,6 +9,7 @@
   import { confirmAction } from "../lib/confirm.svelte";
   import { t, i18n, setLocale, LOCALES } from "../lib/i18n.svelte";
   import { prefs, setPref } from "../lib/prefs.svelte";
+  import { TEXT_SCALES, TYPE_STYLES } from "../lib/typography";
   import type { UpdateChannel, UpdateInfo } from "../lib/types";
   import Icon from "../lib/Icon.svelte";
   import Select, { type SelectOption } from "./Select.svelte";
@@ -85,6 +86,63 @@
     { value: "light", label: t("prefs.themeOptionLight"), icon: "sun" },
     { value: "dark", label: t("prefs.themeOptionDark"), icon: "moon" },
   ]);
+
+  /* --------------------------------------------------------------- type style */
+
+  const sizeOptions = $derived([
+    { value: 0.92, label: t("settings.typeSizeSmall") },
+    { value: 1, label: t("settings.typeSizeDefault") },
+    { value: 1.08, label: t("settings.typeSizeLarge") },
+    { value: 1.16, label: t("settings.typeSizeLarger") },
+  ]);
+
+  let specimens: HTMLDivElement | undefined = $state();
+
+  /** Arrow keys walk the specimen radios and apply each one, as a radio group does. */
+  function onSpecimenKey(e: KeyboardEvent) {
+    const len = TYPE_STYLES.length;
+    const i = TYPE_STYLES.findIndex((s) => s.id === prefs.typeStyle);
+    const next =
+      e.key === "Home"
+        ? TYPE_STYLES[0]
+        : e.key === "End"
+          ? TYPE_STYLES[len - 1]
+          : e.key === "ArrowRight" || e.key === "ArrowDown"
+            ? TYPE_STYLES[(i + 1) % len]
+            : e.key === "ArrowLeft" || e.key === "ArrowUp"
+              ? TYPE_STYLES[(i - 1 + len) % len]
+              : null;
+    if (!next) return;
+    e.preventDefault();
+    setPref("typeStyle", next.id);
+    requestAnimationFrame(() =>
+      specimens?.querySelector<HTMLButtonElement>(`[data-style="${next.id}"]`)?.focus(),
+    );
+  }
+
+  function onSizeKey(e: KeyboardEvent) {
+    const len = TEXT_SCALES.length;
+    const i = TEXT_SCALES.indexOf(prefs.textScale as (typeof TEXT_SCALES)[number]);
+    const next =
+      e.key === "Home"
+        ? TEXT_SCALES[0]
+        : e.key === "End"
+          ? TEXT_SCALES[len - 1]
+          : e.key === "ArrowRight" || e.key === "ArrowDown"
+            ? TEXT_SCALES[(i + 1) % len]
+            : e.key === "ArrowLeft" || e.key === "ArrowUp"
+              ? TEXT_SCALES[(i - 1 + len) % len]
+              : null;
+    if (next === null) return;
+    e.preventDefault();
+    setPref("textScale", next);
+    document.querySelector<HTMLButtonElement>(`[data-scale="${next}"]`)?.focus();
+  }
+
+  function resetType() {
+    if (prefs.typeStyle !== "herbarium") setPref("typeStyle", "herbarium");
+    if (prefs.textScale !== 1) setPref("textScale", 1);
+  }
 
   /* ------------------------------------------------------ desktop integration */
 
@@ -251,6 +309,62 @@
           ]}
           onchange={setLocale}
         />
+      </SettingRow>
+      <SettingRow stacked title={t("settings.typeStyle")} hint={t("settings.typeStyleHint")}>
+        <div
+          class="specimens"
+          role="radiogroup"
+          aria-label={t("settings.typeStyle")}
+          onkeydown={onSpecimenKey}
+          bind:this={specimens}
+        >
+          {#each TYPE_STYLES as style (style.id)}
+            <button
+              type="button"
+              role="radio"
+              aria-checked={prefs.typeStyle === style.id}
+              tabindex={prefs.typeStyle === style.id ? 0 : -1}
+              class="specimen"
+              data-type={style.id}
+              data-style={style.id}
+              onclick={() => setPref("typeStyle", style.id)}
+            >
+              <span class="specimen-aa" aria-hidden="true">Aa</span>
+              <span class="specimen-name">{t(style.nameKey)}</span>
+              <span class="specimen-sample" aria-hidden="true">{t("settings.typeSample")}</span>
+              <span class="specimen-mono" aria-hidden="true">{t("settings.typeMonoSample")}</span>
+              <span class="specimen-blurb">{t(style.blurbKey)}</span>
+              {#if prefs.typeStyle === style.id}
+                <span class="specimen-check" aria-hidden="true"><Icon name="check" size={12} /></span>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </SettingRow>
+      <SettingRow stacked title={t("settings.textSize")} hint={t("settings.textSizeHint")}>
+        <div class="size-control">
+          <div class="seg" role="radiogroup" aria-label={t("settings.textSize")} onkeydown={onSizeKey}>
+            {#each sizeOptions as option (option.value)}
+              <button
+                type="button"
+                role="radio"
+                aria-checked={prefs.textScale === option.value}
+                tabindex={prefs.textScale === option.value ? 0 : -1}
+                class="seg-btn size-btn"
+                class:active={prefs.textScale === option.value}
+                data-scale={option.value}
+                onclick={() => setPref("textScale", option.value)}
+              >
+                {option.label}
+              </button>
+            {/each}
+          </div>
+          {#if prefs.typeStyle !== "herbarium" || prefs.textScale !== 1}
+            <button type="button" class="btn btn-ghost btn-sm" onclick={resetType}>
+              {t("settings.typeReset")}
+            </button>
+          {/if}
+        </div>
       </SettingRow>
     </SettingsSection>
 
@@ -593,5 +707,114 @@
   .update-err {
     color: var(--danger);
     overflow-wrap: anywhere;
+  }
+
+  /* Type style specimens. Each card carries its own data-type, so the
+     [data-type] blocks in app.css give it that style's fonts while the rest
+     of the app keeps the active one. */
+  .specimens {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    width: 100%;
+  }
+  @container settings (min-width: 700px) {
+    .specimens {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  .specimen {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1px;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-family: var(--font);
+    font-variation-settings: var(--font-ui-settings);
+    text-align: left;
+    cursor: pointer;
+    transition:
+      transform var(--t-fast) var(--ease-out),
+      border-color var(--t-fast) var(--ease-out),
+      background var(--t-fast) var(--ease-out);
+  }
+  .specimen:hover {
+    transform: translateY(-2px);
+    border-color: var(--border-hover);
+  }
+  .specimen[aria-checked="true"] {
+    /* 1.5px, without the 1px of layout shift a thicker border would cause */
+    border-width: 1.5px;
+    border-color: var(--text);
+    padding: calc(12px - 0.5px) calc(14px - 0.5px);
+  }
+  .specimen:focus-visible {
+    outline: 2px solid var(--leaf);
+    outline-offset: 2px;
+  }
+  .specimen-aa {
+    font-family: var(--font-display);
+    font-variation-settings: var(--font-display-settings);
+    font-weight: var(--display-weight);
+    font-size: calc(var(--fs-3xl) * var(--display-size-adjust));
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
+    color: var(--text);
+  }
+  .specimen-name {
+    margin-top: 2px;
+    font-size: var(--fs-sm);
+    font-weight: 600;
+  }
+  .specimen-sample {
+    max-width: 100%;
+    font-family: var(--font);
+    font-size: var(--fs-sm);
+    line-height: 1.35;
+    color: var(--text-soft);
+    overflow-wrap: anywhere;
+  }
+  .specimen-mono {
+    font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
+    font-size: var(--fs-2xs);
+    color: var(--muted);
+  }
+  .specimen-blurb {
+    margin-top: 3px;
+    font-size: var(--fs-xs);
+    line-height: 1.4;
+    color: var(--muted);
+    overflow-wrap: anywhere;
+  }
+  .specimen-check {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 9999px;
+    background: var(--text);
+    color: var(--surface);
+  }
+
+  .size-control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .size-btn {
+    width: auto;
+    padding: 0 9px;
+    font-size: var(--fs-xs);
   }
 </style>
