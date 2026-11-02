@@ -47,6 +47,7 @@
   import type { PageMeta } from "../lib/types";
   import ContextMenu from "./ContextMenu.svelte";
   import DropdownMenu, { type DropdownMenuItem } from "./DropdownMenu.svelte";
+  import PathTree from "./PathTree.svelte";
 
   interface Branch {
     name: string;
@@ -1216,9 +1217,13 @@
               />
             {:else}
               {@const g = pathGrowth(path.id)}
+              {@const pathTitle = g.mature
+                ? `${t("tree.stage.mature")} · ${path.name}`
+                : path.description || path.name}
               <div
                 class="nav-item path-head"
                 class:active={app.view === "path" && app.pathView === path.id && !app.readId}
+                title={pathTitle}
                 role="presentation"
                 oncontextmenu={(e) => pathMenu(e, path.id, path.name)}
               >
@@ -1232,10 +1237,12 @@
                 </button>
                 <button
                   class="path-name"
-                  title={path.description || path.name}
+                  title={pathTitle}
                   onclick={() => void openPathView(path.id)}
                 >
-                  <!--PATHTREE-->
+                  <span class="path-tree">
+                    <PathTree seed={path.id} read={g.read} total={g.total} size={16} detail="mini" animate />
+                  </span>
                   <span class="nav-label ellipsis">{path.name}</span>
                   <span class="count" class:grown={g.mature} title={g.mature ? t("paths.view.fullyGrown") : undefined}>
                     {g.read}/{g.total}
@@ -1827,6 +1834,13 @@
     padding: 0;
     gap: 0;
     cursor: default;
+  }
+  .path-tree {
+    display: inline-flex;
+    flex: none;
+  }
+  .path-head.active .path-chev {
+    color: inherit;
   }
   .path-chev {
     flex: none;
