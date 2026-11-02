@@ -426,7 +426,9 @@
       {:else if app.view === "trash"}
         <TrashView />
       {:else if app.view === "path"}
-        <PathView />
+        {#key app.pathView}
+          <PathView />
+        {/key}
       {:else}
         <PageList />
       {/if}
