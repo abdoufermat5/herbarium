@@ -260,7 +260,13 @@
   }
   .planted-title {
     margin: 0;
-    font-size: var(--fs-2xl);
+    font-family: var(--font-display);
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-2xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
     color: var(--c-sage);
   }
   .planted-body {
