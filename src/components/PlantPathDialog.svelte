@@ -509,7 +509,11 @@
       window.removeEventListener("keydown", onWindowKey, true);
       clearTimeout(seedTimer);
       clearTimeout(leaveTimer);
-      if (prevFocus?.isConnected) prevFocus.focus();
+      const target = prevFocus;
+      // The shell is inert until the app re-renders without this dialog.
+      void tick().then(() => {
+        if (target?.isConnected && !document.querySelector('[aria-modal="true"]')) target.focus();
+      });
     };
   });
 </script>
