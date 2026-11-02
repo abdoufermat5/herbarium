@@ -237,6 +237,8 @@ function finish(drafts: Draft[], baseX: number, limbs: { x: number; y: number }[
       threshold,
       limb: d.limb ?? -1,
       hideAt: d.hideAt === EPS ? sproutHide : d.hideAt,
+      ref: d.ref,
+      part: d.part,
     });
   for (const d of base) push(d, 0);
   grow.forEach((d) => push(d, d.mature ? 1 : ++r / (K + 1)));
