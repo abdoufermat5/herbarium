@@ -287,6 +287,8 @@ export const en = {
   "palette.closeKey": "close",
   "palette.newPage": "New page",
   "palette.newFolder": "New folder",
+  "palette.plantPath": "Plant a reading path…",
+  "palette.plantPathFromPage": "New reading path from this page",
   "palette.rescan": "Rescan vault",
   "palette.startReview": "Start review session",
   "palette.goTrash": "Open Trash",

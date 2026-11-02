@@ -286,6 +286,8 @@ export const fr: Record<MessageKey, string> = {
   "palette.closeKey": "fermer",
   "palette.newPage": "Nouvelle page",
   "palette.newFolder": "Nouveau dossier",
+  "palette.plantPath": "Planter un parcours de lecture…",
+  "palette.plantPathFromPage": "Nouveau parcours depuis cette page",
   "palette.rescan": "Réanalyser le coffre",
   "palette.startReview": "Démarrer une session de révision",
   "palette.goTrash": "Ouvrir la corbeille",

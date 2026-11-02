@@ -12,6 +12,7 @@
     rescanVault,
     openPage,
     openPathView,
+    openPlantPath,
     goView,
     goAll,
     showFolder,
@@ -208,6 +209,14 @@
         run: () => requestCreate("folder", app.folderFilter ?? ""),
       },
       {
+        key: "plant-path",
+        group,
+        label: t("palette.plantPath"),
+        kbd: "P",
+        icon: "leaf",
+        run: () => openPlantPath(),
+      },
+      {
         key: "import",
         group,
         label: t("palette.import"),
@@ -348,6 +357,13 @@
     if (page) {
       const pg = t("palette.current");
       list.push(
+        {
+          key: "page-plant-path",
+          group: pg,
+          label: t("palette.plantPathFromPage"),
+          icon: "leaf",
+          run: () => openPlantPath({ pages: [page.id] }),
+        },
         {
           key: "page-move",
           group: pg,
