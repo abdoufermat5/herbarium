@@ -253,12 +253,12 @@
   }
 
   h1 {
-    font-size: var(--fs-4xl);
-    letter-spacing: -0.03em;
+    font-size: calc(var(--fs-4xl) * var(--display-size-adjust));
+    letter-spacing: var(--display-tracking);
   }
   .welcome h1 {
-    font-size: var(--fs-5xl);
-    letter-spacing: -0.035em;
+    font-size: calc(var(--fs-5xl) * var(--display-size-adjust));
+    letter-spacing: var(--display-tracking);
   }
 
   .lede {
@@ -305,10 +305,12 @@
 
   h2 {
     font-family: var(--font-display);
-    font-size: var(--fs-xl);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
   }
 
   .option p {
@@ -347,6 +349,7 @@
     align-items: center;
     gap: 8px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
     color: var(--muted);
     margin-top: 6px;

@@ -309,7 +309,8 @@
     background: var(--raised);
     color: var(--text-soft);
     font-family: var(--mono);
-    font-size: 11px;
+    font-variation-settings: var(--font-mono-settings);
+    font-size: var(--fs-2xs);
     line-height: 1;
   }
 

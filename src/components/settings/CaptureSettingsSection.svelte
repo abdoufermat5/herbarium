@@ -93,6 +93,7 @@
   .shortcut input {
     width: 220px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
   }
 </style>

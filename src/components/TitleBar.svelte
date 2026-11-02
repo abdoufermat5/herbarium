@@ -131,6 +131,7 @@
     background: var(--sunken);
     color: var(--muted);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     line-height: 1.4;
   }

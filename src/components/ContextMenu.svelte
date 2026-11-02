@@ -184,6 +184,7 @@
     margin-left: auto;
     padding-left: 14px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }

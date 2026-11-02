@@ -1509,8 +1509,10 @@
   }
   .who strong {
     font-family: var(--font-display);
-    font-size: 18px;
-    font-weight: 500;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-lg) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
     line-height: 1.25;
     overflow-wrap: anywhere;
   }
@@ -1626,6 +1628,7 @@
   .vkey .count {
     color: var(--muted);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
   }
   @keyframes vkey-in {

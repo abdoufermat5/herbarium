@@ -226,6 +226,7 @@
   }
   .count {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
   }
 

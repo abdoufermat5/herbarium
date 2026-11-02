@@ -394,6 +394,7 @@
   }
   .n {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -430,6 +431,7 @@
   }
   .mono {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
   }
   .stat dd.best {
     color: var(--c-sage);

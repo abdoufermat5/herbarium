@@ -90,6 +90,7 @@
     border: 1px solid var(--border);
     border-radius: 999px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
   }
   .chip-label {

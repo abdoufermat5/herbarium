@@ -354,6 +354,7 @@
   }
   .vault-path code {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     overflow-wrap: anywhere;
   }
@@ -410,6 +411,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
   }
   .badge {

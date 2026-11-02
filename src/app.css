@@ -543,6 +543,9 @@ samp {
   font-variation-settings: var(--font-display-settings);
   font-weight: var(--display-weight);
   font-optical-sizing: auto;
+  /* x-height normalization is for UI text; display faces keep their own
+     proportions, then --display-size-adjust lifts the small ones. */
+  font-size-adjust: none;
   font-size: calc(1em * var(--display-size-adjust));
   letter-spacing: var(--display-tracking);
   line-height: var(--display-leading);
@@ -1041,6 +1044,7 @@ textarea {
 .empty strong {
   font-family: var(--font-display);
   font-variation-settings: var(--font-display-settings);
+  font-size-adjust: none;
   font-weight: var(--display-weight);
   font-size: var(--fs-2xl);
   letter-spacing: var(--display-tracking);

@@ -186,6 +186,7 @@
   .command {
     height: 36px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
   }
   .sample-row {

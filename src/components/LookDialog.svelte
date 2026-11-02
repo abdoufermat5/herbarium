@@ -147,7 +147,7 @@
     border-radius: var(--radius-sm);
     background: var(--sunken);
     color: var(--muted);
-    font-size: 16px;
+    font-size: var(--fs-md);
     cursor: pointer;
   }
   .icon-choice.on {

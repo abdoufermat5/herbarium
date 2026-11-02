@@ -385,7 +385,9 @@
   .summary {
     margin: 0;
     font-family: var(--font-display);
-    font-size: 17px;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-lg) * var(--display-size-adjust));
     line-height: 1.4;
   }
   .empty {

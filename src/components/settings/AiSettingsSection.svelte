@@ -621,11 +621,13 @@
   }
   .mono {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
   }
   .mono-path {
     margin: -6px 0 0;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;

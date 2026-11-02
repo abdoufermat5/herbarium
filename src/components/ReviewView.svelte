@@ -699,6 +699,7 @@
   .stat-n {
     margin: 0;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xl);
     font-weight: 500;
     line-height: 1;
@@ -816,6 +817,7 @@
   }
   .date {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -853,6 +855,7 @@
     font-size: var(--fs-xs);
     color: var(--muted);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
   }
   .hist-more {
     font-size: var(--fs-2xs);
@@ -862,6 +865,7 @@
 
   .err-detail {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     color: var(--muted);
     overflow-wrap: anywhere;
@@ -941,6 +945,7 @@
   }
   .bar-count {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -1090,6 +1095,7 @@
     background: var(--raised);
     box-shadow: var(--shadow);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--text);
     white-space: nowrap;
@@ -1128,6 +1134,7 @@
   }
   .caught-next {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     color: var(--muted);
   }
@@ -1156,6 +1163,7 @@
   }
   .fc-table td {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     color: var(--muted);
   }
 

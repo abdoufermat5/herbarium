@@ -821,10 +821,12 @@
   .success h3 {
     margin: 6px 0 0;
     font-family: var(--font-display);
-    font-size: var(--fs-2xl);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-2xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
     color: var(--text);
   }
   .success p {
@@ -882,6 +884,7 @@
     width: 100%;
     min-height: 130px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
   }
 

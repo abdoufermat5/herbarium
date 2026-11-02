@@ -688,6 +688,7 @@
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
@@ -762,6 +763,7 @@
     font-family: var(--font-display);
     font-variation-settings: var(--font-display-settings);
     font-weight: var(--display-weight);
+    font-size-adjust: none;
     font-size: calc(var(--fs-3xl) * var(--display-size-adjust));
     letter-spacing: var(--display-tracking);
     line-height: var(--display-leading);

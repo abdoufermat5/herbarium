@@ -45,6 +45,7 @@
     white-space: normal;
     overflow-wrap: anywhere;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-sm);
     color: var(--text);
   }

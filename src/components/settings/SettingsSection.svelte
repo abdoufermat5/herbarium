@@ -19,10 +19,12 @@
   h2 {
     margin-bottom: 10px;
     font-family: var(--font-display);
-    font-size: var(--fs-lg);
-    font-weight: 500;
-    letter-spacing: -0.02em;
-    line-height: 1.1;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-lg) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
+    line-height: var(--display-leading);
     color: var(--text);
   }
   .rows {
