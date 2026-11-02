@@ -146,6 +146,7 @@
     if (next.length !== chosen.length) {
       chosen = next;
       pickedOrder = picked;
+      sortMode = null;
     }
   }
 
@@ -158,6 +159,8 @@
     if (!chosenIndex.has(id)) return;
     chosen = chosen.filter((x) => x !== id);
     pickedOrder = pickedOrder.filter((x) => x !== id);
+    hovered = null;
+    sortMode = null;
   }
 
   function removeAt(i: number) {
@@ -363,6 +366,7 @@
     const [moved] = next.splice(d.from, 1);
     next.splice(d.to, 0, moved);
     chosen = next;
+    hovered = null;
     sortMode = null;
   }
 
