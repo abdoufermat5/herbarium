@@ -48,6 +48,12 @@
   const name = $derived(label ?? t(`tree.stage.${stage}`));
   const clickable = $derived(detail === "full" && !!onlimbclick);
 
+  // The plant grows taller as pages are read. At progress 0 only the seed is
+  // there, so it keeps its natural size; from then on the trunk starts short
+  // and reaches full height when every page is read.
+  const floor = $derived(detail === "mini" ? 0.7 : 0.55);
+  const plantScale = $derived(progress <= 0 ? 1 : floor + (1 - floor) * (1 - (1 - progress) ** 2));
+
   // Progress already on screen. Plain variables on purpose: they must not
   // trigger anything, they only tell the next render what is new.
   let shownProgress = -1;
@@ -89,6 +95,8 @@
 <svg
   class="tree {detail}"
   class:mature
+  class:animated={animate && !reduced}
+  class:mount={animate && !reduced && growOnMount}
   class:hover-rustle={detail === "full" && animate && !reduced}
   class:clickable
   width={size * TREE_ASPECT}
@@ -99,6 +107,9 @@
   aria-label={name}
   focusable="false"
   style:--bx="{model.baseX}px"
+  style:--gy="{model.ground}px"
+  style:--s={plantScale}
+  style:--s0={floor}
   onclick={clickable ? hit : undefined}
 >
   <title>{name}</title>
@@ -117,7 +128,40 @@
     </g>
   {/each}
   <g class="plant">
-    {#each [2, 3, 4, 5, 6] as layer (layer)}
+    {#each [2, 3] as layer (layer)}
+      <g>
+        {#each layers[layer] as it (it.el.i)}
+          <path
+            class="e {it.el.kind} t{it.el.tone} d{it.el.depth}"
+            class:fresh={it.fresh}
+            class:dim={dim(it.el.page)}
+            class:lit={highlight != null && it.el.page === highlight}
+            d={it.el.d}
+            stroke-width={it.el.w || undefined}
+            pathLength={it.el.kind === "branch" ? 1 : undefined}
+            data-p={it.el.page}
+            style:--d={it.fresh ? `${it.delay}ms` : undefined}
+          />
+        {/each}
+      </g>
+    {/each}
+  </g>
+  {#each [4] as layer (layer)}
+    <g>
+      {#each layers[layer] as it (it.el.i)}
+        <path
+          class="e {it.el.kind} t{it.el.tone} d{it.el.depth}"
+          class:fresh={it.fresh}
+          class:dim={dim(it.el.page)}
+          d={it.el.d}
+          stroke-width={it.el.w || undefined}
+          style:--d={it.fresh ? `${it.delay}ms` : undefined}
+        />
+      {/each}
+    </g>
+  {/each}
+  <g class="plant">
+    {#each [5, 6] as layer (layer)}
       <g>
         {#each layers[layer] as it (it.el.i)}
           <path
@@ -308,11 +352,25 @@
     }
   }
 
-  /* a single gentle rustle when the pointer arrives */
+  /* the plant gets taller with progress, rooted at the trunk base */
   .plant {
     transform-box: view-box;
-    transform-origin: var(--bx) 90px;
+    transform-origin: var(--bx) var(--gy);
+    transform: scale(var(--s, 1));
   }
+  .animated .plant {
+    transition: transform var(--t-slow) var(--ease-spring);
+  }
+  .mount .plant {
+    animation: plant-in var(--t-slow) var(--ease-spring);
+  }
+  @keyframes plant-in {
+    from {
+      transform: scale(var(--s0));
+    }
+  }
+
+  /* a single gentle rustle when the pointer arrives */
   @media (prefers-reduced-motion: no-preference) {
     .hover-rustle:hover .plant {
       animation: rustle 800ms var(--ease-in-out);
@@ -321,16 +379,16 @@
   @keyframes rustle {
     0%,
     100% {
-      transform: rotate(0);
+      transform: rotate(0) scale(var(--s, 1));
     }
     25% {
-      transform: rotate(-1.3deg);
+      transform: rotate(-1.3deg) scale(var(--s, 1));
     }
     55% {
-      transform: rotate(1deg);
+      transform: rotate(1deg) scale(var(--s, 1));
     }
     80% {
-      transform: rotate(-0.4deg);
+      transform: rotate(-0.4deg) scale(var(--s, 1));
     }
   }
 </style>
