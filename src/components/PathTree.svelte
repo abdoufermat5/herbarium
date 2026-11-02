@@ -225,17 +225,16 @@
   .mini .leaf {
     stroke-width: 1;
   }
+  /* blossoms: a wash of rose with a warm heart, quiet enough to read as flowers */
   .petals {
     fill: var(--c-rose-soft);
     stroke: var(--c-rose);
     stroke-linejoin: round;
+    opacity: 0.85;
   }
   .heart {
     fill: var(--c-amber);
     stroke: none;
-  }
-  .heart.t1 {
-    fill: var(--c-rose);
   }
 
   /* hit strokes: invisible, wide */

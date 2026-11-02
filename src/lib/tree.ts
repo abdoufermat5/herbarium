@@ -453,27 +453,34 @@ function buildFull(seed: string): Geometry {
   const leaves = drafts.filter((d) => d.kind === "leaf" && d.limb === lastLimb).sort((a, b) => a.g - b.g || a.n - b.n);
   for (const l of leaves.slice(-6)) l.mature = true;
 
-  // Maturity: one offset sun disc and blossoms.
+  // Maturity: one offset sun disc and a handful of quiet blossoms.
   const sr = R(14, 18);
   const sideSun = rnd() < 0.5 ? -1 : 1;
   const sx = clamp(cx + sideSun * rx * 0.5, sr + 2, TREE_W - sr - 2);
   const sy = clamp(cy - ry * 0.3, sr + 2, 60);
   add({ kind: "sun", layer: LAYER.sun, d: circ(sx, sy, sr), g: 20, mature: true });
-  const nB = Math.min(anchors.length, 14 + Math.floor(rnd() * 9));
-  for (let k = 0; k < nB; k++) {
+  // Few and never crowded: candidates closer than 6 units to a kept blossom
+  // are dropped, so the crown keeps its calm instead of filling with pinwheels.
+  const nB = 7 + Math.floor(rnd() * 5);
+  const spots: P[] = [];
+  for (let tries = 0; tries < 30 && spots.length < nB; tries++) {
     const a = anchors[Math.floor(rnd() * anchors.length)];
     const bx = a[0] + R(-3, 3);
     const by = a[1] + R(-3, 3);
-    const pr = R(1.15, 1.6);
+    if (spots.some(([px, py]) => Math.hypot(px - bx, py - by) < 6)) continue;
+    spots.push([bx, by]);
+  }
+  spots.forEach(([bx, by], k) => {
+    const pr = R(1.0, 1.3);
     const rot = R(0, Math.PI * 2);
     let d = "";
     for (let i = 0; i < 5; i++) {
       const t = rot + (i * Math.PI * 2) / 5;
       d += circ(bx + Math.cos(t) * pr * 1.05, by + Math.sin(t) * pr * 1.05, pr);
     }
-    add({ kind: "petals", layer: LAYER.bloom, d, w: 0.5, g: 21 + k * 0.01, mature: true });
-    add({ kind: "heart", layer: LAYER.bloom, d: circ(bx, by, pr * 0.62), tone: k % 3 === 0 ? 1 : 0, g: 21.005 + k * 0.01, mature: true });
-  }
+    add({ kind: "petals", layer: LAYER.bloom, d, w: 0.35, g: 21 + k * 0.01, mature: true });
+    add({ kind: "heart", layer: LAYER.bloom, d: circ(bx, by, pr * 0.45), g: 21.005 + k * 0.01, mature: true });
+  });
   return finish(drafts, baseX, limbBase);
 }
 
