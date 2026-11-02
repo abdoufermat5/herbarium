@@ -15,8 +15,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `paths.progress` operation (also an MCP tool): which pages of each reading path have been opened.
 
 ### Changed
-- Motion throughout, quiet and quick: views cross-fade, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
+- Motion throughout, quiet and quick: the content area rises into place when you change view, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
 - Redesigned library cards (hover actions, due chips, highlighted search terms), the command palette (grouped results, highlighted matches), the shortcuts sheet (keycaps, filter), onboarding (three steps), settings (sliding tabs, springier switches), trash and the import dialog (per-file progress).
+
+### Fixed
+- Review today opens faster: its year of activity no longer builds a new date formatter for every day shown.
 
 ## [0.4.2] - 2026-10-15
 
