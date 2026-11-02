@@ -184,7 +184,7 @@ try {
 
   mark("reader");
   // Read a page and highlight a passage.
-  await click("Rust Ownership in Five Rules", ".card, li, button, a");
+  await click("Rust Ownership in Five Rules", ".open-overlay");
   await sleep(1500);
   const frame = await app.exec(() => {
     const r = document.querySelector("iframe.ready").getBoundingClientRect();

@@ -32,7 +32,7 @@ try {
   await shot("03b-ai-library");
   await app.exec(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
   await sleep(300);
-  await app.click("Welcome to Herbarium", "a, button, [role=button], .card, li");
+  await app.click("Welcome to Herbarium", ".open-overlay");
   await sleep(1500);
   await shot("04-reader");
   await app.click("Details", ".actions button");

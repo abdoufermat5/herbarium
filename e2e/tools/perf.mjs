@@ -83,7 +83,8 @@ try {
   await measure("go to All pages", clickText, "All pages");
   const search = (q) =>
     new Promise((resolve) => {
-      const count = () => document.querySelector(".count")?.textContent;
+      // The sidebar's path rows also carry a .count (read/total): read the library's own.
+      const count = () => document.querySelector(".head-meta .count")?.textContent;
       const before = count();
       const i = document.querySelector("input[type=search], .search input");
       i.value = q;

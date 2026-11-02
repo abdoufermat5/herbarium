@@ -79,7 +79,7 @@ try {
     await app.exec(() => document.querySelectorAll("*").forEach((el) => el.scrollTop > 0 && (el.scrollTop = 0)));
     await sleep(1500);
     await shot("library");
-    await app.click("Rust Ownership in Five Rules", ".card, li, button, a");
+    await app.click("Rust Ownership in Five Rules", ".open-overlay");
     await sleep(2000);
     await shot("reader");
     await app.click("Review today");
