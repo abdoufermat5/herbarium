@@ -2,10 +2,6 @@ import { describe, expect, it } from "vitest";
 import { growTree, isGrown, treeProgress, treeStage, type TreeDetail } from "./tree";
 
 const TOTALS = [1, 2, 3, 7, 40, 500];
-const visible = (seed: string, total: number, read: number, detail: TreeDetail = "full") => {
-  const p = treeProgress(read, total);
-  return new Set(growTree(seed, total, detail).elements.filter((e) => isGrown(e, p)).map((e) => e.i));
-};
 /** Grown and never hidden again: the sprout parts fall away, so they are not additive. */
 const persistent = (seed: string, total: number, read: number, detail: TreeDetail = "full") => {
   const p = treeProgress(read, total);
