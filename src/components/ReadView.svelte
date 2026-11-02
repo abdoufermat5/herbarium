@@ -2247,10 +2247,12 @@
   .title {
     min-width: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-lg);
-    font-weight: 500;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-lg) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
     line-height: 1.2;
-    letter-spacing: -0.02em;
+    letter-spacing: var(--display-tracking);
   }
 
   .meta {
@@ -2404,6 +2406,7 @@
     gap: 5px;
     color: var(--text);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
   }
   .review-bar.pulse .rb-date {
@@ -2500,6 +2503,7 @@
   }
   .hud-count {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     line-height: 1;
     color: var(--text);
@@ -2522,6 +2526,7 @@
   }
   .hud-time {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     color: var(--text-soft);
     font-variant-numeric: tabular-nums;
@@ -2573,6 +2578,7 @@
   }
   .g-int {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -2761,7 +2767,7 @@
     border-radius: var(--radius-sm);
     background: var(--surface);
     color: var(--muted);
-    font-size: 15px;
+    font-size: var(--fs-md);
     cursor: pointer;
   }
 
@@ -2777,7 +2783,7 @@
     border: 0;
     border-radius: var(--radius-sm);
     background: none;
-    font-size: 15px;
+    font-size: var(--fs-md);
     cursor: pointer;
   }
 
@@ -2897,6 +2903,7 @@
     margin: 0;
     color: var(--text);
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     text-align: right;
   }
@@ -2966,6 +2973,7 @@
 
   .bar-mono {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
   }
@@ -3226,6 +3234,7 @@
     color: var(--muted);
     text-decoration: line-through;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
   }
 
@@ -3274,9 +3283,11 @@
 
   .err strong {
     font-family: var(--font-display);
-    font-size: var(--fs-xl);
-    font-weight: 500;
-    letter-spacing: -0.02em;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-xl) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
   }
 
   .err-actions {

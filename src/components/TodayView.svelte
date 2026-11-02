@@ -756,6 +756,7 @@
     display: grid;
     place-items: center;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-lg);
     font-weight: 500;
     font-variant-numeric: tabular-nums;
@@ -777,7 +778,8 @@
   }
   .due-n {
     font-family: var(--mono);
-    font-size: 34px;
+    font-variation-settings: var(--font-mono-settings);
+    font-size: var(--fs-3xl);
     font-weight: 500;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -814,7 +816,8 @@
   }
   .streak-n {
     font-family: var(--mono);
-    font-size: 44px;
+    font-variation-settings: var(--font-mono-settings);
+    font-size: var(--fs-4xl);
     font-weight: 500;
     line-height: 1;
     font-variant-numeric: tabular-nums;
@@ -840,6 +843,7 @@
   }
   .mini-head span {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     line-height: 1;
     text-align: center;
@@ -901,6 +905,7 @@
   .legend-count {
     margin-left: auto;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-variant-numeric: tabular-nums;
     color: var(--muted);
   }
@@ -966,6 +971,7 @@
     max-width: 100%;
     margin-top: 2px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     font-variant-numeric: tabular-nums;
     color: var(--muted);
@@ -1103,6 +1109,7 @@
   }
   .mono {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-variant-numeric: tabular-nums;
   }
   .progress {

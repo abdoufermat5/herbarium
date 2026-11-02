@@ -1047,6 +1047,7 @@
   }
   .count {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-xs);
     font-variant-numeric: tabular-nums;
   }
@@ -1316,10 +1317,12 @@
   }
   .page-title {
     font-family: var(--font-display);
-    font-size: 17px;
-    font-weight: 500;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-lg) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
     line-height: 1.25;
-    letter-spacing: -0.015em;
+    letter-spacing: var(--display-tracking);
     color: var(--text);
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -1462,6 +1465,7 @@
   /* Due chips: rose when overdue, amber when due today, muted otherwise. */
   .due {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     letter-spacing: 0;
     text-transform: none;
@@ -1565,6 +1569,7 @@
   }
   .list .loc {
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
   }
   .list .page-side {
@@ -1607,7 +1612,7 @@
     color: var(--chip-ink);
   }
   .thumb-emoji {
-    font-size: 16px;
+    font-size: var(--fs-md);
     line-height: 1;
   }
   .preview {
@@ -1644,7 +1649,7 @@
     color: var(--chip-ink);
   }
   .placeholder-emoji {
-    font-size: 30px;
+    font-size: var(--fs-3xl);
     line-height: 1;
   }
   .empty-actions {

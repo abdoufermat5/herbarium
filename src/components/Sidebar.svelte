@@ -1454,9 +1454,11 @@
     flex: 1;
     min-width: 0;
     font-family: var(--font-display);
-    font-size: var(--fs-md);
-    font-weight: 500;
-    letter-spacing: -0.01em;
+    font-variation-settings: var(--font-display-settings);
+    font-size-adjust: none;
+    font-size: calc(var(--fs-md) * var(--display-size-adjust));
+    font-weight: var(--display-weight);
+    letter-spacing: var(--display-tracking);
     color: var(--text);
   }
   /* With several vaults the brand opens the vault switcher. */
@@ -1882,6 +1884,7 @@
   .count {
     flex: none;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
   }
@@ -1919,6 +1922,7 @@
     flex: none;
     min-width: 14px;
     font-family: var(--mono);
+    font-variation-settings: var(--font-mono-settings);
     font-size: var(--fs-2xs);
     color: var(--muted);
     text-align: right;
@@ -2049,7 +2053,7 @@
   }
 
   .row-emoji {
-    font-size: 13px;
+    font-size: var(--fs-sm);
     line-height: 1;
   }
 </style>
