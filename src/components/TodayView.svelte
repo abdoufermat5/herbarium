@@ -11,6 +11,7 @@
     startReviewSession,
     toast,
     openSettings,
+    openPlantPath,
   } from "../lib/state.svelte";
   import { dateFormat, fmtDate, plural, timeAgo } from "../lib/format";
   import { i18n, t, LOCALES, type MessageKey } from "../lib/i18n.svelte";
@@ -125,6 +126,9 @@
 
   type CardKey = "review" | "streak" | "grove" | "garden" | "continue" | "rediscover" | "recent" | "day";
 
+  /** No paths yet but enough pages to build one: the grove slot invites planting. */
+  const showPlantInvite = $derived(app.paths.length === 0 && app.library.length >= 2);
+
   interface CardSlot {
     row: number;
     span: number;
@@ -165,9 +169,10 @@
       }
     }
 
-    // The grove is a band of its own, right under review and streak: every
-    // later card moves down one row, so each row still fills all six columns.
-    if (app.paths.length > 0) {
+    // The grove (or its invitation) is a band of its own, right under review
+    // and streak: every later card moves down one row, so each row still fills
+    // all six columns.
+    if (app.paths.length > 0 || showPlantInvite) {
       for (const slot of Object.values(s)) {
         if (slot && slot.row > 1) slot.row += 1;
       }
@@ -527,6 +532,20 @@
                 </button>
               {/if}
             </div>
+          </section>
+        {:else if showPlantInvite}
+          <section class="card plant-invite" use:reveal style={place("grove")}>
+            <div class="plant-invite-art" aria-hidden="true">
+              <Illustration name="seedling" size={96} animate />
+            </div>
+            <div class="plant-invite-copy">
+              <h2 class="display plant-invite-title">{t("today.plantTitle")}</h2>
+              <p class="plant-invite-body">{t("today.plantBody")}</p>
+            </div>
+            <button type="button" class="btn btn-primary plant-invite-cta" onclick={() => openPlantPath()}>
+              {t("today.plantCta")}
+              <span class="kbd">P</span>
+            </button>
           </section>
         {/if}
 
@@ -967,6 +986,54 @@
   .grove-more:hover {
     border-color: var(--border-hover);
     background: var(--raised);
+  }
+
+  /* ------------------------------------------------------ first path invite */
+  .plant-invite {
+    flex-direction: row;
+    align-items: center;
+    gap: 24px;
+  }
+  .plant-invite-art {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 96px;
+    height: 96px;
+  }
+  .plant-invite-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+  }
+  .plant-invite-title {
+    margin: 0;
+    font-size: var(--fs-xl);
+  }
+  .plant-invite-body {
+    margin: 0;
+    max-width: 52ch;
+    color: var(--text-soft);
+    font-size: var(--fs-sm);
+    line-height: 1.5;
+  }
+  .plant-invite-cta {
+    flex: none;
+    align-self: center;
+  }
+  .plant-invite-cta .kbd {
+    background: var(--surface);
+    border-color: var(--border-strong);
+    color: var(--text-soft);
+  }
+
+  @container today (max-width: 640px) {
+    .plant-invite {
+      flex-direction: column;
+      align-items: flex-start;
+    }
   }
 
   /* ---------------------------------------------------------- reading rows */
