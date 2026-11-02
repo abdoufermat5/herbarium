@@ -219,7 +219,8 @@ function makeCrown(seed: string): Crown {
     ry = R(19, 24);
     ox = (lean >= 0 ? 1 : -1) * R(5, 9);
   }
-  ry = Math.min(ry, (GROUND - trunkH - 6) / 1.5);
+  rx = Math.min(rx * 1.08, 39);
+  ry = Math.min(ry * 1.38,(GROUND - trunkH - 5) / 1.5);
   const forkX = baseX + lean;
   const cx = clamp(forkX + ox, rx + 4, TREE_W - rx - 4);
   const cy = GROUND - trunkH - ry * 0.5;
@@ -256,7 +257,7 @@ function buildFull(seed: string): Geometry {
 
   // Ground: an ink line, a soil mound, and the seed beneath.
   const gx = clamp(baseX - 30, 3, 27);
-  add({ kind: "ground", layer: LAYER.ground, d: `M${n(gx)} ${GROUND}q10 -1.4 20 0t20 0t20 0`, w: 1.1, g: -3, base: true });
+  add({ kind: "ground", layer: LAYER.ground, d: `M${n(gx)} ${GROUND}q10 -1.4 20 0t20 0t20 0`, w: 0.9, g: -3, base: true });
   add({
     kind: "mound",
     layer: LAYER.mound,
@@ -268,7 +269,7 @@ function buildFull(seed: string): Geometry {
   add({ kind: "seed", layer: LAYER.ground, d: `M${n(baseX - 1.4)} ${GROUND + 4}a2 1.3 0 1 0 4 0a2 1.3 0 1 0 -4 0Z`, w: 1, g: -3, base: true });
 
   // Sprout: a short stem and a pair of seed leaves, there from the start.
-  add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, 0, 0.3), depth: 0, w: 1.8, g: -2, base: true });
+  add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, 0, 0.3), depth: 0, w: 1.5, g: -2, base: true });
   const sp = qpt(trunk, 0.3);
   const stan = qtan(trunk, 0.3);
   const sa = Math.atan2(stan[1], stan[0]);
@@ -278,7 +279,7 @@ function buildFull(seed: string): Geometry {
   // Trunk: six tapering segments rising in order.
   const SEG = 6;
   for (let k = 0; k < SEG; k++) {
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, k / SEG, (k + 1) / SEG), depth: 0, w: 4 - k * 0.3, g: k * 0.02 });
+    add({ kind: "branch", layer: LAYER.branch, d: qsub(trunk, k / SEG, (k + 1) / SEG), depth: 0, w: 2.9 - k * 0.18, g: k * 0.02 });
   }
 
   // Limbs fan out across the crown; wide ones leave the trunk lower.
@@ -309,7 +310,7 @@ function buildFull(seed: string): Geometry {
       ty = cy + (ty - cy) * 0.88;
     }
     const q = curve(p, [tx, ty], R(-0.16, 0.16) * (side > 0 ? 1 : -1), 0.02);
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 1), depth, w: depth === 2 ? 1.2 : 0.8, g });
+    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 1), depth, w: depth === 2 ? 0.85 : 0.6, g });
     branches.push({ q, depth, g, side });
     return { q, g };
   };
@@ -323,8 +324,8 @@ function buildFull(seed: string): Geometry {
     const ty = cy - ry * cθ * rr * 0.92 + (cr.style === 3 ? ry * 0.5 * cθ ** 6 : 0) + R(-2, 2);
     const q = curve(A, [tx, ty], R(-0.17, 0.17), 0.1);
     const g0 = 0.13 + j * 0.07 + R(0, 0.02);
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 0.5), depth: 1, w: 2.1, g: g0 });
-    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0.5, 1), depth: 1, w: 1.6, g: g0 + 0.02 });
+    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0, 0.5), depth: 1, w: 1.5, g: g0 });
+    add({ kind: "branch", layer: LAYER.branch, d: qsub(q, 0.5, 1), depth: 1, w: 1.2, g: g0 + 0.02 });
     let side = rnd() < 0.5 ? 1 : -1;
     for (const t of [0.4, 0.66, 0.92]) {
       side = -side;
@@ -345,7 +346,7 @@ function buildFull(seed: string): Geometry {
     const out = Math.atan2(y - cy, x - cx);
     let a = Math.atan2(Math.sin(ang) + Math.sin(out), Math.cos(ang) + Math.cos(out)) + R(-0.5, 0.5);
     if (y > GROUND - 14) a = -Math.PI / 2 + R(-0.9, 0.9);
-    const L = R(6.5, 9.5) * scale;
+    const L = R(8, 11.5) * scale;
     const w = L * R(0.32, 0.42);
     const spread = R(0.6, 1.0);
     const o: P = [x, y];
@@ -355,7 +356,7 @@ function buildFull(seed: string): Geometry {
     const inner = 1 - Math.hypot((x - cx) / rx, (y - cy) / ry);
     const back = rnd() < 0.3 + clamp(inner, 0, 1) * 0.45;
     if (back) {
-      add({ kind: "leaf", layer: LAYER.back, d, tone: rnd() < 0.18 ? 1 : 0, g });
+      add({ kind: "leaf", layer: LAYER.back, d, tone: rnd() < 0.1 ? 1 : 0, g });
     } else {
       add({ kind: "leaf", layer: LAYER.front, d, tone: v < 0.34 ? 2 : v > 0.62 && rnd() < 0.3 ? 4 : 3, g });
     }
@@ -437,16 +438,24 @@ function buildMini(seed: string): Geometry {
 
   // Canopy blobs: big soft ones behind, smaller rich ones in front.
   const m = Math.min(rx, ry);
-  add({ kind: "leaf", layer: LAYER.back, d: circ(cx, cy, m * 0.95), tone: 0, g: 0.5 });
-  add({ kind: "leaf", layer: LAYER.back, d: circ(cx - rx * 0.5, cy + ry * 0.12, m * 0.62), tone: 1, g: 0.6 });
-  add({ kind: "leaf", layer: LAYER.back, d: circ(cx + rx * 0.5, cy + ry * 0.12, m * 0.62), tone: 0, g: 0.7 });
-  const fronts = 2 + Math.floor(rnd() * 3);
+  const backs = 3 + Math.floor(rnd() * 2);
+  for (let k = 0; k < backs; k++) {
+    const a = Math.PI * (1.08 + (0.84 * k) / (backs - 1)) + R(-0.12, 0.12); // across the top of the crown
+    add({
+      kind: "leaf",
+      layer: LAYER.back,
+      d: circ(cx + Math.cos(a) * rx * 0.55, cy + 0.1 * ry + Math.sin(a) * ry * 0.5, m * R(0.58, 0.72)),
+      tone: k % 3 === 1 ? 1 : 0,
+      g: 0.5 + k * 0.05,
+    });
+  }
+  const fronts = 2 + Math.floor(rnd() * 2);
   for (let k = 0; k < fronts; k++) {
     const T = tops[k % tops.length];
     add({
       kind: "leaf",
       layer: LAYER.front,
-      d: circ(T[0] + R(-3, 3), T[1] + R(-2, 4), m * R(0.34, 0.48)),
+      d: circ(T[0] + R(-3, 3), T[1] + R(-2, 4), m * R(0.34, 0.46)),
       tone: k % 2 ? 3 : 2,
       g: 0.8 + k * 0.1,
     });
