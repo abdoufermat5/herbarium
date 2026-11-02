@@ -413,10 +413,11 @@ function buildFull(seed: string): Geometry {
     if (rnd() < 0.5) cluster(qpt(q, 0.95), ang, g + 0.001 * k++, 4.5, limb);
   };
 
-  // Each limb is one self-contained growth group: its two segments, then each
-  // child branch dressed with leaves, then that child's twigs dressed the same
-  // way, then the next child. Everything stays inside [g0, g0 + 0.9), so a limb
-  // never shows a bare twig: its leaves share its growth window.
+  // Each limb is one self-contained growth group: its two segments, a tuft of
+  // leaves at its tip, then each child branch dressed with leaves, then that
+  // child's twigs dressed the same way, then the next child. Everything stays
+  // inside [g0, g0 + 0.9), so a limb never shows a bare twig: its leaves share
+  // its growth window.
   const limbBase: { x: number; y: number }[] = [];
   limbs.forEach((L, j) => {
     const g0 = 1 + j;
