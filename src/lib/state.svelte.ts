@@ -1036,15 +1036,20 @@ export function fmtClock(ms: number): string {
   return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${s}` : `${m}:${s}`;
 }
 
+/** One formatter per locale: building one per call cost ~100 ms for the year heatmap. */
+const dayFormats = new Map<string, Intl.DateTimeFormat>();
+
 /** A UTC `YYYY-MM-DD` day as a short locale date, without timezone drift. */
 export function fmtDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
   if (!y || !m || !d) return day;
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(LOCALES[i18n.locale].bcp47, {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
+  const locale = LOCALES[i18n.locale].bcp47;
+  let format = dayFormats.get(locale);
+  if (!format) {
+    format = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone: "UTC" });
+    dayFormats.set(locale, format);
+  }
+  return format.format(Date.UTC(y, m - 1, d));
 }
 
 /** "Next: 3 pages tomorrow", from the 14-day forecast (UTC days); a plain note when nothing is scheduled. */

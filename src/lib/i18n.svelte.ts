@@ -35,6 +35,18 @@ export const i18n = $state<{ locale: Locale }>({ locale: storedLocale() });
 
 export type Params = Record<string, string | number>;
 
+/** One `PluralRules` per locale; plural keys run per row in long lists. */
+const pluralRules = new Map<Locale, Intl.PluralRules>();
+
+function pluralForm(locale: Locale, count: number): Intl.LDMLPluralRule {
+  let rules = pluralRules.get(locale);
+  if (!rules) {
+    rules = new Intl.PluralRules(LOCALES[locale].bcp47);
+    pluralRules.set(locale, rules);
+  }
+  return rules.select(count);
+}
+
 /**
  * Translate a key. Reads `i18n.locale`, so calls inside templates and
  * `$derived` re-run when the language changes. When `params.count` is a
@@ -44,7 +56,7 @@ export function t(key: MessageKey | PluralKey, params?: Params): string {
   const catalog = CATALOGS[i18n.locale];
   let msg: string | undefined;
   if (typeof params?.count === "number") {
-    const form = new Intl.PluralRules(LOCALES[i18n.locale].bcp47).select(params.count);
+    const form = pluralForm(i18n.locale, params.count);
     msg = catalog[`${key}_${form}`] ?? catalog[`${key}_other`];
   }
   msg ??= catalog[key] ?? (en as Record<string, string>)[key];
