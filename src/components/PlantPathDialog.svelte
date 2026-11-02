@@ -791,8 +791,14 @@
       <span class="esc-hint"><kbd class="kbd">Esc</kbd> <span>{t("plant.esc")}</span></span>
       <span class="foot-gap"></span>
       <kbd class="kbd foot-mod">{modKey("↵")}</kbd>
+      {#if disabledReason}<span id="plant-disabled" class="sr-only">{disabledReason}</span>{/if}
       <span class="tip" title={disabledReason ?? undefined}>
-        <button class="btn btn-primary" disabled={!!disabledReason || saving} onclick={() => void plant()}>
+        <button
+          class="btn btn-primary"
+          disabled={!!disabledReason || saving}
+          aria-describedby={disabledReason ? "plant-disabled" : undefined}
+          onclick={() => void plant()}
+        >
           {tendId ? t("plant.save") : t("plant.plant", { count })}
         </button>
       </span>
