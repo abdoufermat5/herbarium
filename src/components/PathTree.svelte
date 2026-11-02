@@ -90,6 +90,9 @@
 
   const STAGGER_MS = 90; // between limb groups
   const DRAW_MAX = 40; // fresh branches still worth their own draw-in
+  // Animating an SVG group makes WebKit redraw every path inside it each frame,
+  // so only a small step gets per-limb motion; a bigger one moves as one svg.
+  const STEP_MAX = 60; // fresh shapes still animated limb by limb
 
   const view = $derived.by(() => {
     const m = model;
@@ -129,14 +132,26 @@
         items: [el],
       });
     }
-    return out;
+    return { layers: out, from };
   });
+
+  const fresh = $derived.by(() => {
+    let n = 0;
+    for (const layer of view.layers) for (const band of layer.fresh) n += band.items.length;
+    return n;
+  });
+
+  // A growth step small enough to animate limb by limb; a bigger one blooms in
+  // as a whole picture (cheap: the svg composites, its groups do not).
+  const stepped = $derived(moving && fresh > 0 && fresh <= STEP_MAX);
+  // The plant itself blooms in: from nothing, or on the moment a path is grown.
+  const entrance = $derived(moving && fresh > 0 && view.from <= 0 && (fresh > STEP_MAX || growOnMount));
 
   // A big step (a first visit to a mature path) would fire hundreds of draw-ins;
   // past a few dozen the groups carry the motion alone.
   const draw = $derived.by(() => {
     let n = 0;
-    for (const layer of view) for (const band of layer.fresh) for (const el of band.items) if (el.kind === "branch") n++;
+    for (const layer of view.layers) for (const band of layer.fresh) for (const el of band.items) if (el.kind === "branch") n++;
     return n > 0 && n <= DRAW_MAX;
   });
 
@@ -172,15 +187,15 @@
 
 {#snippet paint(l: number)}
   <g>
-    {#each view[l].before as el (el.i)}{@render elem(el, false)}{/each}
+    {#each view.layers[l].before as el (el.i)}{@render elem(el, false)}{/each}
   </g>
-  {#each view[l].fresh as band (band.key)}
-    <g class="grow" style:--d="{band.delay}ms" style:--ox="{band.x}px" style:--oy="{band.y}px">
+  {#each view.layers[l].fresh as band (band.key)}
+    <g class="band" class:grow={stepped} style:--d="{band.delay}ms" style:--ox="{band.x}px" style:--oy="{band.y}px">
       {#each band.items as el (el.i)}{@render elem(el, true)}{/each}
     </g>
   {/each}
   <g>
-    {#each view[l].after as el (el.i)}{@render elem(el, false)}{/each}
+    {#each view.layers[l].after as el (el.i)}{@render elem(el, false)}{/each}
   </g>
 {/snippet}
 
@@ -189,7 +204,7 @@
   class="tree {detail}"
   class:mature
   class:animated={moving}
-  class:mount={moving && growOnMount}
+  class:entrance={entrance}
   class:hover-rustle={detail === "full" && moving}
   class:clickable
   width={size * TREE_ASPECT}
@@ -372,11 +387,17 @@
   .animated .plant {
     transition: transform var(--t-slow) var(--ease-spring);
   }
-  .mount .plant {
+
+  /* a whole tree blooming in (a first visit to a mature path): one animation on
+     the svg, which the compositor can handle, instead of one per limb */
+  .tree.entrance {
+    transform-box: view-box;
+    transform-origin: var(--bx) var(--gy);
     animation: plant-in var(--t-slow) var(--ease-spring);
   }
   @keyframes plant-in {
     from {
+      opacity: 0;
       transform: scale(var(--s0));
     }
   }
