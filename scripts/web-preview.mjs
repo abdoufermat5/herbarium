@@ -193,13 +193,22 @@ export function webPreview() {
         }
       });
     },
-    /** Install the IPC stand-in before the app's entry runs (one module, so the order is guaranteed). */
+    /**
+     * Install the IPC stand-in before the app's entry runs (one module, so the
+     * order is guaranteed). `?scratch=<name>` loads `/src/preview/<name>.ts`
+     * instead of the app: a place for throwaway component galleries.
+     */
     transformIndexHtml: {
       order: "pre",
       handler: (html) =>
         html.replace(
           /<script type="module" src="\/src\/main\.ts[^"]*"><\/script>/,
-          '<script type="module">await import("/src/preview/ipc.ts"); await import("/src/main.ts");</script>',
+          `<script type="module">
+      await import("/src/preview/ipc.ts");
+      const scratch = new URLSearchParams(location.search).get("scratch");
+      if (scratch && /^[\\w-]+$/.test(scratch)) await import(/* @vite-ignore */ \`/src/preview/\${scratch}.ts\`);
+      else await import("/src/main.ts");
+    </script>`,
         ),
     },
   };
