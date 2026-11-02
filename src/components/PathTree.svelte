@@ -3,10 +3,13 @@
   // mature model, thresholded); this component shows the elements whose
   // threshold has been reached and animates only what just crossed it.
   //
-  // Growth is animated per limb group, never per element: a growth step is a
-  // handful of animations no matter how many shapes it brings in. Branches keep
-  // their draw-in only for small steps. Everything is CSS (one-shot, no idle
-  // animation) and honours prefers-reduced-motion.
+  // A page-sized step grows limb by limb: the fresh shapes are grouped per
+  // (layer, limb) and each group springs in from its attachment point. A bigger
+  // step, and the moment a path is fully grown, blooms as one picture: a single
+  // animation on the <svg>, which the compositor can handle, because WebKit
+  // redraws every path inside an animated SVG group on every frame.
+  // Everything is CSS (one-shot, no idle animation) and honours
+  // prefers-reduced-motion.
   //
   // Viewbox is 90 x 100, so the rendered width is 0.9 x `size`.
   import {
