@@ -314,6 +314,7 @@
         <div
           class="specimens"
           role="radiogroup"
+          tabindex="-1"
           aria-label={t("settings.typeStyle")}
           onkeydown={onSpecimenKey}
           bind:this={specimens}
@@ -343,7 +344,7 @@
       </SettingRow>
       <SettingRow stacked title={t("settings.textSize")} hint={t("settings.textSizeHint")}>
         <div class="size-control">
-          <div class="seg" role="radiogroup" aria-label={t("settings.textSize")} onkeydown={onSizeKey}>
+          <div class="seg" role="radiogroup" tabindex="-1" aria-label={t("settings.textSize")} onkeydown={onSizeKey}>
             {#each sizeOptions as option (option.value)}
               <button
                 type="button"
