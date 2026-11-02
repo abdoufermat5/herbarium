@@ -18,6 +18,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Changed
 - Motion throughout, quiet and quick: the content area rises into place when you change view, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
+- Reading-path trees are grown from a deterministic 3D branch skeleton and projected into the same flat, hand-inked view: deeper branching, tapered limbs, aerial shading and foliage that fills the crown as pages are read. Same seeds grow the same trees; the mini trees and the public model are unchanged, with no new dependency.
 - Redesigned library cards (hover actions, due chips, highlighted search terms), the command palette (grouped results, highlighted matches), the shortcuts sheet (keycaps, filter), onboarding (three steps), settings (sliding tabs, springier switches), trash and the import dialog (per-file progress).
 
 ### Fixed
