@@ -12,7 +12,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Review sessions: a progress bar, a timer and grade buttons that show their key (1-4) and the interval each would schedule. A session ends on a summary with the grade distribution, time spent, pages that recovered, your streak and what is due next.
 - Today is a dashboard: a review ring for the day, the last four weeks of reviews, how your library is doing, and R to start a review.
 - Hand-drawn illustrations for empty states (library, search, trash, onboarding, caught-up reviews, imports).
-- Keyboard: arrows, X, S and Delete on library cards; R to start a review; Esc dismisses the newest notification.
+- Keyboard: arrows, X, S and Delete on library cards; R to start a review; P to plant a reading path (from anywhere, also from a selection or the open page); Esc dismisses the newest notification.
 - `paths.progress` operation (also an MCP tool): which pages of each reading path have been opened.
 - Ten type styles and four text sizes in Settings → Appearance. Each style brings its own interface, heading and mono fonts — from Herbarium's warm serifs to Storybook, Field notes, Typewriter, Arcade and an easy-reading face — shown live in a specimen picker; the interface text scales from 0.92× to 1.16×. The chosen style is applied before the first paint, so it never flashes.
 
