@@ -5,6 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Reading paths grow trees. Every path has its own tree, shaped by the path, which grows a limb with its leaves for each page you read and blossoms once every page is read. The new path view shows the tree beside the path's pages (hover a page to see the limb it grew, click a limb to open its page) and a "Continue" button for the next unread page. The sidebar, the reader's path bar and the command palette ("Open path: …") show a small version, and Today's new Grove card shows all of them on one ground line. The moment a tree is fully grown is marked once, in the reader or the path view.
+- Page vitality: a small leaf on cards, list rows, the reader, review rows and the palette shows how well you probably still remember a page, from the same forgetting curve the review scheduler uses (thriving, healthy, thirsty, wilting, or a seed when never reviewed). The graph can colour pages by it.
+- Review sessions: a progress bar, a timer and grade buttons that show their key (1-4) and the interval each would schedule. A session ends on a summary with the grade distribution, time spent, pages that recovered, your streak and what is due next.
+- Today is a dashboard: a review ring for the day, the last four weeks of reviews, how your library is doing, and R to start a review.
+- Hand-drawn illustrations for empty states (library, search, trash, onboarding, caught-up reviews, imports).
+- Keyboard: arrows, X, S and Delete on library cards; R to start a review; Esc dismisses the newest notification.
+- `paths.progress` operation (also an MCP tool): which pages of each reading path have been opened.
+
+### Changed
+- Motion throughout, quiet and quick: views cross-fade, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
+- Redesigned library cards (hover actions, due chips, highlighted search terms), the command palette (grouped results, highlighted matches), the shortcuts sheet (keycaps, filter), onboarding (three steps), settings (sliding tabs, springier switches), trash and the import dialog (per-file progress).
+
 ## [0.4.2] - 2026-10-15
 
 ### Changed
