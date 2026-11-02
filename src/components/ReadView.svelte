@@ -23,7 +23,12 @@
     openInPath,
     setPageInPath,
     refreshPathProgress,
+    openPathView,
   } from "../lib/state.svelte";
+  import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
+  import { celebrate } from "../lib/celebrate";
+  import { treeStage } from "../lib/tree";
+  import PathTree from "./PathTree.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
   import { confirmAction, confirmState } from "../lib/confirm.svelte";
   import { folderPickerState } from "../lib/folder-picker.svelte";
@@ -882,6 +887,38 @@
     return { path, index, prev, next };
   });
 
+  const barGrowth = $derived(currentPath ? pathGrowth(currentPath.path.id) : null);
+  const barStage = $derived(barGrowth ? treeStage(barGrowth.read, barGrowth.total) : "seed");
+  let barTree = $state<HTMLElement | null>(null);
+  let grownBanner = $state<string | null>(null);
+  // What this reader last saw of a path, to catch the read < total -> read === total step.
+  // Plain variable: it only feeds the next comparison.
+  let seenGrowth: { id: string; mature: boolean } | null = null;
+
+  $effect(() => {
+    const id = currentPath?.path.id;
+    const g = barGrowth;
+    if (!id || !g || app.reviewSession) {
+      seenGrowth = null;
+      return;
+    }
+    // Progress not loaded yet: a baseline taken now would be a guess.
+    if (!app.pathProgress[id]) return;
+    const before = seenGrowth;
+    seenGrowth = { id, mature: g.mature };
+    if (!before || before.id !== id || before.mature || !g.mature) return;
+    if (wasCelebrated(id)) return;
+    markCelebrated(id);
+    grownBanner = id;
+    const r = barTree?.getBoundingClientRect();
+    celebrate(r ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : undefined);
+  });
+
+  // The banner belongs to one path; leaving it clears the banner.
+  $effect(() => {
+    if (grownBanner && currentPath?.path.id !== grownBanner) grownBanner = null;
+  });
+
   // Links change when this page or any other is rewritten; refetch on both.
   $effect(() => {
     const p = page;
@@ -1552,9 +1589,21 @@
 
     {#if currentPath && !app.reviewSession}
       <div class="path-bar">
-        <span class="eyebrow">{t("paths.reading")}</span>
-        <strong class="ellipsis">{currentPath.path.name}</strong>
+        {#if barGrowth}
+          <span class="bar-tree" bind:this={barTree}>
+            <PathTree detail="mini" size={28} seed={currentPath.path.id} read={barGrowth.read} total={barGrowth.total} animate />
+          </span>
+        {/if}
+        <button
+          class="bar-name ellipsis"
+          title={t("paths.bar.open", { name: currentPath.path.name })}
+          onclick={() => currentPath && void openPathView(currentPath.path.id)}
+        >{currentPath.path.name}</button>
         <span class="muted">{t("paths.position", { n: currentPath.index + 1, total: currentPath.path.pages.length })}</span>
+        {#if barGrowth}
+          <span class="muted bar-mono">{t("paths.bar.read", { read: barGrowth.read, total: barGrowth.total })}</span>
+          <span class="chip" data-color={barStage === "mature" ? "rose" : "sage"}>{t(`tree.stage.${barStage}`)}</span>
+        {/if}
         <span class="grow"></span>
         <button
           class="btn btn-xs"
@@ -1571,6 +1620,20 @@
           {t("paths.next")}<Icon name="chevron-right" size={12} />
         </button>
       </div>
+      {#if grownBanner === currentPath.path.id}
+        <div class="grown-banner" role="status">
+          <div class="grown-text">
+            <strong class="display">{t("paths.bar.grownTitle")}</strong>
+            <span>{t("paths.bar.grownText", { name: currentPath.path.name })}</span>
+          </div>
+          <button class="btn btn-xs btn-primary" onclick={() => currentPath && void openPathView(currentPath.path.id)}>
+            {t("paths.bar.seeTree")}
+          </button>
+          <button class="btn btn-xs" aria-label={t("paths.bar.dismiss")} onclick={() => (grownBanner = null)}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      {/if}
     {/if}
 
     {#if app.reviewSession && highlights.length > 0}
@@ -2867,6 +2930,72 @@
   .path-bar .muted {
     color: var(--muted);
     white-space: nowrap;
+  }
+
+  .bar-tree {
+    display: inline-flex;
+    flex: none;
+    color: var(--text-soft);
+  }
+
+  .bar-name {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .bar-name:hover {
+    text-decoration: underline;
+  }
+
+  .bar-mono {
+    font-family: var(--mono);
+    font-size: var(--fs-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .grown-banner {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--c-sage-soft);
+    font-size: var(--fs-sm);
+    flex: none;
+    animation: grown-in var(--t-enter) var(--ease-out);
+  }
+
+  .grown-text {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .grown-text strong {
+    font-size: var(--fs-lg);
+    font-weight: 500;
+  }
+
+  @keyframes grown-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .grown-banner {
+      animation: none;
+    }
   }
 
   .path-check {
