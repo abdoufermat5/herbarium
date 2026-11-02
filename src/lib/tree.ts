@@ -39,6 +39,10 @@ export interface TreeElement {
   limb: number;
   /** Hidden again once progress reaches this value (the sprout parts). */
   hideAt?: number;
+  /** Skeleton branch or leaf-anchor index for the 3D hero; absent on base art. */
+  ref?: number;
+  /** Branch segment or leaf-card index within that source. */
+  part?: number;
 }
 
 export interface TreeModel {
@@ -149,6 +153,10 @@ interface Draft {
   hideAt?: number;
   /** Limb this element grows with, -1 outside a limb. */
   limb?: number;
+  /** Skeleton branch or leaf-anchor index for the 3D hero. */
+  ref?: number;
+  /** Branch segment or leaf-card index within that source. */
+  part?: number;
   n: number;
 }
 
@@ -258,6 +266,8 @@ function buildFull(seed: string): Geometry {
       mature: d.mature,
       hideAt: d.hideAt,
       limb: d.limb,
+      ref: d.ref,
+      part: d.part,
       n: count++,
     };
     drafts.push(draft);
@@ -304,6 +314,8 @@ function buildFull(seed: string): Geometry {
       depth: 0,
       w: w2(clamp(trunkRadii[mid] * 0.85, 0.35, 3.0)),
       g: 0.5 + k * 0.15,
+      ref: 0,
+      part: k,
     });
   });
 
@@ -321,7 +333,7 @@ function buildFull(seed: string): Geometry {
     if (l.z > zMax) zMax = l.z;
   }
   const zSpan = zMax - zMin || 1;
-  const leafCluster = (l: (typeof proj.leaves)[number], g: number) => {
+  const leafCluster = (l: (typeof proj.leaves)[number], g: number, ref: number) => {
     const zN = clamp((l.z - zMin) / zSpan, 0, 1);
     const nx = clamp((l.x - 45) / 45, -1, 1);
     const ny = clamp((l.y - 50) / 45, -1, 1);
@@ -333,7 +345,7 @@ function buildFull(seed: string): Geometry {
     else if (light > 0.8 && zN > 0.8) tone = 4;
     const depth = clamp(l.level, 1, 3);
     clusterPaths(l.x, l.y, l.angle, l.size).forEach((d, p) =>
-      add({ kind: "leaf", layer, d, depth, tone, g: g + 0.00001 * p, limb: l.limb }),
+      add({ kind: "leaf", layer, d, depth, tone, g: g + 0.00001 * p, limb: l.limb, ref, part: p }),
     );
   };
 
@@ -369,7 +381,7 @@ function buildFull(seed: string): Geometry {
     const last = pb.points.length - 1;
     if (b.level <= 1 && pb.points.length >= 4) {
       const m = Math.max(1, Math.floor(last / 2));
-      for (const [s, e] of [[0, m], [m, last]] as const) {
+      [[0, m], [m, last]].forEach(([s, e], part) => {
         add({
           kind: "branch",
           layer: LAYER.branch,
@@ -378,8 +390,10 @@ function buildFull(seed: string): Geometry {
           w: w2(clamp(pb.radii[Math.min((s + e) >> 1, pb.radii.length - 1)] * 0.85, 0.35, 3.0)),
           g,
           limb: j,
+          ref: i,
+          part,
         });
-      }
+      });
     } else {
       add({
         kind: "branch",
@@ -389,14 +403,16 @@ function buildFull(seed: string): Geometry {
         w: w2(clamp(pb.radii[last >> 1] * 0.85, 0.35, 3.0)),
         g,
         limb: j,
+        ref: i,
+        part: 0,
       });
     }
     let li = 0;
-    for (const l of proj.leaves) {
-      if (l.tip || l.parent !== i || l.limb !== j) continue;
-      leafCluster(l, g + 0.001 * (li + 1));
+    proj.leaves.forEach((l, ref) => {
+      if (l.tip || l.parent !== i || l.limb !== j) return;
+      leafCluster(l, g + 0.001 * (li + 1), ref);
       li++;
-    }
+    });
   };
 
   // Each limb grows in its own [g0, g0 + 1) window. Its level-1 branch comes
@@ -410,8 +426,8 @@ function buildFull(seed: string): Geometry {
     });
     const first = own.shift();
     if (first !== undefined) addBranch(j, first, g0 + 0.001);
-    const tip = proj.leaves.find((l) => l.tip && l.limb === j);
-    if (tip) leafCluster(tip, g0 + 0.002);
+    const tip = proj.leaves.findIndex((l) => l.tip && l.limb === j);
+    if (tip >= 0) leafCluster(proj.leaves[tip], g0 + 0.002, tip);
     own.forEach((i, k) => addBranch(j, i, g0 + 0.02 + k * 0.006));
   }
 
