@@ -6,6 +6,11 @@ const visible = (seed: string, total: number, read: number, detail: TreeDetail =
   const p = treeProgress(read, total);
   return new Set(growTree(seed, total, detail).elements.filter((e) => isGrown(e, p)).map((e) => e.i));
 };
+/** Grown and never hidden again: the sprout parts fall away, so they are not additive. */
+const persistent = (seed: string, total: number, read: number, detail: TreeDetail = "full") => {
+  const p = treeProgress(read, total);
+  return new Set(growTree(seed, total, detail).elements.filter((e) => e.hideAt === undefined && isGrown(e, p)).map((e) => e.i));
+};
 
 describe("growTree", () => {
   it("is deterministic per seed and differs between seeds", () => {
@@ -15,12 +20,12 @@ describe("growTree", () => {
     expect(shapes.size).toBe(5);
   });
 
-  it("is additive: the tree at p1 is contained in the tree at p2", () => {
+  it("is additive apart from the sprout parts, which hide at hideAt", () => {
     for (const detail of ["full", "mini"] as const) {
       for (const total of [3, 7, 40]) {
-        let prev = visible("additive", total, 0, detail);
+        let prev = persistent("additive", total, 0, detail);
         for (let read = 1; read <= total; read++) {
-          const next = visible("additive", total, read, detail);
+          const next = persistent("additive", total, read, detail);
           for (const i of prev) expect(next.has(i)).toBe(true);
           prev = next;
         }
@@ -50,7 +55,22 @@ describe("growTree", () => {
     expect(at0.some((e) => e.kind === "seed")).toBe(true);
     expect(at0.some((e) => e.kind === "branch")).toBe(true);
     expect(at0.some((e) => e.kind === "petals" || e.kind === "sun")).toBe(false);
-    expect(m.elements.every((e) => isGrown(e, 1))).toBe(true);
+    // The sprout parts are the only things that hide again: everything else is
+    // grown at full progress, and the seed and seed leaves are gone by then.
+    const sprouts = m.elements.filter((e) => e.hideAt !== undefined);
+    expect(sprouts.length).toBeGreaterThan(0);
+    for (const e of m.elements) expect(isGrown(e, 1)).toBe(e.hideAt === undefined);
+  });
+
+  it("never leaves a visible branch bare at 20% progress", () => {
+    for (const seed of ["life", "Networking basics", "Rust from the ground up", "x-17"]) {
+      for (const total of [3, 5, 8, 12, 40]) {
+        const m = growTree(seed, total, "full");
+        const vis = m.elements.filter((e) => isGrown(e, 0.2));
+        const limbsWithLeaves = new Set(vis.filter((e) => e.kind === "leaf").map((e) => e.limb));
+        for (const e of vis) if (e.kind === "branch" && e.depth >= 2) expect(limbsWithLeaves.has(e.limb)).toBe(true);
+      }
+    }
   });
 
   it("holds blossoms and the sun back until maturity", () => {
