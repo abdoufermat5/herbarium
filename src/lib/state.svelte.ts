@@ -110,6 +110,8 @@ interface AppState {
   pathId: string | null;
   /** The reading path the path view (its tree) shows. */
   pathView: string | null;
+  /** The "plant a reading path" dialog, and what it opened with; null when closed. */
+  plant: PlantRequest | null;
   /** The reader hides the sidebar, details and review bar. */
   focusMode: boolean;
   /** The "import from a Claude or ChatGPT export" dialog is open. */
@@ -209,6 +211,7 @@ export const app: AppState = $state({
   previews: {},
   pathId: null,
   pathView: null,
+  plant: null,
   focusMode: false,
   aiImportOpen: false,
   ai: null,
@@ -594,6 +597,7 @@ export function resetWorkspace() {
   app.previews = {};
   app.pathId = null;
   app.pathView = null;
+  app.plant = null;
   app.focusMode = false;
   knownProposals = null;
   app.createRequest = null;
@@ -788,6 +792,23 @@ export async function openInPath(pathId: string, pageId: string): Promise<boolea
   const opened = await openPage(pageId);
   if (opened) app.pathId = pathId;
   return opened;
+}
+
+/**
+ * What the plant dialog opens with. Without `pathId` it plants a new path,
+ * starting from `pages` (in order) when given; with `pathId` it edits that
+ * path's name and pages.
+ */
+export interface PlantRequest {
+  pathId?: string;
+  pages?: string[];
+}
+
+/** Open the dialog that plants a new reading path or tends an existing one. */
+export function openPlantPath(request: PlantRequest = {}) {
+  if (!app.config?.vaultPath) return;
+  app.paletteOpen = false;
+  app.plant = request;
 }
 
 /** Show a reading path: its tree and its pages in order. */
