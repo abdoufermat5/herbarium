@@ -149,8 +149,23 @@ function leaf(o: P, ang: number, L: number, w: number): string {
   const dy = Math.sin(ang);
   const px = -dy;
   const py = dx;
-  const at = (f: number, s: number) => `${n(o[0] + dx * L * f + px * w * s)} ${n(o[1] + dy * L * f + py * w * s)}`;
-  return `M${at(0, 0)}C${at(0.25, 1)} ${at(0.8, 0.7)} ${at(1, 0)}C${at(0.8, -0.7)} ${at(0.25, -1)} ${at(0, 0)}Z`;
+  const x = o[0];
+  const y = o[1];
+  const lx = dx * L;
+  const ly = dy * L;
+  const wx = px * w;
+  const wy = py * w;
+  // control points at 25% (full width) and 80% (70% width) along the leaf, mirrored
+  const ax = lx * 0.25;
+  const ay = ly * 0.25;
+  const bx = lx * 0.8;
+  const by = ly * 0.8;
+  const hx = wx * 0.7;
+  const hy = wy * 0.7;
+  return (
+    `M${n(x)} ${n(y)}C${n(x + ax + wx)} ${n(y + ay + wy)} ${n(x + bx + hx)} ${n(y + by + hy)} ${n(x + lx)} ${n(y + ly)}` +
+    `C${n(x + bx - hx)} ${n(y + by - hy)} ${n(x + ax - wx)} ${n(y + ay - wy)} ${n(x)} ${n(y)}Z`
+  );
 }
 
 // ---------------------------------------------------------------- drafts
@@ -253,7 +268,18 @@ function buildFull(seed: string): Geometry {
   const drafts: Draft[] = [];
   let count = 0;
   const add = (d: Omit<Draft, "n" | "depth" | "w" | "tone"> & Partial<Pick<Draft, "depth" | "w" | "tone">>) =>
-    drafts.push({ depth: 0, w: 0, tone: 0, ...d, n: count++ });
+    drafts.push({
+      kind: d.kind,
+      layer: d.layer,
+      d: d.d,
+      depth: d.depth ?? 0,
+      w: d.w ?? 0,
+      tone: d.tone ?? 0,
+      g: d.g,
+      base: d.base,
+      mature: d.mature,
+      n: count++,
+    });
 
   // Ground: an ink line, a soil mound, and the seed beneath.
   const gx = clamp(baseX - 30, 3, 27);
@@ -410,7 +436,18 @@ function buildMini(seed: string): Geometry {
   const drafts: Draft[] = [];
   let count = 0;
   const add = (d: Omit<Draft, "n" | "depth" | "w" | "tone"> & Partial<Pick<Draft, "depth" | "w" | "tone">>) =>
-    drafts.push({ depth: 0, w: 0, tone: 0, ...d, n: count++ });
+    drafts.push({
+      kind: d.kind,
+      layer: d.layer,
+      d: d.d,
+      depth: d.depth ?? 0,
+      w: d.w ?? 0,
+      tone: d.tone ?? 0,
+      g: d.g,
+      base: d.base,
+      mature: d.mature,
+      n: count++,
+    });
 
   add({ kind: "ground", layer: LAYER.ground, d: `M${n(baseX - 26)} ${GROUND}H${n(baseX + 26)}`, w: 3.2, g: -3, base: true });
   add({
