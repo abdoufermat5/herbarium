@@ -92,10 +92,11 @@
   let shownModel: unknown = null;
 
   const STAGGER_MS = 90; // between limb groups
-  const DRAW_MAX = 40; // fresh branches still worth their own draw-in
+  const DRAW_MAX = 60; // fresh branches still worth their own draw-in
   // Animating an SVG group makes WebKit redraw every path inside it each frame,
-  // so only a small step gets per-limb motion; a bigger one moves as one svg.
-  const STEP_MAX = 60; // fresh shapes still animated limb by limb
+  // so only a step of up to a page or two of the deepest model (about 90 shapes)
+  // gets per-limb motion; a bigger one moves as one svg.
+  const STEP_MAX = 90; // fresh shapes still animated limb by limb
 
   const view = $derived.by(() => {
     const m = model;
@@ -151,7 +152,7 @@
   const entrance = $derived(moving && fresh > 0 && view.from <= 0 && (fresh > STEP_MAX || growOnMount));
 
   // A big step (a first visit to a mature path) would fire hundreds of draw-ins;
-  // past a few dozen the groups carry the motion alone.
+  // past sixty the groups carry the motion alone.
   const draw = $derived.by(() => {
     let n = 0;
     for (const layer of view.layers) for (const band of layer.fresh) for (const el of band.items) if (el.kind === "branch") n++;
@@ -269,8 +270,25 @@
   .branch {
     fill: none;
   }
+  /* aerial perspective: finer wood recedes; inline stroke-width is untouched */
+  .branch.d0 {
+    stroke-opacity: 0.98;
+  }
+  .branch.d1 {
+    stroke-opacity: 0.94;
+  }
+  .branch.d2 {
+    stroke-opacity: 0.88;
+  }
+  .branch.d3 {
+    stroke-opacity: 0.78;
+  }
+  .branch.d4 {
+    stroke-opacity: 0.68;
+  }
   .branch.lit {
     stroke: var(--text);
+    stroke-opacity: 1;
   }
   .ground {
     fill: none;
@@ -304,6 +322,12 @@
     stroke: var(--c-teal);
     stroke-opacity: 0.4;
   }
+  .full .leaf.t0 {
+    fill-opacity: 0.42;
+  }
+  .full .leaf.t1 {
+    fill-opacity: 0.55;
+  }
   .leaf.t2 {
     fill: var(--c-sage);
     fill-opacity: 0.5;
@@ -321,6 +345,12 @@
     fill-opacity: 0.5;
     stroke: var(--c-teal);
     stroke-opacity: 0.7;
+  }
+  .leaf.d3:not(.dim) {
+    opacity: 0.88;
+  }
+  .leaf.d4:not(.dim) {
+    opacity: 0.8;
   }
   .mini .leaf {
     stroke-width: 1;
