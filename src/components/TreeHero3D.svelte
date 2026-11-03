@@ -213,8 +213,7 @@
   .hero3d {
     position: absolute;
     top: 0;
-    left: 50%;
-    transform: translateX(-50%);
+    left: 0;
     opacity: 0;
     pointer-events: none;
     transition: opacity 300ms ease;
