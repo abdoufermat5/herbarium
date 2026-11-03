@@ -387,8 +387,22 @@ jobs:
     steps:
       # winget-releaser updates an existing winget-pkgs package; the first
       # submission for abdoufermat5.Herbarium is made by hand (see
-      # docs/distribution.md).
+      # docs/distribution.md). Skip, with a notice, until that manifest exists.
+      - name: Is the package in winget-pkgs?
+        id: package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WINGET_TOKEN }}
+        run: |
+          if gh api 'repos/microsoft/winget-pkgs/contents/manifests/a/abdoufermat5/Herbarium' >/dev/null 2>&1; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::abdoufermat5.Herbarium has no winget-pkgs manifest yet; submit the first version by hand (see docs/distribution.md). Skipping this release's WinGet update."
+          fi
+
       - uses: vedantmgoyal9/winget-releaser@v2
+        if: steps.package.outputs.found == 'true'
         with:
           identifier: abdoufermat5.Herbarium
           release-repository: herbarium

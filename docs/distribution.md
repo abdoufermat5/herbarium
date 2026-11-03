@@ -74,7 +74,9 @@ One-time setup:
    `WINGET_TOKEN`; winget-releaser pushes updates to the existing fork.
 
 Missing `WINGET_TOKEN`: the job is skipped; the version simply is not submitted
-to WinGet.
+to WinGet. The workflow also skips, with a notice, while the package has no
+manifest in `winget-pkgs` yet, so a token set before the first submission does
+not turn a release run red.
 
 ## Snap Store
 
@@ -108,9 +110,14 @@ One-time setup:
 
    ```bash
    snapcraft export-login --snaps=herbarium \
-     --acls package_access,package_push,package_update,package_release - \
+     --acls package_access,package_manage,package_push,package_update,package_release - \
      | gh secret set SNAPCRAFT_STORE_CREDENTIALS
    ```
+
+   Listing fields (summary, description and icon) come from
+   `snapcraft.yaml`. The workflow pushes them after releasing with
+   `snapcraft upload-metadata --force`, because an edit made in the Store
+   dashboard turns the store's automatic metadata updates off.
 
 3. To publish an already-released version (v0.2.0 shipped before the snap
    channel existed), dispatch the workflow with its tag:

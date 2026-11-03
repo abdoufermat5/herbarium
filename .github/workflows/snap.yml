@@ -197,3 +197,16 @@ jobs:
         with:
           snap: ${{ steps.file.outputs.snap }}
           release: ${{ steps.channel.outputs.channel }}
+
+      # A manual edit of the listing in the Store dashboard turns automatic
+      # metadata updates (UMoR) off; force the summary, description and icon
+      # from the snap so snapcraft.yaml stays the source of truth.
+      - name: Update the store listing
+        if: steps.creds.outputs.configured == 'true'
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        run: |
+          if ! command -v snapcraft >/dev/null 2>&1; then
+            sudo snap install snapcraft --classic
+          fi
+          snapcraft upload-metadata "${{ steps.file.outputs.snap }}" --force

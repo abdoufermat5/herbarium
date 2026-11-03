@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Fixed
+- The snap workflow now pushes the Snap Store listing (summary, description and icon) from `snapcraft.yaml` after publishing, and the WinGet job skips cleanly until its first manual manifest exists instead of failing the release run.
+
 ## [0.5.0] - 2026-11-03
 
 ### Added
