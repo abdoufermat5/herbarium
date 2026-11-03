@@ -600,6 +600,7 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
       const mesh = new Mesh(geometry, barkMat);
       mesh.userData.page = element.page;
       mesh.userData.ref = ref;
+      mesh.userData.depth = element.depth;
 
       const group = new Group();
       group.position.set(origin[0], origin[1], origin[2]);
@@ -618,10 +619,11 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
         appear: 0,
       });
 
-      if (element.depth <= 1) {
+      if (element.depth === 1) {
         const hitGeometry = makeTube(points, radii, origin, HIT_SCALE);
         const hit = new Mesh(hitGeometry, hitMat);
         hit.userData.page = element.page;
+        hit.userData.depth = element.depth;
         group.add(hit);
         hitProxies.push(hit);
         branchGeometries.push(hitGeometry);
@@ -971,7 +973,7 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
     }
     if (!rebuilt && nextProgress === progress) return;
     progress = nextProgress;
-    applyGrowth(true);
+    applyGrowth(!rebuilt);
   }
 
   function setHighlight(next: number | null) {
@@ -1046,31 +1048,35 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
     scene.updateMatrixWorld(true);
     raycaster.setFromCamera(pointer, camera);
 
-    const proxies = raycaster.intersectObjects(hitProxies, false);
-    for (const hit of proxies) {
-      if (hit.object.parent && !hit.object.parent.visible) continue;
-      const page = hit.object.userData.page;
-      if (typeof page === "number" && page >= 0) return page;
-    }
-
+    // Shapes under the pointer win; limb proxies are only the fallback for
+    // clicks that miss every leaf and branch (matching the SVG).
+    const shapes: { distance: number; page: number }[] = [];
+    const addShape = (distance: number, page: unknown) => {
+      if (typeof page === "number" && page >= 0) shapes.push({ distance, page });
+    };
     if (leafMesh && leafMesh.count > 0) {
       leafMesh.boundingSphere = null;
-      const leaves = raycaster.intersectObject(leafMesh, false);
-      for (const hit of leaves) {
+      for (const hit of raycaster.intersectObject(leafMesh, false)) {
         const id = hit.instanceId;
-        if (id === undefined) continue;
-        const page = leafPages[id];
-        if (page !== undefined && page >= 0) return page;
+        if (id !== undefined) addShape(hit.distance, leafPages[id]);
       }
     }
+    for (const hit of raycaster.intersectObjects(branchMeshes, false)) {
+      if (hit.object.parent && !hit.object.parent.visible) continue;
+      if (hit.object.userData.depth === 0) continue;
+      addShape(hit.distance, hit.object.userData.page);
+    }
+    shapes.sort((a, b) => a.distance - b.distance);
+    if (shapes.length > 0) return shapes[0].page;
 
-    const branches = raycaster.intersectObjects(branchMeshes, false);
-    for (const hit of branches) {
+    const proxies: { distance: number; page: number }[] = [];
+    for (const hit of raycaster.intersectObjects(hitProxies, false)) {
       if (hit.object.parent && !hit.object.parent.visible) continue;
       const page = hit.object.userData.page;
-      if (typeof page === "number" && page >= 0) return page;
+      if (typeof page === "number" && page >= 0) proxies.push({ distance: hit.distance, page });
     }
-    return -1;
+    proxies.sort((a, b) => a.distance - b.distance);
+    return proxies[0]?.page ?? -1;
   }
 
   function dispose() {
@@ -1078,7 +1084,6 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
     disposed = true;
     cancelRaf();
     canvas.removeEventListener("webglcontextlost", onContextLost);
-    canvas.removeEventListener("webglcontextrestored", onContextRestored);
     clearTree();
     leafGeometry.dispose();
     blossomGeometry.dispose();
@@ -1107,13 +1112,7 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
     cancelRaf();
   }
 
-  function onContextRestored() {
-    contextLost = false;
-    if (visible) renderOnce();
-  }
-
   canvas.addEventListener("webglcontextlost", onContextLost);
-  canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   try {
     buildTree();
