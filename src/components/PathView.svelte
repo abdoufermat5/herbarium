@@ -158,18 +158,20 @@
                   label={path.name}
                 />
               </span>
-              <TreeHero3D
-                seed={path.id}
-                read={growth.read}
-                total={growth.total}
-                size={360}
-                label={path.name}
-                {highlight}
-                onlimbclick={openIndex}
-                animate
-                entrance={playMoment}
-                onactive={(on) => (hero3d = on)}
-              />
+              {#key path.id}
+                <TreeHero3D
+                  seed={path.id}
+                  read={growth.read}
+                  total={growth.total}
+                  size={360}
+                  label={path.name}
+                  {highlight}
+                  onlimbclick={openIndex}
+                  animate
+                  entrance={playMoment}
+                  onactive={(on) => (hero3d = on)}
+                />
+              {/key}
             </span>
           </div>
           {#if playMoment && momentDone}
