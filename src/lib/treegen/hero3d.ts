@@ -19,7 +19,7 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
-  PerspectiveCamera,
+  OrthographicCamera,
   PlaneGeometry,
   Quaternion,
   Raycaster,
@@ -75,7 +75,6 @@ export interface HeroHandle {
   dispose(): void;
 }
 
-const FOV = 34;
 const ASPECT = 0.9;
 const DPR_MAX = 1.75;
 const TWEEN_MS = 500;
@@ -84,6 +83,7 @@ const BRANCH_FROM = 0.8;
 const LEAF_FROM = 0.7;
 const EPS = 1e-6;
 const RADIAL_SEGMENTS = 5;
+const BARK_SCALE = 0.55;
 const HIT_SCALE = 2.6;
 const YAW = 0.35;
 const ELEVATION = 0.12;
@@ -186,7 +186,7 @@ function makeTube(points: V3[], radii: number[], origin: V3, thickness = 1): Buf
     }
     binormal.crossVectors(tangent, normal).normalize();
 
-    const radius = (radii[Math.min(i, radii.length - 1)] ?? 0.1) * thickness;
+    const radius = (radii[Math.min(i, radii.length - 1)] ?? 0.1) * thickness * BARK_SCALE;
     point.set(points[i][0], points[i][1], points[i][2]).sub(base);
     for (let j = 0; j < radial; j++) {
       const angle = (j / radial) * Math.PI * 2;
@@ -384,11 +384,13 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
   renderer.setClearColor(0x000000, 0);
 
   const scene = new Scene();
-  const camera = new PerspectiveCamera(FOV, ASPECT, 0.1, 1000);
   const fit = fitSkeleton(skel);
   const center = fit.center;
   const radius = fit.radius;
-  const distance = (radius / Math.sin((FOV * Math.PI) / 360)) * 0.86;
+  const distance = radius * 3;
+  const halfH = radius * 1.08;
+  const halfW = halfH * ASPECT;
+  const camera = new OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, distance + radius * 4);
   const viewDir = new Vector3(
     Math.sin(YAW) * Math.cos(ELEVATION),
     Math.sin(ELEVATION),
@@ -396,8 +398,6 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
   ).normalize();
   camera.position.copy(center).addScaledVector(viewDir, distance);
   camera.lookAt(center.x, center.y + radius * 0.05, center.z);
-  camera.near = Math.max(0.1, distance * 0.02);
-  camera.far = distance + radius * 5;
   camera.updateProjectionMatrix();
 
   scene.add(new HemisphereLight(0xfff6e8, 0x6f6154, 0.9));
@@ -661,7 +661,7 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
       const direction = new Vector3(anchor.dir[0], anchor.dir[1], anchor.dir[2]).normalize();
       const quaternion = leafQuaternion(direction, anchor.at, part);
       const position = new Vector3(anchor.at[0], anchor.at[1], anchor.at[2]);
-      const leafSize = anchor.size * 1.2;
+      const leafSize = anchor.size * 1.05;
       const baseColor = toneColor(element.tone, colors);
 
       matrix.compose(position, quaternion, scaleVector.setScalar(leafSize));
@@ -1013,8 +1013,6 @@ export function createHero(canvas: HTMLCanvasElement, options: HeroOptions): Her
     size = clamp(finite(nextSize, size), 1, 8192);
     renderer.setPixelRatio(Math.min(typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1, DPR_MAX));
     renderer.setSize(size * ASPECT, size, false);
-    camera.aspect = ASPECT;
-    camera.updateProjectionMatrix();
     if (visible) renderOnce();
   }
 
