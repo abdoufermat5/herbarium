@@ -143,10 +143,22 @@ test("organize with AI: review, apply and undo", { skip: unavailable ?? false },
   const sidecar = JSON.parse(readFileSync(join(vault, "Programming/Rust/ownership.json"), "utf8"));
   assert.deepEqual(sidecar.tags, ["systems"]);
 
-  // Undo: back where they were, the tag removed.
-  await app.waitText("Undo");
-  await app.click("Undo", ".toast button");
-  await app.waitText("Everything is back where it was", 30000);
+  // Undo: back where they were, the tag removed. Click the action on the
+  // organize toast itself: another toast may have arrived and cover it.
+  const undo = await app.exec(() => {
+    const toast = [...document.querySelectorAll(".toast")].find((el) => el.textContent.includes("2 pages organized"));
+    const action = toast?.querySelector("button");
+    action?.click();
+    return action?.textContent?.trim() ?? null;
+  });
+  assert.equal(undo, "Undo", "the organize toast offers Undo");
+  try {
+    await app.waitText("Everything is back where it was", 30000);
+  } catch (e) {
+    await shot("undo-failed");
+    console.error("Undo did not finish. Screen text:\n" + (await app.text()));
+    throw e;
+  }
   assert.ok(where("ownership.html"));
   assert.ok(where("Inbox/lifetimes.html"));
   const back = JSON.parse(readFileSync(join(vault, "ownership.json"), "utf8"));

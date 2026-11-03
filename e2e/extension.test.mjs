@@ -125,6 +125,12 @@ before(async () => {
   });
   worker = context.serviceWorkers()[0] ?? (await context.waitForEvent("serviceworker"));
   assert.equal(worker.url(), `chrome-extension://${EXTENSION_ID}/background.js`);
+  // background.js defines `herbarium` after it has opened the native port.
+  await waitFor(
+    () => worker.evaluate(() => typeof herbarium !== "undefined").catch(() => false),
+    10000,
+    "the extension's native messaging bridge",
+  );
 });
 
 after(async () => {
