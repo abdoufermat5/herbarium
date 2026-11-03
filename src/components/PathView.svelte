@@ -330,6 +330,8 @@
   .tree-seed {
     display: block;
     position: relative;
+    width: fit-content;
+    margin: 0 auto;
     transform-origin: 50% 92%;
   }
   .tree-fallback {
