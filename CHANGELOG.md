@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-03
+
 ### Added
 - The reading-path view grows a 3D hero where hardware WebGL is available: a lazily loaded, flat-shaded tree built from the same skeleton and read progress as the SVG, with clickable limbs, theme-aware colours, and the SVG tree as the fallback on software or lost contexts.
 - Planting a reading path is now a dialog: search the library, fill the order from a folder, a tag or the pages saved most recently, drag (or use Alt+↑/↓) to set the reading order, and watch the tree the name will grow; pressing Ctrl/⌘+Enter plants it and the path view drops the seed into place. Existing paths open in the same dialog from "Add or reorder pages" to change their name, description and pages.
@@ -199,7 +201,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.4.2...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/abdoufermat5/herbarium/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/abdoufermat5/herbarium/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/abdoufermat5/herbarium/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/abdoufermat5/herbarium/compare/v0.3.2...v0.4.0
