@@ -27,6 +27,9 @@ Thumbs.db
 *.suo
 *.sw?
 
+# Local credentials
+.snap_pass
+
 # Project notes (kept local by choice)
 CONTEXT.md
 docs/*-design.md

@@ -119,6 +119,11 @@ One-time setup:
    `snapcraft upload-metadata --force`, because an edit made in the Store
    dashboard turns the store's automatic metadata updates off.
 
+   Screenshots are store-side media, not part of `snapcraft.yaml` or a
+   revision. When the interface changes, replace them (`docs/screenshots`,
+   1280×800) in the Store dashboard; they stay across releases and weekly
+   snap rebuilds.
+
 3. To publish an already-released version (v0.2.0 shipped before the snap
    channel existed), dispatch the workflow with its tag:
 
