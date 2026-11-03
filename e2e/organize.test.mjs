@@ -144,8 +144,9 @@ test("organize with AI: review, apply and undo", { skip: unavailable ?? false },
   assert.deepEqual(sidecar.tags, ["systems"]);
 
   // Undo: back where they were, the tag removed.
-  await app.click("Undo", ".toast button, button");
-  await app.waitText("Everything is back where it was");
+  await app.waitText("Undo");
+  await app.click("Undo", ".toast button");
+  await app.waitText("Everything is back where it was", 30000);
   assert.ok(where("ownership.html"));
   assert.ok(where("Inbox/lifetimes.html"));
   const back = JSON.parse(readFileSync(join(vault, "ownership.json"), "utf8"));

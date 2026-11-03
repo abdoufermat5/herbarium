@@ -171,7 +171,11 @@ fn progress_counts_opened_pages_still_in_the_vault() {
     let vault = temp_vault("progress");
     let host = open(&vault);
     let (a, b, c) = (page(&host, "A"), page(&host, "B"), page(&host, "C"));
-    call(&host, "paths.create", json!({ "name": "Grow", "pages": [a, b, c] }));
+    call(
+        &host,
+        "paths.create",
+        json!({ "name": "Grow", "pages": [a, b, c] }),
+    );
     call(&host, "paths.create", json!({ "name": "Empty" }));
     assert_eq!(
         call(&host, "paths.progress", json!({})),
@@ -180,7 +184,8 @@ fn progress_counts_opened_pages_still_in_the_vault() {
 
     // Opened out of order, the read list still follows the path's order.
     for id in [&c, &a] {
-        host.call(Caller::Ui, "reads.mark", json!({ "id": id })).unwrap();
+        host.call(Caller::Ui, "reads.mark", json!({ "id": id }))
+            .unwrap();
     }
     assert_eq!(
         call(&host, "paths.progress", json!({}))["grow"],

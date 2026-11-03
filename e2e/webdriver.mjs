@@ -61,8 +61,13 @@ export async function launchApp(env) {
   const port = await freePort();
   const nativePort = await freePort();
   let log = "";
+  // Force the app onto the Xvfb display even on a Wayland host: with
+  // WAYLAND_DISPLAY set, GTK would open the window on the real session, where
+  // xdotool (the demo) and x11grab cannot see it.
+  const driverEnv = { ...process.env, ...env, DISPLAY: display, GDK_BACKEND: "x11", NO_AT_BRIDGE: "1" };
+  delete driverEnv.WAYLAND_DISPLAY;
   const driver = spawn("tauri-driver", ["--port", String(port), "--native-port", String(nativePort)], {
-    env: { ...process.env, ...env, DISPLAY: display, NO_AT_BRIDGE: "1" },
+    env: driverEnv,
   });
   driver.stdout.on("data", (d) => (log += d));
   driver.stderr.on("data", (d) => (log += d));
