@@ -9,6 +9,7 @@
   import Icon from "../lib/Icon.svelte";
   import VitalityLeaf from "./VitalityLeaf.svelte";
   import PathTree from "./PathTree.svelte";
+  import TreeHero3D from "./TreeHero3D.svelte";
 
   const GROW_MS = 1200;
 
@@ -36,6 +37,7 @@
   // The maturity moment plays once per path: decided when the view opens.
   const playMoment = untrack(() => !!id && pathGrowth(id).mature && !wasCelebrated(id));
   let momentDone = $state(false);
+  let hero3d = $state(false);
   let planted = $state(false);
   let stageEl = $state<HTMLElement | null>(null);
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -141,18 +143,32 @@
       <div class="hero">
         <div class="stage" bind:this={stageEl} use:reveal>
           <div class="tree">
-            <span class="tree-seed" class:drop={planted}>
-              <PathTree
+            <span class="tree-seed" class:drop={planted} class:hero3d>
+              <span class="tree-fallback" aria-hidden={hero3d ? "true" : undefined}>
+                <PathTree
+                  seed={path.id}
+                  read={growth.read}
+                  total={growth.total}
+                  size={360}
+                  detail="full"
+                  animate
+                  growOnMount={playMoment}
+                  {highlight}
+                  onlimbclick={openIndex}
+                  label={path.name}
+                />
+              </span>
+              <TreeHero3D
                 seed={path.id}
                 read={growth.read}
                 total={growth.total}
                 size={360}
-                detail="full"
-                animate
-                growOnMount={playMoment}
+                label={path.name}
                 {highlight}
                 onlimbclick={openIndex}
-                label={path.name}
+                animate
+                entrance={playMoment}
+                onactive={(on) => (hero3d = on)}
               />
             </span>
           </div>
@@ -313,7 +329,18 @@
   }
   .tree-seed {
     display: block;
+    position: relative;
     transform-origin: 50% 92%;
+  }
+  .tree-fallback {
+    display: block;
+  }
+  .tree-seed :global(svg.tree) {
+    transition: opacity 300ms ease;
+  }
+  .tree-seed.hero3d :global(svg.tree) {
+    opacity: 0;
+    pointer-events: none;
   }
   .tree-seed.drop {
     animation: seed-drop 420ms var(--ease-spring) both;
@@ -501,6 +528,9 @@
     .planted,
     .tree-seed.drop {
       animation: none;
+    }
+    .tree-seed :global(svg.tree) {
+      transition: none;
     }
   }
 </style>
