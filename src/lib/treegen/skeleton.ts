@@ -3,8 +3,8 @@ import { clamp, makeRng, range } from "./rng";
 
 const GOLDEN = 2.39996;
 const MAX_BRANCHES = 70;
-const MAX_LEAVES = 76;
-const MIN_LEAVES = 68;
+const MAX_LEAVES = 84;
+const MIN_LEAVES = 76;
 const TILT_MIN = 0.6981317;
 const TILT_MAX = 1.134464;
 const TROPISM_GAIN = 0.022;
@@ -222,11 +222,13 @@ function build(seed: string): Skeleton {
     const b = branches[i];
     if (b.level === 1) {
       leaves.push(anchor(b, i, 1, 1, true));
-      leaves.push(anchor(b, i, 1, 0.55, false));
+      leaves.push(anchor(b, i, 1, 0.35, false));
+      leaves.push(anchor(b, i, 1, 0.6, false));
       leaves.push(anchor(b, i, 1, 0.85, false));
     } else if (b.level === 2) {
       leaves.push(anchor(b, i, 2, 1, false));
-      leaves.push(anchor(b, i, 2, 0.55, false));
+      leaves.push(anchor(b, i, 2, 0.35, false));
+      leaves.push(anchor(b, i, 2, 0.65, false));
     } else if (b.level === 3) {
       leaves.push(anchor(b, i, 3, 0.6, false));
       leaves.push(anchor(b, i, 3, 1, false));
