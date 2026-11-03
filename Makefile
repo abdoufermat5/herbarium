@@ -1,7 +1,7 @@
 MANIFEST := --manifest-path desktop/Cargo.toml
 VAULT ?=
 
-.PHONY: help install dev build check lint test ci e2e demo mcp icons release clean
+.PHONY: help install dev build check lint test ci e2e demo screenshots mcp icons release clean
 
 help: ## List targets
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-10s %s\n", $$1, $$2}'
@@ -32,6 +32,9 @@ e2e: ## Run the end-to-end suites (CLI, extension, desktop app)
 
 demo: ## Record docs/demo.gif (needs Xvfb, tauri-driver, WebKitWebDriver, xdotool, ffmpeg)
 	HERBARIUM_REBUILD=1 node e2e/tools/demo.mjs docs/demo.gif
+
+screenshots: ## Retake docs/screenshots (same needs as demo, without xdotool)
+	node e2e/tools/screenshots.mjs
 
 mcp: ## Run the MCP server on stdio (VAULT=path to override the app's vault)
 	cargo run $(MANIFEST) --quiet -- mcp $(if $(VAULT),--vault $(VAULT))

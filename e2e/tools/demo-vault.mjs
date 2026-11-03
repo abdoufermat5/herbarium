@@ -1,7 +1,7 @@
 // The vault the README demo is recorded in: a small library of pages an AI
 // tool might have made, in five folders, linked to each other. Pages follow
 // the reader's theme and are self-contained (no network).
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const link = (id, text) => `<a href="herbarium-app://open/${id}">${text}</a>`;
@@ -278,6 +278,79 @@ export function writeDemoVault(dir) {
     mkdirSync(join(dir, p.folder), { recursive: true });
     writeFileSync(join(dir, p.folder, `${p.id}.html`), page(p));
   }
+}
+
+const DAY = 86_400_000;
+
+/**
+ * Tags, three reading paths at different stages, and a spread of review
+ * states, so every vitality level, the due queue and every tree size show up.
+ * `call(area.verb, args)` runs one vault-core operation (see mcp.mjs).
+ */
+export async function seedDemoVault(vault, call) {
+  for (const p of PAGES) await call("pages.update", { id: p.id, tags: p.tags });
+  await call("paths.create", { name: "Networking basics", pages: ["dns", "tcp-handshake", "http-caching"] });
+  await call("paths.create", { name: "Rust from the ground up", pages: ["ownership", "lifetimes", "traits"] });
+  await call("paths.create", {
+    name: "Life, cell by cell",
+    pages: ["enzymes", "photosynthesis", "mitosis", "binary-search", "big-o"],
+  });
+  for (const id of ["dns", "ownership", "lifetimes", "traits", "enzymes", "photosynthesis"]) markRead(vault, id);
+  for (const id of ["big-o", "mitosis", "french-revolution", "color-contrast", "photosynthesis", "tcp-handshake", "dns"]) {
+    await call("review.complete", { id, grade: "good" });
+  }
+  const now = Date.now();
+  // [lastReview days ago, next review in days (negative: overdue), stability days]
+  const states = {
+    "big-o": [1, 9, 10],
+    mitosis: [6, 4, 10],
+    "french-revolution": [2, 1, 3],
+    "color-contrast": [12, -2, 10],
+    photosynthesis: [5, -1, 4],
+    "tcp-handshake": [40, -30, 10],
+    dns: [3, 0, 3],
+  };
+  for (const file of sidecars(vault)) {
+    const meta = JSON.parse(readFileSync(file, "utf8"));
+    const state = states[meta.id];
+    if (!state) continue;
+    const [ago, next, stability] = state;
+    meta.lastReview = now - ago * DAY;
+    meta.nextReview = next === 0 ? now - 60_000 : now + next * DAY;
+    meta.intervalMinutes = Math.round(((meta.nextReview - meta.lastReview) / DAY) * 1440);
+    meta.ext ??= {};
+    const log = Array.from({ length: 3 }, (_, i) => ({ at: meta.lastReview - i * 3 * DAY, grade: "good", intervalMinutes: 1440 * (3 - i) }));
+    meta.ext.review = { count: log.length, log, stability, difficulty: 5 };
+    writeFileSync(file, JSON.stringify(meta, null, 2));
+  }
+  await call("vault.rescan").catch(() => {});
+}
+
+/** What the core's `reads.mark` does: `.herbarium/reads.json` keeps `{ last, count }` per page. */
+function markRead(vault, id) {
+  const file = join(vault, ".herbarium", "reads.json");
+  let reads = {};
+  try {
+    reads = JSON.parse(readFileSync(file, "utf8"));
+  } catch {
+    mkdirSync(join(vault, ".herbarium"), { recursive: true });
+  }
+  const read = { last: Date.now(), count: (reads[id]?.count ?? 0) + 1 };
+  reads[id] = read;
+  writeFileSync(file, JSON.stringify(reads));
+  return read;
+}
+
+/** Every page sidecar (`*.json` next to a `.html`) under the vault. */
+function sidecars(dir) {
+  const out = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name.startsWith(".")) continue;
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...sidecars(path));
+    else if (entry.name.endsWith(".json")) out.push(path);
+  }
+  return out;
 }
 
 /** The quiz the fake AI service "writes" when the demo remixes a page. */

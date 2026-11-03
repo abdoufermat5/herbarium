@@ -3,16 +3,17 @@
   <id>io.github.abdoufermat5.Herbarium</id>
 
   <name>Herbarium</name>
-  <summary>Reader for the HTML pages AI tools generate</summary>
+  <summary>A library for the HTML pages AI tools make</summary>
 
   <metadata_license>MIT</metadata_license>
   <project_license>MIT</project_license>
 
   <description>
     <p>
-      Herbarium is a desktop reader for the HTML pages AI tools generate. Save a
-      page, find it later, open it with its interactivity intact, and schedule it
-      for review so it comes back when you need it.
+      Herbarium is a quiet home for the HTML explainers, cheat sheets and tiny
+      interactive tools that AI makes. Save a page from the browser, a chat
+      export or a file, read it offline with its interactivity intact, highlight
+      it, and let adaptive review bring it back right before you would forget it.
     </p>
     <p>
       Pages stay plain .html files in a folder you own, with a small JSON sidecar
@@ -21,9 +22,12 @@
       per-page switch.
     </p>
     <p>
-      Includes full-text search, folders and tags, a keyboard-driven review
-      session, a command palette, light and dark themes, and an English and
-      French interface.
+      Today is a dashboard with a review ring, a garden of page vitality and a
+      grove of reading paths. Paths grow a tree as you read them, review sessions
+      end with a summary and a streak, and ten type styles change the app's
+      voice. There is also a link graph, full-text search with filters, AI remix
+      and organizing, a command palette, light and dark themes, and an English
+      and French interface.
     </p>
   </description>
 
@@ -41,20 +45,24 @@
   <!-- Rendered by e2e/tools/screenshots.mjs. -->
   <screenshots>
     <screenshot type="default">
-      <caption>Today: what is due, the reading path and recent pages</caption>
+      <caption>Today: what is due, the garden of page vitality and the grove of reading paths</caption>
       <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-today.png</image>
     </screenshot>
     <screenshot>
-      <caption>The library, with page previews, folders and tags</caption>
+      <caption>The library, with page previews, due dates and vitality leaves</caption>
       <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-library.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>A reading path beside the tree it grew</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-path.png</image>
     </screenshot>
     <screenshot>
       <caption>Reading a saved page, scripts included, in a sandbox</caption>
       <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-reader.png</image>
     </screenshot>
     <screenshot>
-      <caption>A review session</caption>
-      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-review.png</image>
+      <caption>A finished review session: grades, time, pages recovered and streak</caption>
+      <image>https://raw.githubusercontent.com/abdoufermat5/herbarium/main/docs/screenshots/light-session.png</image>
     </screenshot>
     <screenshot>
       <caption>The dark theme</caption>
@@ -74,6 +82,19 @@
   <content_rating type="oars-1.1"/>
 
   <releases>
+    <release version="0.5.0" date="2026-11-03">
+      <description>
+        <p>
+          Reading paths now grow trees, with a flat-shaded 3D hero where WebGL is
+          available. Today is a dashboard with a review ring, a garden of page
+          vitality and a grove of every path. Review sessions get a progress bar,
+          a timer, grade buttons that show the interval they would schedule, and a
+          summary with the pages recovered and your streak. Ten type styles and
+          four text sizes change the app's voice, and motion, illustrations and
+          celebrations make the library feel alive.
+        </p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-04">
       <description>
         <p>

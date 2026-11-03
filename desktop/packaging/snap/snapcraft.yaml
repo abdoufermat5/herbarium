@@ -15,7 +15,7 @@ base: core22
 architectures: [amd64]
 version: "__VERSION__"
 title: Herbarium
-summary: Reader for the HTML pages AI tools generate
+summary: A library for the HTML pages AI tools make
 license: MIT
 contact: https://github.com/abdoufermat5/herbarium/issues
 issues: https://github.com/abdoufermat5/herbarium/issues
@@ -24,9 +24,16 @@ website: https://github.com/abdoufermat5/herbarium
 # Store listing icon (512x512), copied next to this file by snap.yml.
 icon: herbarium.png
 description: |
-  Herbarium is a desktop reader for the HTML pages AI tools generate. Save a
-  page, find it later, open it with its interactivity intact, and schedule it
-  for review so it comes back when you need it.
+  Herbarium is a quiet home for the HTML explainers, cheat sheets and tiny
+  interactive tools that AI makes. Save a page from the browser, a chat export
+  or a file, read it offline with its interactivity intact, highlight it, and
+  let adaptive review bring it back right before you would forget it.
+
+  Today is a dashboard with a review ring, a garden of page vitality and a grove
+  of reading paths. Paths grow a tree as you read them, review sessions end with
+  a summary and a streak, and ten type styles change the app's voice. There is
+  also a link graph, full-text search with filters, AI remix and organizing, a
+  command palette, light and dark themes, and an English and French interface.
 
   Your pages stay plain .html files in a folder you own. Herbarium also speaks
   the Model Context Protocol, so coding agents can save, search and schedule

@@ -4,13 +4,14 @@
 //
 // usage: node e2e/tools/demo.mjs [out.gif]   (needs Xvfb, tauri-driver,
 // WebKitWebDriver, xdotool and ffmpeg; HERBARIUM_REBUILD=1 rebuilds the app)
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { join, resolve } from "node:path";
 import { tempDir } from "../helpers.mjs";
 import { desktopBin, launchApp } from "../webdriver.mjs";
-import { PAGES, remixedWithQuiz, writeDemoVault } from "./demo-vault.mjs";
+import { PAGES, remixedWithQuiz, seedDemoVault, writeDemoVault } from "./demo-vault.mjs";
+import { mcpClient } from "./mcp.mjs";
 
 const OUT = resolve(process.argv[2] ?? "docs/demo.gif");
 const W = 1200;
@@ -61,30 +62,17 @@ writeFileSync(
 );
 writeFileSync(join(config, "secrets.json"), JSON.stringify({ anthropicKey: "sk-demo" }), { mode: 0o600 });
 
-// Tags, a reading path, a few pages due and a little review history, through
-// the MCP server like an agent would.
+// Tags, reading paths, reads, pages due and review history, through the MCP
+// server like an agent would.
 const env = {
   HOME: work,
   XDG_CONFIG_HOME: join(work, "config"),
   XDG_DATA_HOME: join(work, "data"),
   HERBARIUM_ANTHROPIC_API: `http://127.0.0.1:${api.address().port}`,
 };
-function mcp(calls) {
-  const lines = [
-    { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "demo", version: "1" } } },
-    ...calls.map(([name, args], i) => ({ jsonrpc: "2.0", id: i + 1, method: "tools/call", params: { name, arguments: args } })),
-  ];
-  spawnSync(desktopBin(), ["mcp", "--vault", vault], {
-    input: lines.map((l) => JSON.stringify(l)).join("\n") + "\n",
-    env: { ...process.env, ...env },
-  });
-}
-mcp([
-  ...PAGES.map((p) => ["pages_update", { id: p.id, tags: p.tags }]),
-  ["paths_create", { name: "Networking basics", pages: ["dns", "tcp-handshake", "http-caching"] }],
-  ...["photosynthesis", "tcp-handshake"].map((id) => ["review_schedule", { id, intervalMinutes: 1 }]),
-  ...["big-o", "mitosis", "french-revolution", "color-contrast"].map((id) => ["review_complete", { id, grade: "good" }]),
-]);
+const mcp = mcpClient(desktopBin(), vault, env);
+await seedDemoVault(vault, mcp.call);
+mcp.close();
 
 /* ----------------------------------------------------------- the pointer */
 
@@ -153,7 +141,11 @@ await sleep(2500);
 // Let the library draw its page previews while nobody watches.
 await app.click("All pages");
 await sleep(20000);
-await app.click("Today");
+// Warm the path view and its 3D chunk on a sapling, so the tree is on screen
+// straight away when the film opens on the finished path.
+await app.click("Life, cell by cell", "aside .path-name");
+await sleep(4500);
+await app.click("Today", "aside button, nav button");
 await sleep(1500);
 xdo("mousemove", pointer.x, pointer.y);
 
@@ -170,9 +162,14 @@ t0 = Date.now();
 
 try {
   mark("today");
-  // Today: what is due, the reading path in progress, recent saves.
+  // Today: what is due, the grove of reading paths, recent saves.
   await glide(560, 300, 700);
   await sleep(900);
+
+  mark("path");
+  // A finished reading path: the tree blossoms, then settles beside its pages.
+  await click("Rust from the ground up", "aside .path-name");
+  await sleep(6000);
 
   mark("library");
   // The library, with each page's first screen, and a search filter.
@@ -217,7 +214,7 @@ try {
   await click("Ask AI", ".titlebar button");
   await sleep(900);
   await click("Add a quiz", "[role=option]");
-  await sleep(2700);
+  await sleep(3600);
   await click("Accept", ".panel button, button", { pause: 600 });
   await sleep(1000);
 
@@ -260,18 +257,20 @@ try {
   await sleep(2300);
 
   mark("review");
-  // A review session: grade each page due today.
+  // A review session: grade everything due, then let the summary land.
   await click("Review today", "aside button, nav button");
   await sleep(1300);
   await click("Start session", "button");
   await sleep(1400);
-  for (let i = 0; i < 2; i++) {
-    const good = await app.exec(() => !!document.querySelector(".review-bar, [class*=session]"));
-    if (!good) break;
+  for (let i = 0; i < 4; i++) {
+    const done = await app.exec(() => document.body.innerText.includes("SESSION COMPLETE"));
+    if (done) break;
     await click("Good", "button", { ms: 450 });
-    await sleep(1100);
+    await sleep(1200);
   }
-  await sleep(1300);
+  await app.waitFor(() => app.exec(() => document.body.innerText.includes("SESSION COMPLETE")), "the session summary", 15000).catch(() => {});
+  // Let the streak and the recovered pages settle before the film ends.
+  await sleep(4200);
   mark("end");
 } catch (e) {
   console.error(e);

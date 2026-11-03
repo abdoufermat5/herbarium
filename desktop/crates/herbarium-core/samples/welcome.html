@@ -24,7 +24,13 @@
   .tabs button[aria-selected="true"] { background: var(--leaf); border-color: var(--leaf); color: var(--bg); }
   .panel { margin-top: 12px; padding: 20px 22px; border: 1px solid var(--line); border-radius: 14px; background: var(--card); min-height: 150px; }
   .panel p { margin: 0 0 8px; }
+  .panel ul { margin: 0; padding-left: 20px; }
+  .panel li { margin: 4px 0; }
   kbd { font: 13px ui-monospace, monospace; padding: 1px 6px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 5px; background: var(--bg); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin: 14px 0 4px; }
+  .card { padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+  .card b { display: block; color: var(--leaf); font: 600 13px system-ui, sans-serif; margin-bottom: 4px; }
+  .card p { margin: 0; font-size: 15px; color: var(--muted); }
   .next { display: grid; gap: 12px; margin-top: 14px; }
   .next a { display: block; padding: 14px 18px; border-radius: 12px; background: var(--leaf-soft); color: var(--text); text-decoration: none; }
   .next a strong { color: var(--leaf); }
@@ -39,11 +45,21 @@
   <h1>Welcome to your herbarium</h1>
   <p class="lead">A herbarium is a collection of pressed plants, each one kept, labelled and easy to find again. This one keeps the pages AI tools make for you: explainers, cheat sheets, little interactive tools.</p>
 
+  <h2>What is new</h2>
+  <div class="grid">
+    <div class="card"><b>Trees that grow</b><p>Every reading path grows a tree: a limb for each page you read, blossoms when you finish the path.</p></div>
+    <div class="card"><b>Vitality leaves</b><p>A leaf on every page says how well you probably still remember it, from thriving to wilting.</p></div>
+    <div class="card"><b>A proper finish</b><p>Review sessions end with the grades, the time, the pages you recovered and your streak.</p></div>
+    <div class="card"><b>Ten type styles</b><p>Warm serifs, field notes, a typewriter, an arcade: pick the voice in Settings → Appearance.</p></div>
+  </div>
+
   <h2>A quick tour</h2>
   <div class="tabs" role="tablist" aria-label="Tour">
     <button role="tab" aria-selected="true" data-tab="save">Save</button>
     <button role="tab" aria-selected="false" data-tab="find">Find</button>
     <button role="tab" aria-selected="false" data-tab="learn">Learn</button>
+    <button role="tab" aria-selected="false" data-tab="grow">Grow</button>
+    <button role="tab" aria-selected="false" data-tab="style">Make it yours</button>
     <button role="tab" aria-selected="false" data-tab="agents">Agents</button>
   </div>
   <div class="panel" role="tabpanel" id="panel"></div>
@@ -56,6 +72,14 @@
   <div class="quiz">
     <p><strong>What happens when a page wants the internet?</strong></p>
     <p data-herbarium-recall="Can a page reach the internet?">Nothing, unless you allow it: pages run in a sandbox with network access off. You can turn it on per page with the network switch in the reader.</p>
+  </div>
+  <div class="quiz">
+    <p><strong>What does a vitality leaf tell you?</strong></p>
+    <p data-herbarium-recall="What does a page's vitality leaf mean?">How well you probably still remember that page, from the same forgetting curve the review scheduler uses. A seed means it was never reviewed; wilting means it is past due.</p>
+  </div>
+  <div class="quiz">
+    <p><strong>What happens when every page in a reading path is read?</strong></p>
+    <p data-herbarium-recall="What happens when a reading path is finished?">Its tree blossoms. Each page read grows a limb and its leaves; the finished path is marked once, and the grove on Today keeps it on the ground line beside the others.</p>
   </div>
   <p>Answers marked like these hide during review sessions, so a page can quiz you. Press <kbd>F</kbd> for focus mode, or open <em>View</em> for the contents and zoom.</p>
 
@@ -70,12 +94,21 @@
 <script>
   const text = {
     save: `<p>Drop HTML files on the window, paste a page with <kbd>Ctrl</kbd>+<kbd>V</kbd> in the import dialog, or import everything from a Claude or ChatGPT data export.</p>
-           <p>With the browser extension, one click saves the page or AI artifact in front of you, and the toolbar shows when a page is already saved.</p>`,
-    find: `<p>Search titles, tags, notes and page text from the library, or press <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere.</p>
-           <p>Filters narrow it down: <code>tag:rust is:due updated:7d</code>. Save a search to keep it in the sidebar.</p>`,
-    learn: `<p>Schedule any page for review. Herbarium brings it back right before you would forget it, and adapts to how well you remember.</p>
-            <p>Highlight passages and add notes in the margin; reading paths walk you through a topic page by page.</p>`,
-    agents: `<p>Herbarium is also an MCP server: agents like Claude Code can save, search, organise and schedule pages for you.</p>
+           <p>With the browser extension, one click saves the page or AI artifact in front of you, and the toolbar shows when a page is already saved.</p>
+           <p>A global shortcut can save whatever is on your clipboard, and new HTML files in Downloads are offered for saving.</p>`,
+    find: `<p>Search titles, tags, notes, source prompts and page text from the library, or press <kbd>Ctrl</kbd>+<kbd>K</kbd> anywhere.</p>
+           <p>Filters narrow it down: <code>tag:rust is:due updated:7d</code>. Save a search to keep it in the sidebar.</p>
+           <p>The graph turns links into a map: folders settle into islands, and hovering a page lights up everything it connects to.</p>`,
+    learn: `<p>Today shows the review ring, your streak, the garden of page vitality and what to continue reading.</p>
+            <p>Start a review with <kbd>R</kbd>. Grade with <kbd>1</kbd>–<kbd>4</kbd>; every button shows the interval it would schedule. The session ends with what you recovered and what is due next.</p>
+            <p>Highlight passages and add notes in the margin. Answers marked for recall stay hidden until you reveal them.</p>`,
+    grow: `<p>Group pages into a reading path and step through them with previous/next, like a course.</p>
+            <p>Each path grows its own tree. Read a page and it grows a limb and leaves; read them all and it blossoms. The grove on Today shows every path on one ground line.</p>
+            <p>Plant a path with <kbd>P</kbd>, or from the sidebar. Where WebGL is available, the path view grows a 3D tree; the SVG tree is always there.</p>`,
+    style: `<p>Ten type styles and four text sizes change the app's voice without touching your pages: Herbarium, Storybook, Field notes, Casual, Poster, Library, Typewriter, Arcade, Playground and an easy-reading face.</p>
+             <p>Light and dark themes follow the system or your choice. Motion is quiet and never plays while idle; reduced motion turns it off.</p>
+             <p>Press <kbd>Ctrl</kbd>+<kbd>J</kbd> to remix the page you are reading — simplify it, add quiz questions, translate it, or say what you want — then compare and accept the result.</p>`,
+    agents: `<p>Herbarium is also an MCP server: agents like Claude Code can save, search, organise, schedule and read pages, highlights, links, health, reading paths and what is due today.</p>
              <p>Turn on <em>Review agent edits</em> in Settings to approve every rewrite an agent proposes.</p>`,
   };
   const panel = document.getElementById("panel");

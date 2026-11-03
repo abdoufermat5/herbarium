@@ -20,12 +20,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Ten type styles and four text sizes in Settings → Appearance. Each style brings its own interface, heading and mono fonts — from Herbarium's warm serifs to Storybook, Field notes, Typewriter, Arcade and an easy-reading face — shown live in a specimen picker; the interface text scales from 0.92× to 1.16×. The chosen style is applied before the first paint, so it never flashes.
 
 ### Changed
+- The README, screenshots, demo and store listings now show what 0.5 made: reading-path trees, vitality leaves, review session summaries and the type styles, plus a five-minute tour for new users.
+- The welcome sample page tours the new features and asks a question about trees, vitality and review sessions.
 - Motion throughout, quiet and quick: the content area rises into place when you change view, the sidebar's selection slides, menus open from where they were triggered, notifications stack and can be swiped away, buttons press. Celebrations are kept for finished sessions and fully grown paths. Nothing animates while idle, and the system's reduced-motion setting turns it all off.
 - Reading-path trees are grown from a deterministic 3D branch skeleton and projected into the same flat, hand-inked view: deeper branching, tapered limbs, aerial shading and foliage that fills the crown as pages are read. Same seeds grow the same trees; the mini trees and the public model are unchanged, and the 2D renderer adds no dependency.
 - Redesigned library cards (hover actions, due chips, highlighted search terms), the command palette (grouped results, highlighted matches), the shortcuts sheet (keycaps, filter), onboarding (three steps), settings (sliding tabs, springier switches), trash and the import dialog (per-file progress).
 
 ### Fixed
 - Review today opens faster: its year of activity no longer builds a new date formatter for every day shown.
+- The demo and screenshot tools put the app on the virtual X display on a Wayland host, so `make demo` records the app instead of a black screen.
 
 ## [0.4.2] - 2026-10-15
 

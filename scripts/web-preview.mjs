@@ -3,132 +3,17 @@
 // throwaway copy of the demo vault (e2e/tools/demo-vault.mjs). Lets UI work be
 // checked in Chromium without the Tauri webview. Only loaded in the
 // `web-preview` Vite mode; see src/preview/ipc.ts for the browser half.
-import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { herbariumBin, ROOT } from "../e2e/helpers.mjs";
-import { PAGES, writeDemoVault } from "../e2e/tools/demo-vault.mjs";
+import { seedDemoVault, writeDemoVault } from "../e2e/tools/demo-vault.mjs";
+import { mcpClient } from "../e2e/tools/mcp.mjs";
 
-const DAY = 86_400_000;
 const read = (file) => readFileSync(join(ROOT, "desktop", "src", file), "utf8");
 const SHIM_JS = read("storage_shim.js");
 const BRIDGE_JS = read("reader_bridge.js");
 const RECALL_JS = read("recall.js");
-
-/** JSON-RPC over the stdio of a long-lived `herbarium mcp` process. */
-function mcpClient(vault) {
-  const child = spawn(herbariumBin(), ["mcp", "--vault", vault], { stdio: ["pipe", "pipe", "inherit"] });
-  const pending = new Map();
-  let seq = 0;
-  createInterface({ input: child.stdout }).on("line", (line) => {
-    let msg;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      return;
-    }
-    const waiter = pending.get(msg.id);
-    if (!waiter) return;
-    pending.delete(msg.id);
-    waiter(msg);
-  });
-  const request = (method, params) =>
-    new Promise((resolve) => {
-      const id = ++seq;
-      pending.set(id, resolve);
-      child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
-    });
-  /** Run one core operation (`area.verb`); rejects with the core's message. */
-  async function call(name, args = {}) {
-    const msg = await request("tools/call", { name: name.replaceAll(".", "_"), arguments: args ?? {} });
-    if (msg.error) throw new Error(msg.error.message);
-    const text = msg.result?.content?.[0]?.text ?? "null";
-    if (msg.result?.isError) throw new Error(text);
-    return JSON.parse(text);
-  }
-  return {
-    ready: request("initialize", {
-      protocolVersion: "2025-06-18",
-      capabilities: {},
-      clientInfo: { name: "web-preview", version: "1" },
-    }),
-    call,
-    close: () => child.kill(),
-  };
-}
-
-/**
- * Tags, three reading paths at different stages, and a spread of review
- * states, so every vitality level, the due queue and every tree size show up.
- * Review dates are written into the sidecars, then the vault is rescanned.
- */
-async function seed(mcp, vault) {
-  for (const p of PAGES) await mcp.call("pages.update", { id: p.id, tags: p.tags });
-  await mcp.call("paths.create", { name: "Networking basics", pages: ["dns", "tcp-handshake", "http-caching"] });
-  await mcp.call("paths.create", { name: "Rust from the ground up", pages: ["ownership", "lifetimes", "traits"] });
-  await mcp.call("paths.create", {
-    name: "Life, cell by cell",
-    pages: ["enzymes", "photosynthesis", "mitosis", "binary-search", "big-o"],
-  });
-  for (const id of ["dns", "ownership", "lifetimes", "traits", "enzymes", "photosynthesis"]) markRead(vault, id);
-  for (const id of ["big-o", "mitosis", "french-revolution", "color-contrast", "photosynthesis", "tcp-handshake", "dns"]) {
-    await mcp.call("review.complete", { id, grade: "good" });
-  }
-  const now = Date.now();
-  // [lastReview days ago, next review in days (negative: overdue), stability days]
-  const states = {
-    "big-o": [1, 9, 10],
-    mitosis: [6, 4, 10],
-    "french-revolution": [2, 1, 3],
-    "color-contrast": [12, -2, 10],
-    photosynthesis: [5, -1, 4],
-    "tcp-handshake": [40, -30, 10],
-    dns: [3, 0, 3],
-  };
-  for (const file of sidecars(vault)) {
-    const meta = JSON.parse(readFileSync(file, "utf8"));
-    const state = states[meta.id];
-    if (!state) continue;
-    const [ago, next, stability] = state;
-    meta.lastReview = now - ago * DAY;
-    meta.nextReview = next === 0 ? now - 60_000 : now + next * DAY;
-    meta.intervalMinutes = Math.round(((meta.nextReview - meta.lastReview) / DAY) * 1440);
-    meta.ext ??= {};
-    const log = Array.from({ length: 3 }, (_, i) => ({ at: meta.lastReview - i * 3 * DAY, grade: "good", intervalMinutes: 1440 * (3 - i) }));
-    meta.ext.review = { count: log.length, log, stability, difficulty: 5 };
-    writeFileSync(file, JSON.stringify(meta, null, 2));
-  }
-  await mcp.call("vault.rescan").catch(() => {});
-}
-
-/** What the core's `reads.mark` does: `.herbarium/reads.json` keeps `{ last, count }` per page. */
-function markRead(vault, id) {
-  const file = join(vault, ".herbarium", "reads.json");
-  let reads = {};
-  try {
-    reads = JSON.parse(readFileSync(file, "utf8"));
-  } catch {
-    mkdirSync(join(vault, ".herbarium"), { recursive: true });
-  }
-  const read = { last: Date.now(), count: (reads[id]?.count ?? 0) + 1 };
-  reads[id] = read;
-  writeFileSync(file, JSON.stringify(reads));
-  return read;
-}
-
-/** Every page sidecar (`*.json` next to a `.html`) under the vault. */
-function sidecars(dir) {
-  const out = [];
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name.startsWith(".")) continue;
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) out.push(...sidecars(path));
-    else if (entry.name.endsWith(".json")) out.push(path);
-  }
-  return out;
-}
 
 function inject(html, recall) {
   const script =
@@ -155,8 +40,8 @@ export function webPreview() {
       const vault = join(work, "Learning");
       mkdirSync(vault, { recursive: true });
       writeDemoVault(vault);
-      const mcp = mcpClient(vault);
-      const seeded = mcp.ready.then(() => seed(mcp, vault));
+      const mcp = mcpClient(herbariumBin(), vault);
+      const seeded = mcp.ready.then(() => seedDemoVault(vault, mcp.call));
       const stop = () => {
         mcp.close();
         rmSync(work, { recursive: true, force: true });
