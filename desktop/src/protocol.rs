@@ -280,13 +280,12 @@ fn serve<R: tauri::Runtime>(
                 store.vault.clone(),
                 meta.folder.clone(),
                 meta.allow_cdn,
-                meta.ext.get("storage").cloned(),
             )),
             Ok(None) => None,
             Err(_) => return not_found(),
         }
     }; // host lock dropped HERE, before disk I/O!
-    let (vault, folder, allow_cdn, storage) = match lookup_result {
+    let (vault, folder, allow_cdn) = match lookup_result {
         Some(info) => info,
         None => return not_found(),
     };
@@ -338,6 +337,7 @@ fn serve<R: tauri::Runtime>(
             )
         };
         let html = inject_base_tag(&raw_html, &base_href);
+        let storage = herbarium_core::page_storage_value(&vault, &parsed.page_id);
         let html = inject_storage_shim(
             &html,
             &storage_state_json(storage.as_ref()),
