@@ -8,6 +8,7 @@ pub mod content;
 pub mod extension;
 mod host;
 pub mod importer;
+pub mod lock;
 pub mod models;
 pub mod query;
 pub mod rewrite;

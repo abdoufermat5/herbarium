@@ -302,7 +302,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
         vault::delete_history(&store.vault, &meta.id)?;
         delete_proposal(&store.vault, &meta.id)?;
     }
-    vault::write_page(&store.vault, meta, html)?;
+    vault::create_page(store, meta, html)?;
     // The bytes are on disk now; keep the returned `updatedAt` at least their
     // mtime so a caller can save again with it as `baseUpdatedAt`.
     if let Err(e) = refresh_updated_at(&store.vault, meta) {

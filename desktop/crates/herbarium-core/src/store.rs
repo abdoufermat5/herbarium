@@ -75,9 +75,8 @@ impl Store {
         let dir = vault.join(".herbarium");
         std::fs::create_dir_all(&dir).ok();
         let conn = Connection::open(dir.join("index.sqlite"))?;
-        conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "busy_timeout", 5000).ok();
-        conn.execute_batch(SCHEMA)?;
+        conn.pragma_update(None, "journal_mode", "WAL").ok();
         migrate(&conn)?;
         Ok(Store { vault, conn })
     }
@@ -410,18 +409,27 @@ impl Store {
         rows.collect()
     }
 
-    /// Remove every indexed page whose id is not in `keep`.
-    pub fn remove_all_except(&self, keep: &HashSet<String>) -> rusqlite::Result<usize> {
-        let all: Vec<String> = self
-            .conn
+    /// Every indexed page id.
+    pub fn ids(&self) -> rusqlite::Result<HashSet<String>> {
+        self.conn
             .prepare("SELECT id FROM pages")?
             .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
+            .collect()
+    }
+
+    /// Remove the pages in `indexed_before` whose id is not in `keep`. Pages
+    /// indexed after `indexed_before` was taken (by another process, while a
+    /// rescan was walking the vault) are never touched.
+    pub fn remove_missing(
+        &self,
+        indexed_before: &HashSet<String>,
+        keep: &HashSet<String>,
+    ) -> rusqlite::Result<usize> {
         let mut removed = 0;
         let tx = self.conn.unchecked_transaction()?;
-        for id in all {
-            if !keep.contains(&id) {
-                delete_row(&tx, &id)?;
+        for id in indexed_before {
+            if !keep.contains(id) {
+                delete_row(&tx, id)?;
                 removed += 1;
             }
         }
@@ -471,9 +479,35 @@ fn delete_row(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 /// `PRAGMA user_version` once FTS has the `note` column and rowid mapping.
 const FTS_ROWID_VERSION: i64 = 2;
 
+/// Bring the schema up to date. All steps run in one `BEGIN IMMEDIATE`
+/// transaction: a second process opening the same index waits (busy_timeout)
+/// for the first to finish, then finds every step already applied instead of
+/// racing it into "duplicate column". Append new idempotent steps to
+/// `migrate_steps`.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    in_immediate_tx(conn, |conn| {
+        conn.execute_batch(SCHEMA)?;
+        migrate_steps(conn)
+    })
+}
+
+fn in_immediate_tx(
+    conn: &Connection,
+    steps: impl FnOnce(&Connection) -> rusqlite::Result<()>,
+) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match steps(conn) {
+        Ok(()) => conn.execute_batch("COMMIT"),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
+
 /// Bring an index created by an older build up to the current columns.
 /// The index is rebuildable, so adding columns with defaults is enough.
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+fn migrate_steps(conn: &Connection) -> rusqlite::Result<()> {
     let has_ext = conn
         .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'ext'")?
         .exists([])?;
@@ -511,15 +545,13 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version < FTS_ROWID_VERSION {
         conn.execute_batch(&format!(
-            "BEGIN;
-             DROP TABLE IF EXISTS pages_fts;
+            "DROP TABLE IF EXISTS pages_fts;
              CREATE VIRTUAL TABLE pages_fts USING fts5(
                id UNINDEXED, title, tags, folder, note, text, tokenize='porter'
              );
              INSERT INTO pages_fts (rowid, id, title, tags, folder, note, text)
                SELECT rowid, id, title, tags, COALESCE(folder, ''), note, text_content FROM pages;
-             PRAGMA user_version = {FTS_ROWID_VERSION};
-             COMMIT;"
+             PRAGMA user_version = {FTS_ROWID_VERSION};"
         ))?;
     }
     Ok(())
