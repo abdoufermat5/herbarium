@@ -14,7 +14,7 @@ use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource};
 use crate::query::{FILTER_HELP, Query};
-use crate::store::Store;
+use crate::store::{normalize_url, Store};
 use crate::time::now_ms;
 use crate::vault;
 
@@ -33,23 +33,6 @@ pub(crate) const IMPORT_KEY: &str = "import";
 /// The import key recorded on `meta`, if any.
 pub fn import_key(meta: &PageMeta) -> Option<&str> {
     meta.ext.get(IMPORT_KEY)?.get("key")?.as_str()
-}
-
-/// A URL reduced to what identifies a page: scheme and host lowercased, no
-/// fragment, no trailing slash.
-pub fn normalize_url(url: &str) -> String {
-    let url = url.trim();
-    let url = url.split('#').next().unwrap_or(url);
-    let (scheme_host, rest) = match url.find("://") {
-        Some(i) => {
-            let after = &url[i + 3..];
-            let end = after.find(['/', '?']).map_or(url.len(), |j| i + 3 + j);
-            (url[..end].to_ascii_lowercase(), &url[end..])
-        }
-        None => (url.to_string(), ""),
-    };
-    let rest = rest.strip_suffix('/').unwrap_or(rest);
-    format!("{scheme_host}{rest}")
 }
 
 #[derive(Deserialize, Default)]
@@ -563,20 +546,9 @@ impl Extension for Pages {
             |ctx: &mut Ctx, a: ListArgs| {
                 let limit = effective_limit(ctx.caller, a.limit);
                 let folder = vault::clean_folder(a.folder.as_deref())?;
-                let pages = ctx.store.all().map_err(|e| e.to_string())?;
-                let in_folder = |m: &PageMeta| match (&folder, &m.folder) {
-                    (None, _) => true,
-                    (Some(want), Some(have)) => {
-                        have == want || have.strip_prefix(want.as_str()).is_some_and(|rest| rest.starts_with('/'))
-                    }
-                    (Some(_), None) => false,
-                };
-                Ok(pages
-                    .into_iter()
-                    .filter(|m| in_folder(m))
-                    .filter(|m| a.tag.as_ref().is_none_or(|t| m.tags.contains(t)))
-                    .take(limit)
-                    .collect::<Vec<_>>())
+                ctx.store
+                    .list_filtered(folder.as_deref(), a.tag.as_deref(), limit)
+                    .map_err(|e| e.to_string())
             },
         ))?;
 
@@ -596,9 +568,26 @@ impl Extension for Pages {
                 if !query.has_filters() {
                     return ctx.store.search(&query.text, limit).map_err(|e| e.to_string());
                 }
-                let now = now_ms();
-                let hits = ctx.store.search(&query.text, usize::MAX).map_err(|e| e.to_string())?;
-                Ok(hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect())
+                // Push folder/tag/limit into SQL; keep the rest (`is:`,
+                // `has:`, `tool:`, date ranges, negations) in Rust over the
+                // SQL-narrowed set.
+                let (folder, tag) = query.sql_filters();
+                let needs_rust = query.needs_rust_filtering();
+                let sql_limit = if needs_rust { usize::MAX } else { limit };
+                let hits = ctx
+                    .store
+                    .search_filtered(&query.text, folder.as_deref(), tag.as_deref(), sql_limit)
+                    .map_err(|e| e.to_string())?;
+                if needs_rust {
+                    let now = now_ms();
+                    Ok(hits
+                        .into_iter()
+                        .filter(|h| query.matches(&h.meta, now))
+                        .take(limit)
+                        .collect())
+                } else {
+                    Ok(hits)
+                }
             },
         ))?;
 
@@ -611,21 +600,7 @@ impl Extension for Pages {
                 if want.is_empty() {
                     return Ok(Vec::new());
                 }
-                // The extension asks on every page load: only parse the pages
-                // whose metadata mentions the address at all.
-                let needle = want.split_once("://").map_or(want.as_str(), |(_, rest)| rest);
-                let pages = ctx
-                    .store
-                    .with_ext_containing(needle)
-                    .map_err(|e| e.to_string())?;
-                Ok(pages
-                    .into_iter()
-                    .filter(|m| {
-                        PageSource::of(m)
-                            .and_then(|s| s.url)
-                            .is_some_and(|u| normalize_url(&u) == want)
-                    })
-                    .collect::<Vec<_>>())
+                ctx.store.find_by_url(&want).map_err(|e| e.to_string())
             },
         ))?;
 
