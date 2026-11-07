@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => {
 });
 vi.mock("./api", () => ({ api: mocks }));
 vi.mock("./notifier", () => ({ notifyDue: vi.fn().mockResolvedValue(undefined) }));
-import { app, inFolder, movePageInPath, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
+import { app, applyVaultEvent, inFolder, movePageInPath, refreshAll, reloadPages, resetWorkspace, visiblePages } from "./state.svelte";
 
 function page(id: string, patch: Partial<PageMeta> = {}): PageMeta {
   return { schemaVersion: 1, id, title: id, tags: [], folder: null, note: "", createdAt: 1,
@@ -174,5 +174,52 @@ describe("reading paths", () => {
     mocks.updatePath.mockClear();
     await movePageInPath("p", "a", -1);
     expect(mocks.updatePath).not.toHaveBeenCalled();
+  });
+});
+
+describe("pushed vault events", () => {
+  async function openVault(pages: PageMeta[]) {
+    app.config = { vaultPath: "/vault" } as never;
+    mocks.listPages.mockResolvedValue(pages);
+    await reloadPages(true);
+    mocks.listPages.mockClear();
+    mocks.tags.mockClear();
+  }
+
+  it("patches the library, the list and the tag counts without refetching", async () => {
+    await openVault([page("a", { tags: ["x"] }), page("b")]);
+    const meta = page("b", { title: "Renamed", tags: ["x", "y"], updatedAt: 2 });
+    applyVaultEvent({ kind: "page.updated", id: "b", meta });
+    applyVaultEvent({ kind: "page.created", id: "c", meta: page("c") });
+    await vi.advanceTimersByTimeAsync(50);
+    expect(app.library.map((p) => p.title)).toEqual(["a", "Renamed", "c"]);
+    expect(app.pages).toBe(app.library);
+    expect(app.tags).toEqual([{ tag: "x", count: 2 }, { tag: "y", count: 1 }]);
+    expect(mocks.listPages).not.toHaveBeenCalled();
+    expect(mocks.tags).not.toHaveBeenCalled();
+  });
+
+  it("refreshes the review stats once, after the burst", async () => {
+    await openVault([page("a", { nextReview: 5 })]);
+    mocks.reviewStats.mockClear();
+    for (let i = 0; i < 5; i++) {
+      applyVaultEvent({ kind: "page.updated", id: "a", meta: page("a", { nextReview: 10 + i, updatedAt: 2 + i }) });
+    }
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mocks.reviewStats).toHaveBeenCalledTimes(1);
+    expect(app.dueCount).toBe(250);
+  });
+
+  it("reloads only when a re-index reports changes", async () => {
+    await openVault([page("a")]);
+    const report = { indexed: 0, removed: 0, total: 1, skipped: [] };
+    applyVaultEvent({ kind: "vault.indexed", report });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mocks.listPages).not.toHaveBeenCalled();
+    const before = app.vaultRevision;
+    applyVaultEvent({ kind: "vault.indexed", report: { ...report, indexed: 2 } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(mocks.listPages).toHaveBeenCalledTimes(1);
+    expect(app.vaultRevision).toBe(before + 1);
   });
 });

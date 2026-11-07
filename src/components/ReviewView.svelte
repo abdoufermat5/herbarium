@@ -8,7 +8,6 @@
     goAll,
     nextDueLine,
     openPage,
-    refreshAll,
     session,
     startReviewSession,
     toast,
@@ -133,9 +132,9 @@
       due = due.filter((p) => p.id !== id);
       active = Math.max(0, Math.min(active, due.length - 1));
       toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
-      // Re-sync the queue (a capped list may uncover the next page) and the stats.
+      // Re-sync the queue (a capped list may uncover the next page) and the stats;
+      // the page's change event updates the library and refreshes the shared stats.
       load();
-      void refreshAll();
     } catch (e) {
       console.error(e);
       toast(t("review.rescheduleFailed"), "error");
