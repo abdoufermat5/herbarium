@@ -13,6 +13,8 @@ export interface VaultEvent {
   meta?: PageMeta | null;
   /** The re-index outcome; present on `vault.indexed`. */
   report?: IndexReport | null;
+  /** The page's HTML changed (set_html, history restore): its preview is stale. */
+  htmlChanged?: boolean;
 }
 
 export type PageEvent = VaultEvent & { kind: "page.created" | "page.updated" | "page.deleted"; meta: PageMeta };

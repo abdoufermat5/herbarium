@@ -3,6 +3,7 @@
 // extension subscribes to core's event bus and re-emits each event as the
 // Tauri event `vault-event`: `{ kind, id?, meta?, report? }`.
 
+use herbarium_core::models::PageMeta;
 use herbarium_core::{Event, Extension, Host, OpResult, Registry, events};
 use serde_json::{Value, json};
 use tauri::{AppHandle, Emitter, Manager};
@@ -42,16 +43,21 @@ impl Extension for Bridge {
 }
 
 /// The window's view of a core event: its kind, the page (or proposal) it is
-/// about, the page's metadata after the change (page events) and the
-/// re-index outcome (`vault.indexed`).
+/// about, the page's slim metadata after the change (page events; the same
+/// shape `pages.list` returns) and the re-index outcome (`vault.indexed`).
 fn payload(event: &Event) -> Value {
     let page = event.payload.get("page");
     let id = page
         .and_then(|p| p.get("id"))
         .or_else(|| event.payload.get("id"))
         .or_else(|| event.payload.get("proposal").and_then(|p| p.get("id")));
+    let meta = page
+        .and_then(|p| serde_json::from_value::<PageMeta>(p.clone()).ok())
+        .map(|m| m.summary());
     let report = (event.name == events::VAULT_INDEXED).then_some(&event.payload);
-    json!({ "kind": event.name, "id": id, "meta": page, "report": report })
+    // Only HTML edits make a page's preview stale (core sets the flag).
+    let html_changed = event.payload.get("htmlChanged").and_then(Value::as_bool).unwrap_or(false);
+    json!({ "kind": event.name, "id": id, "meta": meta, "report": report, "htmlChanged": html_changed })
 }
 
 /// Rebuild the app's host with the bridge registered. Runs in `setup`, before

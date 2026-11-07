@@ -560,7 +560,6 @@
       try {
         await api.updatePageMeta(id, { title: value });
         renaming = null;
-        await reloadPages(true);
         focusRow(`p:${id}`);
       } catch (e) {
         toast(t("sidebar.renameFailed", { detail: errorMessage(e) }), "error");
@@ -607,7 +606,6 @@
     }
     if (restored.length > 0) toast(t("toast.restored", { count: restored.length }), "success");
     if (errors.length > 0) toast(t("toast.restoreFailed", { detail: errors[0] }), "error");
-    await reloadPages(true);
   }
 
   async function confirmDeleteFolder(path: string, name: string) {
@@ -901,7 +899,6 @@
       } else {
         toast(t("toast.moved", { count: result.updated.length }), "success");
       }
-      await reloadPages(true);
     } catch (e) {
       toast(t("toast.moveFailed", { detail: errorMessage(e) }), "error");
     }

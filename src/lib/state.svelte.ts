@@ -88,6 +88,8 @@ interface AppState {
   tagFilter: string | null;
   importOpen: boolean;
   readId: string | null;
+  /** Keys the open page saved for itself (`storage.get`); 0 when none or no page is open. */
+  readStorageKeys: number;
   /** The reader was opened by a review session (auto-advance on completion). */
   reviewSession: boolean;
   createRequest: CreateRequest | null;
@@ -217,6 +219,7 @@ export const app: AppState = $state({
   tagFilter: null,
   importOpen: false,
   readId: null,
+  readStorageKeys: 0,
   reviewSession: false,
   createRequest: null,
   busy: false,
@@ -252,6 +255,9 @@ export const app: AppState = $state({
   toasts: [],
   review: { ...DEFAULT_REVIEW },
 });
+
+/** Actions the open reader exposes to the palette; set while a ReadView is mounted. */
+export const readerActions: { resetStorage?: () => Promise<void> } = {};
 
 /** A readable message for anything thrown by a backend call (Tauri rejects with plain strings). */
 export function errorMessage(error: unknown): string {

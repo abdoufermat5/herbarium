@@ -483,7 +483,6 @@
         toast(t("list.tagsDone", { count: result.updated.length }), "success");
       }
       tagDraft = "";
-      await reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("list.tagsFailed", { detail: errorMessage(e) }), "error");
@@ -512,7 +511,6 @@
     } else {
       toast(t("list.scheduled", { count: done }), "success");
     }
-    await reloadPages(true);
   }
 
   /* ---------------------------------------------------------------- context */
@@ -593,7 +591,6 @@
     try {
       await api.scheduleReview(id, minutes);
       toast(t("list.scheduled", { count: 1 }), "success");
-      await reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("list.scheduleFailed", { detail: errorMessage(e) }), "error");

@@ -26,6 +26,7 @@
     setPageInPath,
     refreshPathProgress,
     openPathView,
+    readerActions,
   } from "../lib/state.svelte";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
@@ -81,32 +82,13 @@
   const STORAGE_AREAS = ["local", "personal", "shared"] as const;
   const EMPTY_STORAGE: PageStorage = { local: {}, personal: {}, shared: {} };
 
-  /** The page's saved state, tolerating a hand-edited sidecar. */
-  function storageOf(meta: PageMeta): PageStorage {
-    const raw = (meta.ext as Record<string, unknown> | undefined)?.["storage"];
-    const out: PageStorage = { local: {}, personal: {}, shared: {} };
-    if (raw && typeof raw === "object") {
-      for (const area of STORAGE_AREAS) {
-        const map = (raw as Record<string, unknown>)[area];
-        if (map && typeof map === "object") {
-          for (const [key, value] of Object.entries(map)) {
-            if (typeof value === "string") out[area][key] = value;
-          }
-        }
-      }
-    }
-    return out;
-  }
-
   function storageCount(state: PageStorage): number {
     return STORAGE_AREAS.reduce((n, area) => n + Object.keys(state[area]).length, 0);
   }
 
-  /** Metadata comparison that ignores the page's saved state. */
+  /** Metadata comparison for external-change detection. */
   function metaSignature(meta: PageMeta): string {
-    const ext = { ...(meta.ext ?? {}) } as Record<string, unknown>;
-    delete ext.storage;
-    return JSON.stringify({ ...meta, ext });
+    return JSON.stringify(meta);
   }
 
   /** Escape JSON for an inline script: `<` can close it early, U+2028/9 are illegal. */
@@ -118,6 +100,8 @@
   }
 
   let page = $state<Page | null>(null);
+  /** What the open page saved for itself; loaded with `storage.get`, kept in step with writes. */
+  let storage = $state<PageStorage>(EMPTY_STORAGE);
   let error = $state<string | null>(null);
   /** Intervals each grade would schedule for the open page (review session only). */
   let preview = $state<ReviewPreview | null>(null);
@@ -183,7 +167,7 @@
   );
   const due = $derived(page ? dueInfo(page.meta.nextReview) : null);
   const dirty = $derived(isDirty());
-  const hasStorageData = $derived(page ? storageCount(storageOf(page.meta)) > 0 : false);
+  const hasStorageData = $derived(storageCount(storage) > 0);
 
   function sameTags(a: string[], b: string[]): boolean {
     return a.length === b.length && a.every((v, i) => v === b[i]);
@@ -225,15 +209,9 @@
 
   function applyStorageState(id: string, state: PageStorage) {
     if (page && page.meta.id === id) {
-      page = {
-        ...page,
-        meta: { ...page.meta, ext: { ...(page.meta.ext ?? {}), storage: state } },
-      };
-    }
-    // Keep the library copies in step so the palette can offer "Reset page data".
-    for (const list of [app.library, app.pages]) {
-      const meta = list.find((m) => m.id === id);
-      if (meta) meta.ext = { ...(meta.ext ?? {}), storage: state };
+      storage = state;
+      // The palette offers "Reset page data" for the open page from this count.
+      app.readStorageKeys = storageCount(state);
     }
   }
 
@@ -428,6 +406,12 @@
       await flushStorage();
       const loaded = await api.getPage(id);
       page = loaded;
+      storage = EMPTY_STORAGE;
+      app.readStorageKeys = 0;
+      void api
+        .getStorage(id)
+        .then((state) => applyStorageState(id, state))
+        .catch((e) => console.error(e));
       void api
         .markRead(id)
         .then(() => (app.paths.some((p) => p.pages.includes(id)) ? refreshPathProgress() : undefined))
@@ -1249,14 +1233,14 @@
     const src = source;
     const open = editing;
     const allow = p?.meta.allowCdn ?? false;
-    const storage = p ? storageOf(p.meta) : EMPTY_STORAGE;
+    const state = p ? storage : EMPTY_STORAGE;
     clearTimeout(draftTimer);
     if (!open || !p) {
       draftDoc = "";
       return;
     }
     draftTimer = setTimeout(() => {
-      draftDoc = buildDraftDoc(src, p.meta.id, allow, storage);
+      draftDoc = buildDraftDoc(src, p.meta.id, allow, state);
     }, 300);
   });
 
@@ -1429,7 +1413,10 @@
       await flushStorage();
       return confirmDiscardUnsaved();
     });
+    readerActions.resetStorage = resetStorage;
     return () => {
+      if (readerActions.resetStorage === resetStorage) delete readerActions.resetStorage;
+      app.readStorageKeys = 0;
       window.removeEventListener("focus", onFocus);
       window.removeEventListener("keydown", onSessionKey, true);
       window.removeEventListener("keydown", onViewKey, true);

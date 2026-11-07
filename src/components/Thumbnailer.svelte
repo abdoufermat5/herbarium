@@ -139,9 +139,9 @@
         const id = event.meta.id;
         if (event.kind === "page.deleted") {
           queued.delete(id);
-        } else {
-          // A previous digest stays until the new one replaces it: the backend
-          // keys previews on `updatedAt`, so any change makes it stale.
+        } else if (event.kind === "page.created" || event.htmlChanged) {
+          // A previous digest stays until the new one replaces it. Metadata
+          // edits (grades, tags, notes) leave the rendering unchanged.
           queued.add(id);
         }
       }

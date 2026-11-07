@@ -4,7 +4,7 @@
   import { flip } from "svelte/animate";
   import { cubicOut } from "svelte/easing";
   import { api } from "../lib/api";
-  import { reloadPages, toast, errorMessage } from "../lib/state.svelte";
+  import { toast, errorMessage } from "../lib/state.svelte";
   import { confirmAction } from "../lib/confirm.svelte";
   import type { TrashEntry } from "../lib/types";
   import { t } from "../lib/i18n.svelte";
@@ -36,7 +36,7 @@
 
   onMount(() => void load());
 
-  /** Restore one page to its original folder (or the vault root) and refresh the library. */
+  /** Restore one page to its original folder (or the vault root); the page event updates the library. */
   async function restore(entry: TrashEntry) {
     if (busyId) return;
     busyId = entry.id;
@@ -44,7 +44,6 @@
       await api.restorePage(entry.id);
       entries = entries.filter((e) => e.id !== entry.id);
       toast(t("trash.restored", { title: titleOf(entry) }), "success");
-      await reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("trash.restoreFailed", { title: titleOf(entry), detail: errorMessage(e) }), "error");
