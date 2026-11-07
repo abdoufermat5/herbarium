@@ -19,6 +19,7 @@
   import { vitality, type VitalityLevel } from "../lib/vitality";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
+  import { isTypingTarget } from "../lib/typing";
   import { treeStage, type TreeStage } from "../lib/tree";
   import { reveal } from "../lib/reveal";
   import Icon from "../lib/Icon.svelte";
@@ -352,12 +353,6 @@
   }
 
   /* -------------------------------------------------------------- keyboard */
-
-  function isTypingTarget(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
-  }
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() !== "r" || e.repeat) return;

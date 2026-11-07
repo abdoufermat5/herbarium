@@ -2,7 +2,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
-import { i18n, t, LOCALES } from "./i18n.svelte";
+import { compareTitles } from "./collate";
+import { t } from "./i18n.svelte";
 import { navigate } from "./navigation.svelte";
 import { dateFormat } from "./format";
 import { transition } from "./motion";
@@ -855,12 +856,11 @@ export function visiblePages(pages: PageMeta[]): PageMeta[] {
   if (app.sort === "relevance" && app.search.trim()) return [...list];
   const sorted = [...list];
   switch (app.sort) {
-    case "title":
-      sorted.sort((a, b) => (a.title || t("common.untitled")).localeCompare(
-          b.title || t("common.untitled"),
-          LOCALES[i18n.locale].bcp47,
-        ));
+    case "title": {
+      const untitled = t("common.untitled");
+      sorted.sort((a, b) => compareTitles(a.title || untitled, b.title || untitled));
       break;
+    }
     case "review":
       sorted.sort((a, b) => (a.nextReview ?? Infinity) - (b.nextReview ?? Infinity));
       break;

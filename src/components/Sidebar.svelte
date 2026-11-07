@@ -5,6 +5,7 @@
   import { flip } from "svelte/animate";
   import { slide } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
+  import { compareTitles } from "../lib/collate";
   import { slideIndicator } from "../lib/motion";
   import {
     app,
@@ -326,10 +327,9 @@
     };
     for (const f of app.folders) ensure(f);
     for (const p of app.library) ensure(p.folder ?? "").pages.push(p);
-    const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
     for (const node of byPath.values()) {
-      node.folders.sort((a, b) => collator.compare(a.name, b.name));
-      node.pages.sort((a, b) => collator.compare(a.title, b.title));
+      node.folders.sort((a, b) => compareTitles(a.name, b.name));
+      node.pages.sort((a, b) => compareTitles(a.title, b.title));
     }
     return root;
   });
@@ -338,6 +338,9 @@
    * Flattened display order used by the roving keyboard focus: exactly the
    * rows that are visible (a folder's children only while it is expanded).
    */
+  /** Above this many visible rows the tree stops animating reorders and entrances. */
+  const ANIMATED_ROWS = 60;
+
   const rows = $derived.by(() => {
     const out: TreeRow[] = [];
     const walk = (node: Branch, depth: number) => {
@@ -726,8 +729,10 @@
     openPaths = next;
   }
 
+  const titleById = $derived(new Map(app.library.map((p) => [p.id, p.title])));
+
   function pageTitle(id: string): string | null {
-    return app.library.find((p) => p.id === id)?.title ?? null;
+    return titleById.get(id) ?? null;
   }
 
   async function commitPathDraft() {
@@ -932,6 +937,16 @@
   {#each { length: depth } as _, i}
     <span class="guide" style:left="{indent(i) + 8}px" aria-hidden="true"></span>
   {/each}
+{/snippet}
+
+{#snippet treeRow(row: TreeRow)}
+  {#if row.kind === "creator"}
+    {@render creatorRow(row)}
+  {:else if row.kind === "folder"}
+    {@render folderRow(row)}
+  {:else}
+    {@render pageRow(row)}
+  {/if}
 {/snippet}
 
 {#snippet creatorRow(row: TreeRow)}
@@ -1325,21 +1340,22 @@
       </div>
       {#if !folded.has("files")}
         <nav class="tree" aria-label={t("sidebar.files")} bind:this={treeEl}>
-          {#each rows as row (row.key)}
-            <div
-              animate:flip={{ duration: reduceMotion ? 0 : 120 }}
-              in:slide={{ duration: reduceMotion ? 0 : 150, easing: cubicOut }}
-              out:slide={{ duration: reduceMotion ? 0 : 110, easing: cubicOut }}
-            >
-              {#if row.kind === "creator"}
-                {@render creatorRow(row)}
-              {:else if row.kind === "folder"}
-                {@render folderRow(row)}
-              {:else}
-                {@render pageRow(row)}
-              {/if}
-            </div>
-          {/each}
+          {#if rows.length <= ANIMATED_ROWS}
+            {#each rows as row (row.key)}
+              <div
+                animate:flip={{ duration: reduceMotion ? 0 : 120 }}
+                in:slide={{ duration: reduceMotion ? 0 : 150, easing: cubicOut }}
+                out:slide={{ duration: reduceMotion ? 0 : 110, easing: cubicOut }}
+              >
+                {@render treeRow(row)}
+              </div>
+            {/each}
+          {:else}
+            <!-- Measuring and animating every row of a long tree costs more than it shows. -->
+            {#each rows as row (row.key)}
+              <div>{@render treeRow(row)}</div>
+            {/each}
+          {/if}
         </nav>
         {#if app.library.length === 0 && app.folders.length === 0 && !creating}
           <div class="hint">
