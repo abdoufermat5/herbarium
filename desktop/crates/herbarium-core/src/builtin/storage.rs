@@ -1,26 +1,36 @@
 // Per-page persistent storage for interactive pages: values a page writes with
-// `localStorage` or the Claude-artifact `window.storage` API are kept in the
-// sidecar under `ext["storage"]` and never touch the HTML. A page therefore
-// keeps its state across reader reopen, app restart, folder moves and the
-// trash round trip.
+// `localStorage` or the Claude-artifact `window.storage` API are kept in
+// `<vault>/.herbarium/storage/<id>.json` and never touch the HTML, the page
+// sidecar or the index. A page therefore keeps its state across reader
+// reopen, app restart, folder moves and the trash round trip (the file is
+// keyed by id alone, so none of those move it), and the metadata every list
+// carries stays small however much a page stores.
+//
+// Older vaults kept the state in the sidecar under `ext["storage"]`. It is
+// moved to the file on the first storage operation for the page and, for every
+// page, after each index (`vault.indexed`).
 //
 // Storage is not a page revision: writes leave `updatedAt` alone and emit no
 // event, so an open reader never mistakes them for an external edit and never
 // reloads the frame (which would wipe the page's in-memory state).
 
 use std::collections::BTreeMap;
+use std::fs;
+use std::io::ErrorKind;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::{id_prop, object};
-use crate::extension::{Ctx, Extension, OpResult, Operation, Registry};
+use crate::extension::{Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::models::PageMeta;
+use crate::store::Store;
 use crate::vault;
 
 pub(crate) struct Storage;
 
-/// Key of this extension's data in `PageMeta::ext`.
+/// Key the state used to live under in `PageMeta::ext` (migrated away).
 pub(crate) const EXT_KEY: &str = "storage";
 /// Longest accepted key, in Unicode scalar values (matching JS code points).
 const MAX_KEY_CHARS: usize = 200;
@@ -40,13 +50,10 @@ pub struct PageStorage {
 }
 
 impl PageStorage {
-    /// The page's state; a missing or malformed entry reads as empty so a
+    /// A legacy `ext["storage"]` value; a malformed entry reads as empty so a
     /// hand-edited sidecar never blocks a page.
-    fn from_meta(meta: &PageMeta) -> Self {
-        meta.ext
-            .get(EXT_KEY)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default()
+    fn from_legacy(value: &Value) -> Self {
+        Self::deserialize(value).unwrap_or_default()
     }
 
     fn is_empty(&self) -> bool {
@@ -112,25 +119,112 @@ fn apply(state: &mut PageStorage, change: &Change) -> OpResult<()> {
     Ok(())
 }
 
-/// Persist the sidecar and refresh the index without bumping `updated_at` and
-/// without emitting `page.updated`: page state is not a page revision, so an
-/// open reader must not treat the write as an external change.
-fn persist(ctx: &Ctx, meta: &PageMeta) -> OpResult<()> {
-    vault::write_meta(&ctx.store.vault, meta)?;
-    let text = ctx
-        .store
+/// `<vault>/.herbarium/storage/<id>.json`.
+fn state_path(vault: &Path, id: &str) -> OpResult<PathBuf> {
+    let id = vault::checked_page_id(id)?;
+    Ok(vault
+        .join(".herbarium")
+        .join("storage")
+        .join(format!("{id}.json")))
+}
+
+/// The page's saved state; a missing or unreadable file reads as empty.
+fn read_state(vault: &Path, id: &str) -> PageStorage {
+    state_path(vault, id)
+        .ok()
+        .and_then(|p| fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Write the page's state, or remove its file when the state is empty.
+fn write_state(vault: &Path, id: &str, state: &PageStorage) -> OpResult<()> {
+    if state.is_empty() {
+        return remove_state(vault, id);
+    }
+    let bytes = serde_json::to_vec(state).map_err(|e| e.to_string())?;
+    vault::write_atomic(&state_path(vault, id)?, &bytes)
+}
+
+/// Delete the page's state file; a file already gone is fine.
+pub(crate) fn remove_state(vault: &Path, id: &str) -> OpResult<()> {
+    match fs::remove_file(state_path(vault, id)?) {
+        Err(e) if e.kind() != ErrorKind::NotFound => {
+            Err(format!("cannot delete page state of {id}: {e}"))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Copy the state of page `from` to the new page `to` (duplicate); `legacy` is
+/// any `ext["storage"]` the original's metadata still carries.
+pub(crate) fn copy_state(
+    vault: &Path,
+    from: &str,
+    legacy: Option<&Value>,
+    to: &str,
+) -> OpResult<()> {
+    let mut state = read_state(vault, from);
+    if let Some(legacy) = legacy {
+        merge_legacy(&mut state, PageStorage::from_legacy(legacy));
+    }
+    write_state(vault, to, &state)
+}
+
+/// The page's state as JSON for the reader shim; `None` when it saved nothing.
+pub fn page_storage_value(vault: &Path, id: &str) -> Option<Value> {
+    let state = read_state(vault, id);
+    (!state.is_empty())
+        .then(|| serde_json::to_value(state).ok())
+        .flatten()
+}
+
+/// Fold `legacy` into `state`; keys already in the file win.
+fn merge_legacy(state: &mut PageStorage, legacy: PageStorage) {
+    for (dst, src) in [
+        (&mut state.local, legacy.local),
+        (&mut state.personal, legacy.personal),
+        (&mut state.shared, legacy.shared),
+    ] {
+        for (k, v) in src {
+            dst.entry(k).or_insert(v);
+        }
+    }
+}
+
+/// Move a legacy `ext["storage"]` of `meta` into the page's file and strip it
+/// from the sidecar and the index. Returns whether anything was migrated. The
+/// file is written first, so a crash in between loses nothing.
+fn migrate(store: &Store, meta: &mut PageMeta) -> OpResult<bool> {
+    let Some(legacy) = meta.ext.get(EXT_KEY) else {
+        return Ok(false);
+    };
+    let mut state = read_state(&store.vault, &meta.id);
+    merge_legacy(&mut state, PageStorage::from_legacy(legacy));
+    write_state(&store.vault, &meta.id, &state)?;
+    meta.ext.remove(EXT_KEY);
+    // Not a page revision: `updated_at` stays and no event is emitted.
+    vault::write_meta(&store.vault, meta)?;
+    let text = store
         .text_for(&meta.id)
         .map_err(|e| e.to_string())?
         .unwrap_or_default();
-    let mtime = vault::page_mtime(&ctx.store.vault, meta);
-    ctx.store
+    let mtime = vault::page_mtime(&store.vault, meta);
+    store
         .upsert(meta, &text, mtime)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// The page's state, migrating a legacy `ext["storage"]` first.
+fn load(ctx: &Ctx, id: &str) -> OpResult<PageStorage> {
+    let mut meta = ctx.page(id)?;
+    migrate(ctx.store, &mut meta)?;
+    Ok(read_state(&ctx.store.vault, id))
 }
 
 fn write_changes(ctx: &mut Ctx, args: WriteArgs) -> OpResult<PageStorage> {
-    let mut meta = ctx.page(&args.id)?;
-    let mut next = PageStorage::from_meta(&meta);
+    let mut next = load(ctx, &args.id)?;
     // Validate and apply the whole batch to a copy first: a bad key or a size
     // overrun rejects every change, leaving the stored state untouched.
     for change in &args.changes {
@@ -142,15 +236,7 @@ fn write_changes(ctx: &mut Ctx, args: WriteArgs) -> OpResult<PageStorage> {
             MAX_STATE_BYTES
         ));
     }
-    if next.is_empty() {
-        meta.ext.remove(EXT_KEY);
-    } else {
-        meta.ext.insert(
-            EXT_KEY.into(),
-            serde_json::to_value(&next).map_err(|e| e.to_string())?,
-        );
-    }
-    persist(ctx, &meta)?;
+    write_state(&ctx.store.vault, &args.id, &next)?;
     Ok(next)
 }
 
@@ -160,12 +246,23 @@ impl Extension for Storage {
     }
 
     fn register(&self, r: &mut Registry) -> OpResult<()> {
+        // Older vaults carry the state in the sidecars: move it out after
+        // every index so lists and `pages.get` never carry it.
+        r.on(events::VAULT_INDEXED, |store, _| {
+            let Ok(pages) = store.with_ext_containing("\"storage\"") else {
+                return;
+            };
+            for mut meta in pages {
+                let _ = migrate(store, &mut meta);
+            }
+        });
+
         r.add(
             Operation::new(
                 "storage.get",
                 "Read the state an interactive page saved for itself, per namespace (`local`, `personal`, `shared`). Empty maps when the page never wrote anything.",
                 object(json!({ "id": id_prop() }), &["id"]),
-                |ctx: &mut Ctx, a: IdArgs| Ok(PageStorage::from_meta(&ctx.page(&a.id)?)),
+                |ctx: &mut Ctx, a: IdArgs| load(ctx, &a.id),
             )
             .ui_only(),
         )?;
@@ -205,9 +302,8 @@ impl Extension for Storage {
                 object(json!({ "id": id_prop() }), &["id"]),
                 |ctx: &mut Ctx, a: IdArgs| {
                     let mut meta = ctx.page(&a.id)?;
-                    if meta.ext.remove(EXT_KEY).is_some() {
-                        persist(ctx, &meta)?;
-                    }
+                    migrate(ctx.store, &mut meta)?;
+                    remove_state(&ctx.store.vault, &a.id)?;
                     Ok(PageStorage::default())
                 },
             )

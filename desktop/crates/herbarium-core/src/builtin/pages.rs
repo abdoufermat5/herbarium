@@ -9,10 +9,11 @@ use serde_json::json;
 use super::network::default_allow_cdn;
 use super::proposals::{delete_proposal, overwrite_or_propose};
 use super::review::{apply_schedule, load_settings};
+use super::storage;
 use super::{id_prop, object};
 use crate::content::{extract_text, extract_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
-use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource};
+use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource, SearchHit};
 use crate::query::{FILTER_HELP, Query};
 use crate::store::Store;
 use crate::time::now_ms;
@@ -291,6 +292,26 @@ fn effective_limit(caller: Caller, limit: Option<usize>) -> usize {
     })
 }
 
+/// Ids of the pages sitting in the trash (just the entry names).
+fn trashed_ids(vault_dir: &Path) -> Vec<String> {
+    std::fs::read_dir(vault_dir.join(".herbarium").join("trash"))
+        .map(|rd| {
+            rd.filter_map(Result::ok)
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Cut every hit's metadata down to its list summary.
+fn summarize_hits(mut hits: Vec<SearchHit>) -> Vec<SearchHit> {
+    for hit in &mut hits {
+        hit.meta = hit.meta.summary();
+    }
+    hits
+}
+
 /// Write a new page's files, index them, and emit `page.created`. The files
 /// are removed again if indexing fails, so disk and index stay in step.
 fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
@@ -301,6 +322,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
     if !vault::trash_entry_exists(&store.vault, &meta.id) {
         vault::delete_history(&store.vault, &meta.id)?;
         delete_proposal(&store.vault, &meta.id)?;
+        storage::remove_state(&store.vault, &meta.id)?;
     }
     vault::write_page(&store.vault, meta, html)?;
     // The bytes are on disk now; keep the returned `updatedAt` at least their
@@ -576,6 +598,7 @@ impl Extension for Pages {
                     .filter(|m| in_folder(m))
                     .filter(|m| a.tag.as_ref().is_none_or(|t| m.tags.contains(t)))
                     .take(limit)
+                    .map(|m| m.summary())
                     .collect::<Vec<_>>())
             },
         ))?;
@@ -594,11 +617,17 @@ impl Extension for Pages {
                 let limit = effective_limit(ctx.caller, a.limit);
                 let query = Query::parse(&a.query)?;
                 if !query.has_filters() {
-                    return ctx.store.search(&query.text, limit).map_err(|e| e.to_string());
+                    return ctx
+                        .store
+                        .search(&query.text, limit)
+                        .map(summarize_hits)
+                        .map_err(|e| e.to_string());
                 }
                 let now = now_ms();
                 let hits = ctx.store.search(&query.text, usize::MAX).map_err(|e| e.to_string())?;
-                Ok(hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect())
+                Ok(summarize_hits(
+                    hits.into_iter().filter(|h| query.matches(&h.meta, now)).take(limit).collect(),
+                ))
             },
         ))?;
 
@@ -697,7 +726,8 @@ impl Extension for Pages {
             "Copy a page (HTML and metadata) into the same folder as \"<title> (copy)\" with a new id and no review schedule. Returns the new page's metadata.",
             object(json!({ "id": id_prop() }), &["id"]),
             |ctx: &mut Ctx, a: IdArgs| {
-                let original = ctx.page(&a.id)?;
+                let mut original = ctx.page(&a.id)?;
+                let legacy_state = original.ext.remove(storage::EXT_KEY);
                 let store = ctx.store;
                 let html = vault::read_html(&store.vault, &original.id, original.folder.as_deref())?;
                 let title = format!("{} (copy)", original.title);
@@ -711,6 +741,9 @@ impl Extension for Pages {
                 meta.ext = original.ext;
                 meta.ext.remove("review");
                 insert(ctx, &mut meta, &html)?;
+                // Page state lives in its own file (or still in the original's
+                // legacy `ext`): the copy gets it under its own id.
+                storage::copy_state(&store.vault, &a.id, legacy_state.as_ref(), &meta.id)?;
                 Ok(meta)
             },
         ))?;
@@ -800,7 +833,12 @@ impl Extension for Pages {
                 "Permanently delete one trashed page, or empty the whole trash when `id` is omitted.",
                 object(json!({ "id": { "type": ["string", "null"], "description": "Trashed page id; omit to empty the trash." } }), &[]),
                 |ctx: &mut Ctx, a: PurgeArgs| {
+                    let gone = trashed_ids(&ctx.store.vault);
                     let removed = vault::purge_trash(&ctx.store.vault, a.id.as_deref())?;
+                    // A purged page is gone for good, and so is its saved state.
+                    for id in gone.into_iter().filter(|id| a.id.as_deref().is_none_or(|one| one == id)) {
+                        let _ = storage::remove_state(&ctx.store.vault, &id);
+                    }
                     Ok(json!({ "removed": removed }))
                 },
             )

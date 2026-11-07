@@ -570,6 +570,35 @@ fn fts_note(meta: &PageMeta) -> String {
     out
 }
 
+/// The few fields a resource listing needs for one page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListingRow {
+    pub id: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub folder: Option<String>,
+}
+
+impl Store {
+    /// One window of the library in title order (ties by id, so a window is
+    /// stable) without loading the pages' metadata: `limit` rows from `offset`.
+    pub fn listing_window(&self, offset: usize, limit: usize) -> rusqlite::Result<Vec<ListingRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,title,tags,folder FROM pages
+             ORDER BY title COLLATE NOCASE, id LIMIT ?1 OFFSET ?2",
+        )?;
+        stmt.query_map(params![limit as i64, offset as i64], |r| {
+            Ok(ListingRow {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                tags: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+                folder: r.get(3)?,
+            })
+        })?
+        .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
