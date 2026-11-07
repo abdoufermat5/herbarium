@@ -3,7 +3,7 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi, openPlantPath } from "./lib/state.svelte";
+  import { app, applyVaultEvent, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi, openPlantPath } from "./lib/state.svelte";
   import { navigate } from "./lib/navigation.svelte";
   import { folderPickerState } from "./lib/folder-picker.svelte";
   import { api } from "./lib/api";
@@ -36,6 +36,7 @@
   import { rafThrottle, reducedMotion } from "./lib/motion";
   import type { ShortcutContext } from "./lib/shortcuts";
   import type { CaptureOffer } from "./lib/types";
+  import type { VaultEvent } from "./lib/vault-events";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
@@ -329,6 +330,8 @@
     // Quick capture: pages saved from outside the window, and offers from
     // the Downloads and clipboard watchers.
     keep(listen("vault-changed", () => void reloadPages(true)));
+    // Changes this process made, pushed by the backend: patch the lists in place.
+    keep(listen<VaultEvent>("vault-event", (event) => applyVaultEvent(event.payload)));
     keep(
       listen<CaptureOffer>("download-offer", (event) => {
         const offer = event.payload;

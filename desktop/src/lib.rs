@@ -6,6 +6,7 @@ pub mod cli;
 mod commands;
 mod config;
 mod editors;
+mod events;
 mod export;
 mod locate;
 mod native_host;
@@ -86,6 +87,7 @@ pub fn run() {
         .manage(AppState::new())
         .manage(PendingDeepLinks::default())
         .setup(|app| {
+            events::install(app)?;
             let win = navigation::build_main_window(app)?;
             // Window icon for platforms/WMs that read it from the window itself.
             let _ = win.set_icon(tauri::include_image!("icons/128x128.png"));
