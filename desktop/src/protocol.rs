@@ -193,9 +193,12 @@ pub fn inject_base_tag(html: &str, base_href: &str) -> String {
 
     // Find "<head" case-insensitively, then the closing '>' of that tag, and
     // insert the base tag right after it — without lower-casing the document.
-    if let Some(insert_at) = find_ci(bytes, b"<head")
-        .and_then(|pos| bytes[pos..].iter().position(|&b| b == b'>').map(|close| pos + close + 1))
-    {
+    if let Some(insert_at) = find_ci(bytes, b"<head").and_then(|pos| {
+        bytes[pos..]
+            .iter()
+            .position(|&b| b == b'>')
+            .map(|close| pos + close + 1)
+    }) {
         let mut result = String::with_capacity(html.len() + base_tag.len() + 2);
         result.push_str(&html[..insert_at]);
         result.push('\n');
@@ -927,15 +930,24 @@ mod tests {
         );
         assert_eq!(
             parse_range(Some("bytes=500-"), 1000),
-            RangeSpec::Partial { start: 500, end: 999 }
+            RangeSpec::Partial {
+                start: 500,
+                end: 999
+            }
         );
         assert_eq!(
             parse_range(Some("bytes=-200"), 1000),
-            RangeSpec::Partial { start: 800, end: 999 }
+            RangeSpec::Partial {
+                start: 800,
+                end: 999
+            }
         );
         assert_eq!(
             parse_range(Some("bytes=900-2000"), 1000),
-            RangeSpec::Partial { start: 900, end: 999 }
+            RangeSpec::Partial {
+                start: 900,
+                end: 999
+            }
         );
         assert_eq!(
             parse_range(Some("bytes=0-9 "), 1000),
@@ -943,20 +955,39 @@ mod tests {
         );
 
         // Start at/past the end, or an empty file, is unsatisfiable.
-        assert_eq!(parse_range(Some("bytes=1000-"), 1000), RangeSpec::Unsatisfiable);
-        assert_eq!(parse_range(Some("bytes=2000-3000"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(
+            parse_range(Some("bytes=1000-"), 1000),
+            RangeSpec::Unsatisfiable
+        );
+        assert_eq!(
+            parse_range(Some("bytes=2000-3000"), 1000),
+            RangeSpec::Unsatisfiable
+        );
         assert_eq!(parse_range(Some("bytes=0-0"), 0), RangeSpec::Unsatisfiable);
 
         // Malformed input.
-        assert_eq!(parse_range(Some("items=0-9"), 1000), RangeSpec::Unsatisfiable);
-        assert_eq!(parse_range(Some("bytes=0-1,5-6"), 1000), RangeSpec::Unsatisfiable);
-        assert_eq!(parse_range(Some("bytes=abc-def"), 1000), RangeSpec::Unsatisfiable);
-        assert_eq!(parse_range(Some("bytes=-0"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(
+            parse_range(Some("items=0-9"), 1000),
+            RangeSpec::Unsatisfiable
+        );
+        assert_eq!(
+            parse_range(Some("bytes=0-1,5-6"), 1000),
+            RangeSpec::Unsatisfiable
+        );
+        assert_eq!(
+            parse_range(Some("bytes=abc-def"), 1000),
+            RangeSpec::Unsatisfiable
+        );
+        assert_eq!(
+            parse_range(Some("bytes=-0"), 1000),
+            RangeSpec::Unsatisfiable
+        );
     }
 
     #[test]
     fn inject_base_tag_is_case_insensitive_and_preserves_document_case() {
-        let html = "<!DOCTYPE html>\n<HTML LANG=\"en\"><HEAD><TITLE>T</TITLE></HEAD><BODY></BODY></HTML>";
+        let html =
+            "<!DOCTYPE html>\n<HTML LANG=\"en\"><HEAD><TITLE>T</TITLE></HEAD><BODY></BODY></HTML>";
         let out = inject_base_tag(html, "herbarium://page/p/");
 
         let head = out.find("<HEAD>").unwrap();

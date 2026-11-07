@@ -11,6 +11,8 @@ const ext = globalThis.browser ?? globalThis.chrome;
 const HOST = "app.herbarium.host";
 const MAX_IMAGE = 4 * 1024 * 1024;
 const MAX_INLINE = 24 * 1024 * 1024;
+/** Resources fetched at once while inlining a page. */
+const FETCH_CONCURRENCY = 6;
 
 /* ------------------------------------------------------------- the host */
 
@@ -107,47 +109,76 @@ function escapeAttr(value) {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/ /g, "&nbsp;");
 }
 
-/** Replace every attribute occurrence of `url` (as the page serialised it) with `replacement`. */
-function replaceUrl(html, url, replacement) {
-  return html.split(`"${escapeAttr(url)}"`).join(`"${replacement}"`);
+/** Run `fn` over `items`, at most `limit` at a time. `fn` must not throw. */
+async function forEachLimit(items, limit, fn) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+/** The text of a stylesheet with its `url(...)`s made absolute, or null when it cannot be had. */
+async function fetchStylesheet(href) {
+  try {
+    const res = await fetch(href, { credentials: "omit" });
+    if (!res.ok) return null;
+    const css = await res.text();
+    // url(...) inside the sheet is relative to the sheet.
+    return css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => {
+      if (/^(data:|#)/i.test(u)) return m;
+      try {
+        return `url("${new URL(u, href).href}")`;
+      } catch {
+        return m;
+      }
+    });
+  } catch {
+    return null; // keep the link
+  }
 }
 
 /** Inline a snapshot's stylesheets and images so it works offline. */
 async function inlineResources(snap) {
   let html = snap.html;
   let budget = MAX_INLINE;
-  for (const href of snap.stylesheets) {
-    try {
-      const res = await fetch(href, { credentials: "omit" });
-      if (!res.ok) continue;
-      let css = await res.text();
-      // url(...) inside the sheet is relative to the sheet.
-      css = css.replace(/url\(\s*(['"]?)([^'")]+)\1\s*\)/g, (m, q, u) => {
-        if (/^(data:|#)/i.test(u)) return m;
-        try {
-          return `url("${new URL(u, href).href}")`;
-        } catch {
-          return m;
-        }
-      });
-      const tag = new RegExp(`<link[^>]*href="${escapeAttr(href).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"[^>]*>`, "g");
-      html = html.replace(tag, () => `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>`);
-    } catch {
-      /* keep the link */
-    }
+
+  // Stylesheets: fetched concurrently, then every `<link>` swapped in one pass.
+  const sheets = new Map(); // attribute-escaped href -> <style> element
+  await forEachLimit(snap.stylesheets, FETCH_CONCURRENCY, async (href) => {
+    const css = await fetchStylesheet(href);
+    if (css !== null) sheets.set(escapeAttr(href), `<style>${css.replace(/<\/style/gi, "<\\/style")}</style>`);
+  });
+  if (sheets.size) {
+    html = html.replace(/<link[^>]*>/g, (tag) => {
+      const href = /\shref="([^"]*)"/.exec(tag);
+      return (href && sheets.get(href[1])) || tag;
+    });
   }
-  for (const src of snap.images) {
-    if (budget <= 0) break;
+
+  // Images: fetched concurrently within the byte budget, then every
+  // attribute value that is one of those URLs replaced in one pass.
+  const images = new Map(); // attribute-escaped src -> data URL
+  await forEachLimit(snap.images, FETCH_CONCURRENCY, async (src) => {
+    if (budget <= 0) return;
     try {
       const res = await fetch(src, { credentials: "omit" });
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const blob = await res.blob();
-      if (blob.size > MAX_IMAGE || blob.size > budget || !blob.type.startsWith("image/")) continue;
+      if (blob.size > MAX_IMAGE || blob.size > budget || !blob.type.startsWith("image/")) return;
       budget -= blob.size;
-      html = replaceUrl(html, src, await toDataUrl(blob));
+      images.set(escapeAttr(src), await toDataUrl(blob));
     } catch {
       /* keep the remote URL */
     }
+  });
+  if (images.size) {
+    // `="…"` with no markup inside: a stray quote in page text cannot pair up
+    // with a later attribute and hide its URL.
+    html = html.replace(/="([^"<>]*)"/g, (m, value) => {
+      const data = images.get(value);
+      return data === undefined ? m : `="${data}"`;
+    });
   }
   return html;
 }

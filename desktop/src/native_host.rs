@@ -10,6 +10,8 @@
 
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Mutex, OnceLock};
 
 use herbarium_core::{Caller, Host};
 use serde_json::{Value, json};
@@ -93,8 +95,11 @@ fn brief(meta: &Value) -> Value {
     })
 }
 
-/// Answer one request. `open` hands a deep link to `launch`.
-pub fn handle(host: &Host, req: &Value, launch: &dyn Fn(&str) -> Result<(), String>) -> Value {
+/// Answer one request. `open` hands a deep link to `launch`. The request is
+/// consumed so a saved page's HTML moves into the operation instead of being
+/// copied.
+pub fn handle(host: &Host, mut req: Value, launch: &dyn Fn(&str) -> Result<(), String>) -> Value {
+    let req = &mut req;
     let id = req.get("id").cloned().unwrap_or(Value::Null);
     let reply = match req.get("type").and_then(Value::as_str).unwrap_or_default() {
         "ping" => ping(host),
@@ -132,16 +137,16 @@ fn ping(host: &Host) -> Result<Value, String> {
 
 /// Save a page from the browser. Web content is untrusted: network access
 /// is always off, whatever the vault default, and it lands in the Inbox.
-fn save(host: &Host, req: &Value) -> Result<Value, String> {
-    let html = req
-        .get("html")
-        .and_then(Value::as_str)
-        .ok_or("save needs `html`")?;
+fn save(host: &Host, req: &mut Value) -> Result<Value, String> {
+    // Take the HTML out of the request: `json!` would copy it.
+    let Some(Value::String(html)) = req.get_mut("html").map(Value::take) else {
+        return Err("save needs `html`".into());
+    };
     let mut args = json!({
-        "html": html,
         "folder": str_arg(req, "folder").unwrap_or(INBOX),
         "allowCdn": false,
     });
+    args["html"] = Value::String(html);
     if let Some(title) = str_arg(req, "title") {
         args["title"] = json!(title);
     }
@@ -279,9 +284,11 @@ fn open(
 }
 
 /// Open the app on `link`: a new launch hands it to the running window.
-/// With `HERBARIUM_LAUNCH_LOG` set (end-to-end tests), the link is appended
-/// to that file instead.
+/// In debug builds, with `HERBARIUM_LAUNCH_LOG` set (the end-to-end tests run
+/// the debug binary), the link is appended to that file instead. Release
+/// builds carry no such hook.
 fn launch_app(link: &str) -> Result<(), String> {
+    #[cfg(debug_assertions)]
     if let Some(log) = std::env::var_os("HERBARIUM_LAUNCH_LOG").filter(|p| !p.is_empty()) {
         use std::io::Write as _;
         let mut file = std::fs::OpenOptions::new()
@@ -311,24 +318,130 @@ pub fn app_executable() -> Result<PathBuf, String> {
     std::env::current_exe().map_err(|e| format!("cannot locate the Herbarium executable: {e}"))
 }
 
-/// Serve the browser until it closes the connection. The vault is opened once.
+/// Requests answered from a read-only connection while a write may be running.
+fn is_read_request(req: &Value) -> bool {
+    matches!(
+        req.get("type").and_then(Value::as_str),
+        Some("ping" | "lookup" | "search")
+    )
+}
+
+fn error_reply(req: &Value, error: &str) -> Value {
+    json!({ "id": req.get("id").cloned().unwrap_or(Value::Null), "ok": false, "error": error })
+}
+
+/// Serve the browser until it closes the connection.
+///
+/// Requests are answered by two workers so a cheap badge `lookup`/`search`
+/// never waits behind a large `save`: the write worker owns the read/write
+/// host (writes stay serialised), the read worker answers `ping`, `lookup` and
+/// `search` from its own read-only connection. Replies carry the request `id`,
+/// so they may leave out of order. The vault is opened lazily by the write
+/// worker and a failed open is retried on the next request.
 pub fn serve(
     vault: Option<String>,
     input: &mut impl Read,
-    output: &mut impl Write,
+    output: impl Write + Send,
 ) -> io::Result<()> {
-    let mut host = Host::new();
-    let opened = resolve_vault(vault).and_then(|v| host.open_vault(&v).map(|_| ()));
-    while let Some(req) = read_message(input)? {
-        let reply = match &opened {
-            Ok(()) => handle(&host, &req, &launch_app),
-            Err(e) => {
-                json!({ "id": req.get("id").cloned().unwrap_or(Value::Null), "ok": false, "error": e })
+    let output = Mutex::new(output);
+    // The opened vault's canonical path, once the write worker has indexed it.
+    let opened: OnceLock<PathBuf> = OnceLock::new();
+    let send = |reply: &Value| -> io::Result<()> {
+        let mut out = output.lock().unwrap_or_else(|e| e.into_inner());
+        write_message(&mut *out, reply)
+    };
+
+    std::thread::scope(|scope| {
+        let (write_tx, write_rx) = mpsc::channel::<Value>();
+        let (read_tx, read_rx) = mpsc::channel::<Value>();
+
+        let forward = write_tx.clone();
+        scope.spawn(|| write_worker(vault, write_rx, &opened, &send));
+        scope.spawn(|| read_worker(read_rx, forward, &opened, &send));
+
+        let result = loop {
+            match read_message(input) {
+                Ok(Some(req)) => {
+                    let target = if opened.get().is_some() && is_read_request(&req) {
+                        &read_tx
+                    } else {
+                        &write_tx
+                    };
+                    if target.send(req).is_err() {
+                        break Ok(());
+                    }
+                }
+                Ok(None) => break Ok(()),
+                Err(e) => break Err(e),
             }
         };
-        write_message(output, &reply)?;
+        // Closing the channels lets the workers finish what is queued.
+        drop(read_tx);
+        drop(write_tx);
+        result
+    })
+}
+
+/// Owns the read/write host; opens the vault on first need and again after a
+/// failed attempt.
+fn write_worker(
+    vault: Option<String>,
+    requests: Receiver<Value>,
+    opened: &OnceLock<PathBuf>,
+    send: &(dyn Fn(&Value) -> io::Result<()> + Sync),
+) {
+    let mut host: Option<Host> = None;
+    for req in requests {
+        let reply = match ensure_host(&mut host, &vault) {
+            Ok(host) => {
+                let _ = opened.set(host.vault_path().map(Path::to_path_buf).unwrap_or_default());
+                handle(host, req, &launch_app)
+            }
+            Err(e) => error_reply(&req, &e),
+        };
+        if send(&reply).is_err() {
+            return;
+        }
     }
-    Ok(())
+}
+
+fn ensure_host<'a>(host: &'a mut Option<Host>, vault: &Option<String>) -> Result<&'a Host, String> {
+    if host.is_none() {
+        let mut fresh = Host::new();
+        fresh.open_vault(&resolve_vault(vault.clone())?)?;
+        *host = Some(fresh);
+    }
+    host.as_ref().ok_or_else(|| "no vault open".into())
+}
+
+/// Answers read requests from a read-only connection to the opened vault. When
+/// that connection cannot be had, the request goes to the write worker.
+fn read_worker(
+    requests: Receiver<Value>,
+    fallback: Sender<Value>,
+    opened: &OnceLock<PathBuf>,
+    send: &(dyn Fn(&Value) -> io::Result<()> + Sync),
+) {
+    let mut host: Option<Host> = None;
+    for req in requests {
+        if host.is_none()
+            && let Some(vault) = opened.get()
+        {
+            let mut fresh = Host::new();
+            if fresh.open_vault_read_only(vault).is_ok() {
+                host = Some(fresh);
+            }
+        }
+        let Some(host) = &host else {
+            if fallback.send(req).is_err() {
+                return;
+            }
+            continue;
+        };
+        if send(&handle(host, req, &launch_app)).is_err() {
+            return;
+        }
+    }
 }
 
 /// `herbarium native-host …`: serve, or install/uninstall the manifests.
@@ -373,8 +486,7 @@ pub fn run(args: &[String]) -> i32 {
                 .find(|w| w[0] == "--vault")
                 .map(|w| w[1].clone());
             let stdin = io::stdin();
-            let stdout = io::stdout();
-            match serve(vault, &mut stdin.lock(), &mut stdout.lock()) {
+            match serve(vault, &mut stdin.lock(), io::stdout()) {
                 Ok(()) => 0,
                 Err(e) => {
                     eprintln!("herbarium native-host: {e}");
@@ -741,6 +853,111 @@ mod tests {
         input.clear();
     }
 
+    /// A writer the test can read back while `serve` still owns it.
+    #[derive(Clone, Default)]
+    struct Sink(std::sync::Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Sink {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Sink {
+        fn replies(&self) -> Vec<Value> {
+            let bytes = self.0.lock().unwrap().clone();
+            let mut input = bytes.as_slice();
+            std::iter::from_fn(|| read_message(&mut input).unwrap()).collect()
+        }
+    }
+
+    /// Framed requests, each preceded by a hook that runs when `serve` asks for it.
+    type Step = (Box<dyn FnMut()>, Vec<u8>);
+    struct Script(Vec<Step>, std::io::Cursor<Vec<u8>>);
+
+    impl Read for Script {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let n = self.1.read(buf)?;
+            if n > 0 || self.0.is_empty() {
+                return Ok(n);
+            }
+            let (mut hook, bytes) = self.0.remove(0);
+            hook();
+            self.1 = std::io::Cursor::new(bytes);
+            self.1.read(buf)
+        }
+    }
+
+    #[test]
+    fn a_failed_vault_open_is_retried_and_reads_keep_working() {
+        let dir =
+            std::env::temp_dir().join(format!("herbarium-native-retry-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // A file where the vault folder should be: the first open fails.
+        let vault = dir.join("vault");
+        std::fs::write(&vault, "in the way").unwrap();
+
+        let sink = Sink::default();
+        let wait_for = |sink: Sink, replies: usize| {
+            move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                while sink.replies().len() < replies && std::time::Instant::now() < deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+            }
+        };
+        let (s1, s2, s3) = (sink.clone(), sink.clone(), sink.clone());
+        let unblock = vault.clone();
+        let first = wait_for(s1, 0);
+        let second = wait_for(s2, 1);
+        let third = wait_for(s3, 2);
+        let script = Script(
+            vec![
+                (Box::new(first), frame(&json!({ "id": 1, "type": "ping" }))),
+                (
+                    Box::new(move || {
+                        second();
+                        std::fs::remove_file(&unblock).unwrap();
+                    }),
+                    frame(&json!({ "id": 2, "type": "ping" })),
+                ),
+                (
+                    Box::new(third),
+                    frame(&json!({ "id": 3, "type": "lookup", "url": "https://example.com/" })),
+                ),
+            ],
+            std::io::Cursor::new(Vec::new()),
+        );
+        let mut input = script;
+        serve(
+            Some(vault.to_string_lossy().into_owned()),
+            &mut input,
+            sink.clone(),
+        )
+        .unwrap();
+
+        let replies = sink.replies();
+        let by_id = |id: u64| {
+            replies
+                .iter()
+                .find(|r| r["id"] == id)
+                .unwrap_or_else(|| panic!("no reply {id}: {replies:?}"))
+        };
+        assert_eq!(by_id(1)["ok"], false, "the vault is not there yet");
+        assert_eq!(
+            by_id(2)["ok"],
+            true,
+            "the failure is not cached: {replies:?}"
+        );
+        assert_eq!(by_id(3)["pages"], json!([]));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn requests_save_find_search_and_open() {
         let vault = std::env::temp_dir().join(format!("herbarium-native-{}", std::process::id()));
@@ -759,7 +976,7 @@ mod tests {
             launched.borrow_mut().push(link.to_string());
             Ok(())
         };
-        let ask = |req: Value| handle(&host, &req, &launch);
+        let ask = |req: Value| handle(&host, req, &launch);
 
         assert_eq!(ask(json!({ "id": 1, "type": "ping" }))["ok"], true);
         let saved = ask(json!({

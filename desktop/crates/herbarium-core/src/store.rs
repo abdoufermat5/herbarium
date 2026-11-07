@@ -85,7 +85,9 @@ impl Store {
         conn.pragma_update(None, "busy_timeout", 5000).ok();
         let wal: Result<String, _> = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0));
         if !matches!(wal.as_deref(), Ok("wal")) {
-            eprintln!("herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher");
+            eprintln!(
+                "herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher"
+            );
         }
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         migrate(&conn)?;
@@ -94,13 +96,25 @@ impl Store {
 
     /// A read-only connection to the same index, for hot read paths (protocol
     /// serving, native-host lookups) that must never contend with the app's
-    /// write connection. Falls back to a read/write handle (still used only for
-    /// reads) when a read-only WAL handle cannot be opened on this platform.
+    /// write connection. The index must already exist (the writer creates and
+    /// migrates it). If a read-only WAL handle cannot be opened on this
+    /// platform, falls back to an existing-file read/write handle made
+    /// `query_only`, so it still never writes.
     pub fn open_read_only(vault: PathBuf) -> rusqlite::Result<Store> {
+        use rusqlite::OpenFlags;
         let db = vault.join(".herbarium").join("index.sqlite");
-        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
-            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
-        let conn = Connection::open_with_flags(&db, flags).or_else(|_| Connection::open(&db))?;
+        let conn = Connection::open_with_flags(
+            &db,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .or_else(|_| {
+            let conn = Connection::open_with_flags(
+                &db,
+                OpenFlags::SQLITE_OPEN_READ_WRITE | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            conn.pragma_update(None, "query_only", true)?;
+            Ok::<_, rusqlite::Error>(conn)
+        })?;
         conn.pragma_update(None, "busy_timeout", 5000).ok();
         Ok(Store { vault, conn })
     }
@@ -272,7 +286,11 @@ impl Store {
             n += 2;
         }
         if let Some(t) = tag {
-            where_sql.push_str(if where_sql.is_empty() { "WHERE " } else { " AND " });
+            where_sql.push_str(if where_sql.is_empty() {
+                "WHERE "
+            } else {
+                " AND "
+            });
             where_sql.push_str(&format!(
                 "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?{n})"
             ));
@@ -284,7 +302,10 @@ impl Store {
         );
         args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), row_to_meta)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            row_to_meta,
+        )?;
         rows.collect()
     }
 
@@ -347,7 +368,10 @@ impl Store {
             let metas = self.list_filtered(folder, tag, limit)?;
             return Ok(metas
                 .into_iter()
-                .map(|meta| SearchHit { meta, snippet: None })
+                .map(|meta| SearchHit {
+                    meta,
+                    snippet: None,
+                })
                 .collect());
         }
         match self.fts_search(&expr, folder, tag, limit_param) {
@@ -398,12 +422,15 @@ impl Store {
         );
         args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| {
-            let meta = row_to_meta(r)?;
-            let snip: Option<String> = r.get(13)?;
-            let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
-            Ok(SearchHit { meta, snippet })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            |r| {
+                let meta = row_to_meta(r)?;
+                let snip: Option<String> = r.get(13)?;
+                let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
+                Ok(SearchHit { meta, snippet })
+            },
+        )?;
         rows.collect()
     }
 
@@ -601,7 +628,11 @@ fn delete_row(conn: &Connection, id: &str) -> rusqlite::Result<()> {
 /// Write `meta`'s metadata columns (not `text_content`) to the index, on any
 /// connection (or transaction). The `pages_au` trigger refreshes its FTS row.
 /// `mtime`/`fingerprint` are recomputed because the sidecar changed on disk.
-pub(crate) fn update_meta_on(conn: &Connection, vault: &Path, meta: &PageMeta) -> rusqlite::Result<()> {
+pub(crate) fn update_meta_on(
+    conn: &Connection,
+    vault: &Path,
+    meta: &PageMeta,
+) -> rusqlite::Result<()> {
     let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
     let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
     let source_url = PageSource::of(meta)
@@ -1122,8 +1153,18 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "p1");
 
-        assert!(store.find_by_url("https://example.com/other").unwrap().is_empty());
-        assert!(store.find_by_url("https://example.com/foo").unwrap().is_empty());
+        assert!(
+            store
+                .find_by_url("https://example.com/other")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .find_by_url("https://example.com/foo")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -62,10 +62,12 @@ fn park_until(watchers: &Watchers, flag: &AtomicBool) -> bool {
     if flag.load(Ordering::Relaxed) {
         return false;
     }
-    let _ = watchers
-        .wake
-        .wait_while(guard, |_| !flag.load(Ordering::Relaxed))
-        .unwrap_or_else(|e| e.into_inner());
+    drop(
+        watchers
+            .wake
+            .wait_while(guard, |_| !flag.load(Ordering::Relaxed))
+            .unwrap_or_else(|e| e.into_inner()),
+    );
     true
 }
 

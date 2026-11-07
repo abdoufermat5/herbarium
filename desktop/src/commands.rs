@@ -44,13 +44,20 @@ impl Default for AppState {
 type CmdResult<T> = Result<T, String>;
 
 /// Open a vault (create dir if needed), index it, persist it in the config.
-fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
-    let mut host = state.host.lock().map_err(|e| e.to_string())?;
-    let report = host.open_vault(path)?;
-    if let Some(vault) = host.vault_path() {
+///
+/// The index walk runs on a fresh host, outside the app's host lock, so the
+/// vault already open keeps answering while a big vault is scanned; the lock is
+/// held only for the swap. A failed open leaves the current vault untouched.
+fn open_vault(app: &tauri::AppHandle, path: &str) -> CmdResult<Config> {
+    let state = app.state::<AppState>();
+    let mut fresh = crate::events::new_host(app)?;
+    let report = fresh.open_vault(path)?;
+    let canonical = fresh.vault_path().map(Path::to_path_buf);
+    *state.host.lock().map_err(|e| e.to_string())? = fresh;
+    if let Some(vault) = &canonical {
         state.protocol.set_vault(vault);
     }
-    let canonical = host.vault_path().map(|p| p.to_string_lossy().into_owned());
+    let canonical = canonical.map(|p| p.to_string_lossy().into_owned());
     eprintln!(
         "herbarium: vault opened at {} (indexed {}, removed {}, total {})",
         canonical.as_deref().unwrap_or_default(),
@@ -75,12 +82,9 @@ pub async fn get_config() -> CmdResult<Config> {
 
 #[tauri::command]
 pub async fn set_vault(app: tauri::AppHandle, path: String) -> CmdResult<Config> {
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        open_vault(&state, &path)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || open_vault(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -93,13 +97,13 @@ pub async fn create_vault(
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return Err("invalid folder name".into());
     }
-    let target = PathBuf::from(&parent_dir).join(name).to_string_lossy().into_owned();
-    tauri::async_runtime::spawn_blocking(move || {
-        let state = app.state::<AppState>();
-        open_vault(&state, &target)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    let target = PathBuf::from(&parent_dir)
+        .join(name)
+        .to_string_lossy()
+        .into_owned();
+    tauri::async_runtime::spawn_blocking(move || open_vault(&app, &target))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -128,7 +132,11 @@ pub async fn reveal_page(app: tauri::AppHandle, page_id: String) -> CmdResult<()
         let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
-        Ok(herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref()))
+        Ok(herbarium_core::vault::html_path(
+            &vault,
+            &page_id,
+            folder.as_deref(),
+        ))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -446,9 +454,9 @@ pub async fn scan_ai_export(
     tauri::async_runtime::spawn_blocking(move || {
         let state = app.state::<AppState>();
         // Parsing a large export happens before the vault is locked.
-        let scan = herbarium_core::importer::scan(&crate::ai_import::read_conversations(Path::new(
-            &path,
-        ))?)?;
+        let scan = herbarium_core::importer::scan(&crate::ai_import::read_conversations(
+            Path::new(&path),
+        )?)?;
         let have = {
             let host = state.host.lock().map_err(|e| e.to_string())?;
             herbarium_core::importer::imported_keys(host.store().ok_or("no vault open")?)?
@@ -488,9 +496,9 @@ pub async fn import_ai_export(
             .take()
             .ok_or("scan the export again before importing")?;
         let keys: std::collections::HashSet<String> = keys.into_iter().collect();
-        let host = state.host.lock().map_err(|e| e.to_string())?;
+        // The host is locked per page, not for the whole import.
         crate::ai_import::import(
-            &host,
+            &state.host,
             &scan.candidates,
             Some(&keys),
             folder.as_deref(),
@@ -787,7 +795,11 @@ pub async fn open_in_editor(
         let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
-        Ok(herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref()))
+        Ok(herbarium_core::vault::html_path(
+            &vault,
+            &page_id,
+            folder.as_deref(),
+        ))
     })
     .await
     .map_err(|e| e.to_string())??;

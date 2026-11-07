@@ -54,12 +54,15 @@ fn payload(event: &Event) -> Value {
     json!({ "kind": event.name, "id": id, "meta": page, "report": report })
 }
 
+/// A host with the bridge registered, with no vault open yet.
+pub fn new_host(app: &AppHandle) -> OpResult<Host> {
+    Host::with_extensions(vec![Box::new(Bridge { app: app.clone() })])
+}
+
 /// Rebuild the app's host with the bridge registered. Runs in `setup`, before
 /// the frontend opens a vault, so nothing is lost by replacing the host.
 pub fn install(app: &tauri::App) -> OpResult<()> {
-    let host = Host::with_extensions(vec![Box::new(Bridge {
-        app: app.handle().clone(),
-    })])?;
+    let host = new_host(app.handle())?;
     let state = app.state::<AppState>();
     *state.host.lock().map_err(|e| e.to_string())? = host;
     Ok(())
