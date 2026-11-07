@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-07
+
 ### Added
 - Save copies of what a page loads: vendor remote scripts, styles, fonts and ES module graphs into the vault under `.herbarium/deps/` in one click from the health panel, rewriting the page so it works with network access off and in exports. Sub-resources in stylesheets (fonts and images) are inlined as `data:` URIs, and URLs matching built-in libraries are mapped without downloading.
 - Import Mermaid diagrams and Markdown artifacts: Claude and ChatGPT data exports now bring in Mermaid artifacts, Markdown artifacts and ChatGPT text canvases as HTML pages that render offline, with math, code highlighting and diagrams drawn by the built-in libraries. React artifacts are still skipped.
@@ -226,7 +228,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/abdoufermat5/herbarium/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/abdoufermat5/herbarium/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/abdoufermat5/herbarium/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/abdoufermat5/herbarium/compare/v0.4.1...v0.4.2
