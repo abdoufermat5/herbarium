@@ -10,6 +10,9 @@ use crate::models::{PageMeta, PageSource, SCHEMA_VERSION, SearchHit, TagCount};
 use crate::time::now_secs;
 
 const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_minutes,next_review,last_review,allow_cdn,ext,source_title";
+/// Search hits that get a `[match]` snippet: the best-ranked ones, which is
+/// what the palette and the first screens of the library show.
+const SNIPPET_HITS: usize = 50;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS pages (
@@ -408,6 +411,9 @@ impl Store {
 
     /// One FTS query, optionally narrowed to a folder (incl. subfolders) and/or
     /// a case-insensitive tag. Returns hits in bm25 rank order, then title.
+    ///
+    /// Ranking is cheap but `snippet()` re-tokenizes the page's whole text, so
+    /// only the best `SNIPPET_HITS` hits get a snippet, in a second query.
     fn fts_search(
         &self,
         expr: &str,
@@ -440,24 +446,63 @@ impl Store {
             n += 1;
         }
         let sql = format!(
-            "SELECT {page_cols}, snippet(pages_fts, 5, '[', ']', '…', 12)
-             FROM pages_fts f JOIN pages p ON p.id = f.id
+            "SELECT {page_cols}, f.rowid
+             FROM pages_fts f JOIN pages p ON p.rowid = f.rowid
              WHERE {where_sql}
              ORDER BY bm25(pages_fts, 0, 10, 4, 2, 3, 1), p.title COLLATE NOCASE
              LIMIT ?{n}"
         );
         args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(
-            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
-            |r| {
-                let meta = row_to_meta(r)?;
-                let snip: Option<String> = r.get(13)?;
-                let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
-                Ok(SearchHit { meta, snippet })
-            },
+        let ranked = stmt
+            .query_map(
+                rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+                |r| Ok((row_to_meta(r)?, r.get::<_, i64>(13)?)),
+            )?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let snippets = self.snippets(
+            expr,
+            ranked.iter().take(SNIPPET_HITS).map(|(_, rowid)| *rowid),
         )?;
-        rows.collect()
+        Ok(ranked
+            .into_iter()
+            .map(|(meta, rowid)| SearchHit {
+                meta,
+                snippet: snippets.get(&rowid).cloned(),
+            })
+            .collect())
+    }
+
+    /// `[match]` snippets of the given FTS rows for `expr`, keyed by rowid;
+    /// rows whose snippet shows no match are left out.
+    fn snippets(
+        &self,
+        expr: &str,
+        rowids: impl Iterator<Item = i64>,
+    ) -> rusqlite::Result<HashMap<i64, String>> {
+        let rowids: Vec<i64> = rowids.collect();
+        if rowids.is_empty() {
+            return Ok(HashMap::new());
+        }
+        let marks = vec!["?"; rowids.len()].join(",");
+        let sql = format!(
+            "SELECT rowid, snippet(pages_fts, 5, '[', ']', '…', 12) FROM pages_fts
+             WHERE pages_fts MATCH ? AND rowid IN ({marks})"
+        );
+        let mut args: Vec<&dyn rusqlite::ToSql> = vec![&expr];
+        args.extend(rowids.iter().map(|r| r as &dyn rusqlite::ToSql));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(args.as_slice(), |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, Option<String>>(1)?))
+        })?;
+        let mut out = HashMap::with_capacity(rowids.len());
+        for row in rows {
+            let (rowid, snip) = row?;
+            if let Some(s) = snip.filter(|s| s.contains('[') && s.contains(']')) {
+                out.insert(rowid, s);
+            }
+        }
+        Ok(out)
     }
 
     /// Bring the link index up to date: rescan every page whose HTML changed

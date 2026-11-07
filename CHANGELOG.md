@@ -5,8 +5,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- Large vaults stay fast. Measured on a synthetic 1 000-page vault: opening a vault without an index is about 6× faster (one HTML parse per page, one transaction per scan), an unchanged rescan 3× faster, the library list 3× faster and 50× smaller, Today 4× faster, a search matching every page 8× faster, and looking up a page by URL (the browser extension's badge) or searching a word no page contains takes microseconds instead of tens of milliseconds. Only the 50 best search hits get a highlighted snippet.
+- The window no longer reloads the whole library after every change: the app pushes each page change to the window, which updates just that page. Coming back to the window rescans the vault at most every 2 seconds and reloads only if a file changed, and the minute-by-minute refresh pauses while the window is hidden. Grading a page in a review session no longer refreshes the library.
+- The library renders only the cards on screen, the sidebar animates only short trees, and heavy views (graph, settings, AI, import, health, reading paths) and the French interface load on demand: the startup script is 35% smaller. Type specimens in Settings load their fonts as they scroll into view.
+- What a page saves for itself (`localStorage`, `window.storage`) now lives in `.herbarium/storage/<id>.json` instead of the page's sidecar, so it no longer travels with every list and search. Existing pages are moved over automatically.
+- Page and asset requests no longer wait behind a rescan or import, media files can be seeked without loading them whole, and the browser extension's lookups are answered while a large page is being saved. Commands run off the window's thread.
+- Search indexes each page's text once and re-indexes it only when the text, title, tags, folder or note change; history keeps at most 50 versions and 20 MB per page; page previews are redrawn only when a page's HTML changes.
+- Diagnostics go through `HERBARIUM_LOG` (e.g. `HERBARIUM_LOG=debug`) to stderr and, for the app, `logs/herbarium.log` in its config folder.
+- CI benchmarks the core operations on a generated vault and fails on regressions, and checks the size of the startup script.
+
 ### Fixed
 - The snap workflow now pushes the Snap Store listing (summary, description and icon) from `snapcraft.yaml` after publishing, and the WinGet job skips cleanly until its first manual manifest exists instead of failing the release run.
+- The app, the browser extension, the CLI and AI agents (MCP) can no longer overwrite each other's work on the same vault: creating two pages with the same title at once keeps both, a rescan in one no longer drops a page another just added, and edits re-read the page's file when another program changed it. Opening an index that needs an upgrade from two programs at once no longer fails in one of them.
 
 ## [0.5.0] - 2026-11-03
 
