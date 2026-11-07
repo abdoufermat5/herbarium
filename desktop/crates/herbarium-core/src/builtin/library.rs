@@ -6,6 +6,7 @@ use serde_json::json;
 use super::object;
 use crate::extension::{Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::host::reindex;
+use crate::models::PageMeta;
 use crate::time::now_ms;
 use crate::vault;
 
@@ -47,15 +48,18 @@ fn tag_name(raw: &str) -> OpResult<String> {
 }
 
 /// Apply `edit` to the tag list of every page carrying `tag`, saving the pages
-/// whose tags changed. Returns how many were saved.
+/// whose tags changed in one all-or-nothing transaction. Returns how many were
+/// saved.
 fn edit_tagged(
     ctx: &mut Ctx,
     tag: &str,
     edit: impl Fn(&[String]) -> Vec<String>,
 ) -> OpResult<usize> {
-    let pages = ctx.store.all().map_err(|e| e.to_string())?;
-    let mut updated = 0;
-    for mut meta in pages
+    let mut changed: Vec<PageMeta> = Vec::new();
+    for mut meta in ctx
+        .store
+        .all()
+        .map_err(|e| e.to_string())?
         .into_iter()
         .filter(|m| m.tags.iter().any(|t| t == tag))
     {
@@ -65,8 +69,20 @@ fn edit_tagged(
         }
         meta.tags = tags;
         meta.updated_at = now_ms();
-        ctx.save(&meta)?;
-        updated += 1;
+        changed.push(meta);
+    }
+    let updated = changed.len();
+    let store = ctx.store;
+    store
+        .batch(|tx| {
+            for meta in &changed {
+                crate::store::update_meta_on(tx, &store.vault, meta)?;
+            }
+            Ok(())
+        })
+        .map_err(|e| e.to_string())?;
+    for meta in changed {
+        ctx.emit(events::PAGE_UPDATED, json!({ "page": meta }));
     }
     Ok(updated)
 }
@@ -182,7 +198,7 @@ impl Extension for Library {
                 Ok(json!({
                     "path": s.vault,
                     "pages": s.count().map_err(|e| e.to_string())?,
-                    "dueForReview": s.due(now_ms()).map_err(|e| e.to_string())?.len(),
+                    "dueForReview": s.due_count(now_ms()).map_err(|e| e.to_string())?,
                     "folders": vault::list_folders(&s.vault)?,
                     "tags": s.tag_counts().map_err(|e| e.to_string())?,
                     "lastIndexedAt": s.synced_at(),

@@ -203,16 +203,10 @@ fn migrate(store: &Store, meta: &mut PageMeta) -> OpResult<bool> {
     merge_legacy(&mut state, PageStorage::from_legacy(legacy));
     write_state(&store.vault, &meta.id, &state)?;
     meta.ext.remove(EXT_KEY);
-    // Not a page revision: `updated_at` stays and no event is emitted.
+    // Not a page revision: `updated_at` stays and no event is emitted. Only
+    // `ext` changed, so the indexed text is left alone.
     vault::write_meta(&store.vault, meta)?;
-    let text = store
-        .text_for(&meta.id)
-        .map_err(|e| e.to_string())?
-        .unwrap_or_default();
-    let mtime = vault::page_mtime(&store.vault, meta);
-    store
-        .upsert(meta, &text, mtime)
-        .map_err(|e| e.to_string())?;
+    store.update_meta(meta).map_err(|e| e.to_string())?;
     Ok(true)
 }
 
@@ -246,10 +240,13 @@ impl Extension for Storage {
     }
 
     fn register(&self, r: &mut Registry) -> OpResult<()> {
-        // Older vaults carry the state in the sidecars: move it out after
-        // every index so lists and `pages.get` never carry it.
-        r.on(events::VAULT_INDEXED, |store, _| {
-            let Ok(pages) = store.with_ext_containing("\"storage\"") else {
+        // Older vaults carry the state in the sidecars: move it out after an
+        // index that picked up pages, so lists and `pages.get` never carry it.
+        r.on(events::VAULT_INDEXED, |store, event| {
+            if event.payload.get("indexed").and_then(Value::as_u64) == Some(0) {
+                return;
+            }
+            let Ok(pages) = store.with_legacy_storage() else {
                 return;
             };
             for mut meta in pages {

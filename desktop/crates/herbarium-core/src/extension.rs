@@ -207,19 +207,11 @@ impl<'a> Ctx<'a> {
         Ok(indexed)
     }
 
-    /// Persist metadata (sidecar + index), keeping the indexed text, and emit
-    /// `page.updated`.
+    /// Persist metadata only (sidecar + index row), leaving the indexed text
+    /// untouched, and emit `page.updated`.
     pub fn save(&mut self, meta: &PageMeta) -> OpResult<()> {
         vault::write_meta(&self.store.vault, meta)?;
-        let text = self
-            .store
-            .text_for(&meta.id)
-            .map_err(|e| e.to_string())?
-            .unwrap_or_default();
-        let mtime = vault::page_mtime(&self.store.vault, meta);
-        self.store
-            .upsert(meta, &text, mtime)
-            .map_err(|e| e.to_string())?;
+        self.store.update_meta(meta).map_err(|e| e.to_string())?;
         self.emit(events::PAGE_UPDATED, serde_json::json!({ "page": meta }));
         Ok(())
     }
