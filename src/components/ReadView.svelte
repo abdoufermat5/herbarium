@@ -28,6 +28,7 @@
   } from "../lib/state.svelte";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
+  import { isTypingTarget } from "../lib/typing";
   import { treeStage } from "../lib/tree";
   import PathTree from "./PathTree.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
@@ -1376,14 +1377,6 @@
   }
 
   /* --------------------------------------------------------------- shortcuts */
-
-  function isTypingTarget(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable) return true;
-    return typeof el.closest === "function" && !!el.closest(".cm-editor");
-  }
 
   // Capture phase so the review-session keys win over the window-level app
   // shortcuts (which would otherwise close the reader on Escape).

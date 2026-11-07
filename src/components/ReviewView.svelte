@@ -428,7 +428,8 @@
                 {#if hist && hist.log.length > 0}
                   <p class="hist-count">{t("review.historyCount", { count: hist.count })}</p>
                   <ul class="hist-log">
-                    {#each [...hist.log].reverse() as entry, k (k)}
+                    {#each hist.log as _, k (k)}
+                      {@const entry = hist.log[hist.log.length - 1 - k]}
                       <li>
                         {t("review.logEntry", {
                           when: fmtDateTime(entry.at),

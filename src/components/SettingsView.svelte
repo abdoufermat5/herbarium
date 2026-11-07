@@ -98,6 +98,19 @@
 
   let specimens: HTMLDivElement | undefined = $state();
 
+  /** Each specimen shows its own family via `data-type`, which is what makes the
+   *  browser fetch that family's font files. Apply it only once the card is on
+   *  screen, so opening Settings loads the few visible families, not all of them. */
+  function typeWhenVisible(node: HTMLElement, type: string) {
+    const io = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      node.dataset.type = type;
+      io.disconnect();
+    });
+    io.observe(node);
+    return { destroy: () => io.disconnect() };
+  }
+
   /** Arrow keys walk the specimen radios and apply each one, as a radio group does. */
   function onSpecimenKey(e: KeyboardEvent) {
     const len = TYPE_STYLES.length;
@@ -326,8 +339,8 @@
               aria-checked={prefs.typeStyle === style.id}
               tabindex={prefs.typeStyle === style.id ? 0 : -1}
               class="specimen"
-              data-type={style.id}
               data-style={style.id}
+              use:typeWhenVisible={style.id}
               onclick={() => setPref("typeStyle", style.id)}
             >
               <span class="specimen-aa" aria-hidden="true">Aa</span>
