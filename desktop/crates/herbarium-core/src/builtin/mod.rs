@@ -16,7 +16,9 @@ mod paths;
 mod previews;
 mod proposals;
 mod published;
+mod render;
 mod review;
+pub use render::kroki_url;
 mod samples;
 mod searches;
 mod storage;
@@ -46,6 +48,7 @@ pub(crate) fn all() -> Vec<Box<dyn Extension>> {
         Box::new(highlights::Highlights),
         Box::new(health::Health),
         Box::new(published::Published),
+        Box::new(render::Render),
     ]
 }
 

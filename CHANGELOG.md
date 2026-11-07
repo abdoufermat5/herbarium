@@ -5,6 +5,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Save copies of what a page loads: vendor remote scripts, styles, fonts and ES module graphs into the vault under `.herbarium/deps/` in one click from the health panel, rewriting the page so it works with network access off and in exports. Sub-resources in stylesheets (fonts and images) are inlined as `data:` URIs, and URLs matching built-in libraries are mapped without downloading.
+- Import Mermaid diagrams and Markdown artifacts: Claude and ChatGPT data exports now bring in Mermaid artifacts, Markdown artifacts and ChatGPT text canvases as HTML pages that render offline, with math, code highlighting and diagrams drawn by the built-in libraries. React artifacts are still skipped.
+- Bundled offline libraries: Mermaid 11, KaTeX 0.16, highlight.js 11 and Chart.js 4 are compiled into the app and served under `_herbarium/lib/` (Mermaid, KaTeX and highlight.js also as ES modules). Pages can render diagrams, formulas, syntax highlighting and charts with network access turned off, and saving copies maps matching CDN URLs to the built-in copies.
+- Diagram server: configure an optional Kroki server in Settings → Vault to render PlantUML, D2, Graphviz and other diagram languages via `_herbarium/render/<kind>/<base64url>.svg`. Renders are fetched by the app and cached in `.herbarium/cache/render/` so diagrams remain viewable offline.
+
 ## [0.6.0] - 2026-11-07
 
 ### Changed

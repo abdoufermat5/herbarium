@@ -6,7 +6,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
-use herbarium_core::assets::inline_local_assets;
+use herbarium_core::assets::inline_for_export;
 use herbarium_core::content::PAGE_LINK_PREFIX;
 use herbarium_core::rewrite::rewrite_attrs;
 use herbarium_core::vault;
@@ -21,10 +21,11 @@ pub struct ExportPage {
     pub html: String,
 }
 
-/// The page's HTML with its local assets inlined (see
-/// [`herbarium_core::assets::inline_local_assets`]).
+/// The page's HTML with its local and reserved assets inlined for export (see
+/// [`herbarium_core::assets::inline_for_export`]).
 pub fn standalone(vault_dir: &Path, page: &ExportPage) -> String {
-    inline_local_assets(vault_dir, &page.id, page.folder.as_deref(), &page.html)
+    crate::render::prefetch(vault_dir, &page.html);
+    inline_for_export(vault_dir, &page.id, page.folder.as_deref(), &page.html)
 }
 
 /// Point `herbarium-app://open/<id>` links at `<id>.html` for exported pages.

@@ -16,8 +16,10 @@ mod organize;
 mod protocol;
 mod publish;
 mod remix;
+mod render;
 mod secrets;
 mod updater;
+mod vendor;
 
 use herbarium_core::Host;
 use tauri::menu::{Menu, MenuItem};
@@ -250,6 +252,8 @@ pub fn run() {
             commands::list_editors,
             commands::open_in_editor,
             commands::open_external,
+            render::render_test,
+            vendor::vendor_page_deps,
             updater::check_update,
             updater::install_update,
             updater::update_managed_by,

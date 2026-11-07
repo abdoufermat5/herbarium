@@ -1208,12 +1208,21 @@ fn health_finds_what_breaks_a_page_and_inlines_local_files() {
             "missing-asset",
             "needs-network",
             "broken-links",
-            "local-assets"
+            "local-assets",
+            "remote-assets"
         ],
         "{report}"
     );
     assert_eq!(report["issues"][0]["items"], json!(["img/gone.png"]));
     assert_eq!(report["issues"][1]["fix"], "enable-network");
+    assert_eq!(
+        report["issues"][4]["items"],
+        json!([
+            "https://cdn.jsdelivr.net/npm/x.js",
+            "https://evil.example/tracker.js"
+        ])
+    );
+    assert_eq!(report["issues"][4]["fix"], "vendor-deps");
 
     // With network on, only the host outside the allowlist is a problem.
     host.call(

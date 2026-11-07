@@ -66,9 +66,78 @@
     }
   }
 
+  let krokiUrl = $state<string | null>(null);
+  let urlDraft = $state("");
+  let renderLoaded = $state(false);
+  let renderSaving = $state(false);
+  let renderTesting = $state(false);
+  let renderError = $state("");
+
+  async function loadRender() {
+    try {
+      const s = await api.renderSettings();
+      krokiUrl = s.krokiUrl;
+      urlDraft = s.krokiUrl ?? "";
+    } catch (e) {
+      console.error(e);
+      renderError = errorMessage(e);
+    } finally {
+      renderLoaded = true;
+    }
+  }
+
+  async function saveRenderServer() {
+    if (renderSaving) return;
+    renderSaving = true;
+    try {
+      const target = urlDraft.trim() || null;
+      const res = await api.configureRender(target);
+      krokiUrl = res.krokiUrl;
+      urlDraft = res.krokiUrl ?? "";
+      toast(t("settings.diagramServerSaved"), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.diagramServerSaveFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      renderSaving = false;
+    }
+  }
+
+  async function testRender() {
+    const target = urlDraft.trim();
+    if (!target || renderTesting) return;
+    renderTesting = true;
+    try {
+      await api.testRenderServer(target);
+      toast(t("settings.diagramServerTestSuccess"), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.diagramServerTestFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      renderTesting = false;
+    }
+  }
+
+  async function clearRenderServer() {
+    if (renderSaving) return;
+    renderSaving = true;
+    try {
+      const res = await api.configureRender(null);
+      krokiUrl = res.krokiUrl;
+      urlDraft = "";
+      toast(t("settings.diagramServerCleared"), "success");
+    } catch (e) {
+      console.error(e);
+      toast(t("settings.diagramServerSaveFailed", { detail: errorMessage(e) }), "error");
+    } finally {
+      renderSaving = false;
+    }
+  }
+
   onMount(() => {
     void loadNetwork();
     void loadAgents();
+    void loadRender();
   });
 
   async function rescan() {
@@ -341,6 +410,69 @@
   {/if}
 </SettingsSection>
 
+<SettingsSection
+  id="settings-render"
+  title={t("settings.diagramServer")}
+  note={t("settings.diagramServerNote")}
+>
+  <SettingRow
+    title={t("settings.diagramServerUrl")}
+    hint={t("settings.diagramServerUrlHint")}
+    stacked
+  >
+    <div class="render-form">
+      <div class="render-input-row">
+        <input
+          type="url"
+          bind:value={urlDraft}
+          placeholder="https://kroki.example.com"
+          aria-label={t("settings.diagramServerUrl")}
+          spellcheck="false"
+          autocomplete="off"
+          disabled={!renderLoaded || renderSaving || renderTesting}
+        />
+        <button
+          class="btn btn-primary"
+          disabled={!renderLoaded || renderSaving || renderTesting || urlDraft.trim() === (krokiUrl ?? "")}
+          onclick={saveRenderServer}
+        >
+          {renderSaving ? t("settings.diagramServerSaving") : t("settings.diagramServerSave")}
+        </button>
+        <button
+          class="btn"
+          disabled={!urlDraft.trim() || renderTesting || renderSaving}
+          onclick={testRender}
+        >
+          {renderTesting ? t("settings.diagramServerTesting") : t("settings.diagramServerTest")}
+        </button>
+        {#if krokiUrl || urlDraft}
+          <button
+            class="btn btn-ghost"
+            disabled={renderSaving || renderTesting}
+            onclick={clearRenderServer}
+          >
+            {t("settings.diagramServerClear")}
+          </button>
+        {/if}
+      </div>
+      <div class="render-preset">
+        <button
+          type="button"
+          class="btn btn-sm btn-ghost"
+          disabled={renderSaving || renderTesting}
+          onclick={() => { urlDraft = "https://kroki.io"; }}
+        >
+          {t("settings.diagramServerUseKroki")}
+        </button>
+        <span class="render-preset-note">{t("settings.diagramServerPublicNote")}</span>
+      </div>
+    </div>
+  </SettingRow>
+  {#if renderError}
+    <p class="net-error">{t("settings.diagramServerReadFailed", { detail: renderError })}</p>
+  {/if}
+</SettingsSection>
+
 <style>
   .vault-path {
     display: flex;
@@ -442,5 +574,32 @@
     color: var(--danger);
     font-size: var(--fs-sm);
     overflow-wrap: anywhere;
+  }
+  .render-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    max-width: 540px;
+  }
+  .render-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .render-input-row input {
+    flex: 1;
+    min-width: 0;
+    background: var(--surface);
+  }
+  .render-preset {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .render-preset-note {
+    font-size: var(--fs-xs);
+    color: var(--muted);
   }
 </style>

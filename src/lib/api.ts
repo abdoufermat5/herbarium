@@ -42,6 +42,7 @@ import type {
   PageStorage,
   PathProgress,
   ReviewGrade,
+  RenderSettings,
   ReviewPreview,
   ReviewSettings,
   ReviewStats,
@@ -51,6 +52,7 @@ import type {
   TrashEntry,
   UpdateChannel,
   UpdateInfo,
+  VendorReport,
 } from "./types";
 
 /** Run an operation registered by a backend extension (`area.verb`). */
@@ -176,6 +178,19 @@ export const api = {
     return op("network.configure", { defaultAllowCdn });
   },
 
+  renderSettings(): Promise<RenderSettings> {
+    return op("render.settings", {});
+  },
+
+  configureRender(krokiUrl: string | null): Promise<RenderSettings> {
+    return op("render.configure", { krokiUrl });
+  },
+
+  /** Test a diagram server URL with a tiny Graphviz diagram. */
+  testRenderServer(url: string): Promise<void> {
+    return invoke("render_test", { url });
+  },
+
   /** Move one page to the trash. */
   deletePage(id: string): Promise<{ deleted: string }> {
     return op("pages.delete", { id });
@@ -287,6 +302,11 @@ export const api = {
   /** Inline a page's local files so it stands on its own. */
   inlineAssets(id: string): Promise<PageMeta> {
     return op("health.fix", { id, fix: "inline-assets" });
+  },
+
+  /** Download a page's remote dependencies into the vault so it works offline. */
+  vendorDeps(pageId: string): Promise<VendorReport> {
+    return invoke("vendor_page_deps", { pageId });
   },
 
   /** Current previews by page id, and the pages that need one. */

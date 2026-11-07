@@ -1,6 +1,6 @@
-// Import from AI chat data exports: every HTML artifact a person made in
-// Claude or ChatGPT, with the prompt that asked for it, its date and a link
-// back to the conversation. The formats are not documented and change over
+// Import from AI chat data exports: every HTML, SVG, Markdown or Mermaid artifact
+// a person made in Claude or ChatGPT, with the prompt that asked for it, its date
+// and a link back to the conversation. The formats are not documented and change over
 // time, so parsing is lenient: anything unrecognised is skipped, never fatal.
 //
 // Claude (`conversations.json`): conversations with `chat_messages`; artifacts
@@ -127,6 +127,16 @@ fn page_html(kind: &str, body: &str, title: &str) -> Option<String> {
              <style>body{{margin:0;min-height:100vh;display:grid;place-items:center}}svg{{max-width:100%;height:auto}}</style>\
              </head><body>{body}</body></html>"
         ));
+    }
+    if kind == "application/vnd.ant.mermaid"
+        || kind == "text/mermaid"
+        || kind == "code/mermaid"
+        || kind == "mermaid"
+    {
+        return Some(crate::markdown::mermaid_page(title, body));
+    }
+    if kind == "text/markdown" || kind == "markdown" || kind == "text/md" || kind == "document" {
+        return Some(crate::markdown::markdown_page(title, body));
     }
     None
 }
@@ -675,5 +685,118 @@ mod tests {
                 .len(),
             0
         );
+    }
+
+    #[test]
+    fn claude_export_imports_mermaid_and_markdown_artifacts_while_skipping_react() {
+        let export = json!([{
+            "uuid": "c-mixed", "name": "Mixed chat", "created_at": "2025-01-02T10:00:00Z",
+            "chat_messages": [
+                {
+                    "uuid": "m1", "sender": "human", "created_at": "2025-01-02T10:00:00Z",
+                    "text": "Generate a diagram, doc, and component"
+                },
+                {
+                    "uuid": "m2", "sender": "assistant", "created_at": "2025-01-02T10:01:00Z",
+                    "text": "Here they are",
+                    "content": [
+                        {
+                            "type": "tool_use", "name": "artifacts",
+                            "input": {
+                                "id": "diag1", "command": "create", "type": "application/vnd.ant.mermaid",
+                                "title": "System flow", "content": "graph LR\nUser --> API"
+                            }
+                        },
+                        {
+                            "type": "tool_use", "name": "artifacts",
+                            "input": {
+                                "id": "doc1", "command": "create", "type": "text/markdown",
+                                "title": "Setup Guide", "content": "# Setup\n\nRun `cargo build`."
+                            }
+                        },
+                        {
+                            "type": "tool_use", "name": "artifacts",
+                            "input": {
+                                "id": "react1", "command": "create", "type": "application/vnd.ant.react",
+                                "title": "React Component", "content": "export default function Button() { return null; }"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }]);
+
+        let scan = scan(&export.to_string()).unwrap();
+        assert_eq!(scan.conversations, 1);
+        assert_eq!(scan.unsupported, 1, "the React component is skipped");
+        assert_eq!(
+            scan.candidates.len(),
+            2,
+            "mermaid and markdown artifacts become candidates"
+        );
+
+        let diag = scan
+            .candidates
+            .iter()
+            .find(|c| c.key == "claude:c-mixed:diag1")
+            .unwrap();
+        assert_eq!(diag.title, "System flow");
+        assert!(diag.html.contains(r#"<pre class="mermaid">"#));
+        assert!(diag.html.contains("_herbarium/lib/mermaid.js"));
+
+        let doc = scan
+            .candidates
+            .iter()
+            .find(|c| c.key == "claude:c-mixed:doc1")
+            .unwrap();
+        assert_eq!(doc.title, "Setup Guide");
+        assert!(doc.html.contains("<article class=\"markdown\">"));
+        assert!(doc.html.contains("Setup</h1>"));
+    }
+
+    #[test]
+    fn chatgpt_export_imports_document_canvas() {
+        let canvas = json!({
+            "name": "design_doc",
+            "type": "document",
+            "content": "# Design Document\n\nHere are the specifications for offline rendering."
+        })
+        .to_string();
+
+        let export = json!([{
+            "id": "g-doc", "title": "Design chat", "create_time": 1700000000.0, "current_node": "n2",
+            "mapping": {
+                "root": { "id": "root", "message": null, "parent": null, "children": ["n1"] },
+                "n1": {
+                    "id": "n1", "parent": "root", "children": ["n2"],
+                    "message": {
+                        "author": { "role": "user" },
+                        "create_time": 1700000001.0,
+                        "content": { "content_type": "text", "parts": ["Draft the design doc"] }
+                    }
+                },
+                "n2": {
+                    "id": "n2", "parent": "n1", "children": [],
+                    "message": {
+                        "author": { "role": "assistant" },
+                        "recipient": "canmore.create_textdoc",
+                        "create_time": 1700000002.0,
+                        "content": { "parts": [canvas] }
+                    }
+                }
+            }
+        }]);
+
+        let scan = scan(&export.to_string()).unwrap();
+        assert_eq!(
+            scan.candidates.len(),
+            1,
+            "document canvas becomes a candidate"
+        );
+        let candidate = &scan.candidates[0];
+        assert_eq!(candidate.key, "chatgpt:g-doc:canvas:design_doc");
+        assert_eq!(candidate.title, "design_doc");
+        assert!(candidate.html.contains("<article class=\"markdown\">"));
+        assert!(candidate.html.contains("Design Document</h1>"));
     }
 }

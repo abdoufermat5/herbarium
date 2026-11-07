@@ -372,6 +372,82 @@ fn inject_storage_shim(html: &str, state_json: &str, recall: bool) -> String {
 fn percent_encode_segment(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, FRAGMENT).to_string()
 }
+/// Pure helper for serving reserved paths (`_herbarium/lib`, `_herbarium/deps`,
+/// `_herbarium/render`). Returns `None` if `rel` is not a reserved path.
+pub fn reserved_response(vault: &Path, rel: &str) -> Option<Response<Cow<'static, [u8]>>> {
+    let res = herbarium_core::reserved::parse(rel)?;
+    match res {
+        herbarium_core::reserved::Reserved::Lib(_)
+        | herbarium_core::reserved::Reserved::Dep { .. } => {
+            if let Some((mime, bytes)) = herbarium_core::reserved::resolve(vault, &res) {
+                Some(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", mime)
+                        .header("X-Content-Type-Options", "nosniff")
+                        .body(bytes)
+                        .unwrap_or_else(|_| not_found()),
+                )
+            } else {
+                Some(not_found())
+            }
+        }
+        herbarium_core::reserved::Reserved::Render { kind, ref source } => {
+            if let Some((_mime, bytes)) = herbarium_core::reserved::resolve(vault, &res) {
+                Some(
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", "image/svg+xml")
+                        .header(
+                            "Content-Security-Policy",
+                            "default-src 'none'; style-src 'unsafe-inline'",
+                        )
+                        .header("X-Content-Type-Options", "nosniff")
+                        .body(bytes)
+                        .unwrap_or_else(|_| not_found()),
+                )
+            } else {
+                match crate::render::ensure(vault, kind, source) {
+                    Ok(bytes) => Some(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", "image/svg+xml")
+                            .header(
+                                "Content-Security-Policy",
+                                "default-src 'none'; style-src 'unsafe-inline'",
+                            )
+                            .header("X-Content-Type-Options", "nosniff")
+                            .body(Cow::Owned(bytes))
+                            .unwrap_or_else(|_| not_found()),
+                    ),
+                    Err(err) => {
+                        let msg = if err == "no diagram server" {
+                            format!(
+                                "Set a diagram server in Settings → Vault to draw this {kind} diagram"
+                            )
+                        } else {
+                            format!("Couldn't draw this {kind} diagram: {err}")
+                        };
+                        let svg = herbarium_core::reserved::placeholder_svg(&msg);
+                        Some(
+                            Response::builder()
+                                .status(StatusCode::OK)
+                                .header("Content-Type", "image/svg+xml")
+                                .header(
+                                    "Content-Security-Policy",
+                                    "default-src 'none'; style-src 'unsafe-inline'",
+                                )
+                                .header("Cache-Control", "no-store")
+                                .header("X-Content-Type-Options", "nosniff")
+                                .body(Cow::Owned(svg.into_bytes()))
+                                .unwrap_or_else(|_| not_found()),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
 
 fn serve<R: tauri::Runtime>(
     app: &AppHandle<R>,
@@ -398,7 +474,11 @@ fn serve<R: tauri::Runtime>(
 
     // Step 2: Serve asset or page HTML (with NO host lock held!)
     if let Some(rel) = parsed.relative_path {
-        // Asset request
+        // Reserved paths (_herbarium/lib, _herbarium/deps, _herbarium/render)
+        if let Some(resp) = reserved_response(&vault, &rel) {
+            return resp;
+        }
+
         let html_path =
             herbarium_core::vault::html_path(&vault, &parsed.page_id, folder.as_deref());
         let page_folder = match html_path.parent() {
@@ -1000,5 +1080,58 @@ mod tests {
         // The original document casing is preserved, not lower-cased.
         assert!(out.contains("<HTML LANG=\"en\">"));
         assert!(out.contains("<BODY>"));
+    }
+
+    #[test]
+    fn reserved_response_serving() {
+        let vault = std::env::temp_dir().join(format!(
+            "herbarium-proto-test-{}-{}",
+            std::process::id(),
+            herbarium_core::time::now_ms()
+        ));
+        let _ = std::fs::remove_dir_all(&vault);
+        std::fs::create_dir_all(&vault).unwrap();
+
+        // 1. Lib file served with mime
+        let resp = reserved_response(&vault, "_herbarium/lib/mermaid.js").unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers().get("Content-Type").unwrap(),
+            "text/javascript; charset=utf-8"
+        );
+        assert_eq!(
+            resp.headers().get("X-Content-Type-Options").unwrap(),
+            "nosniff"
+        );
+
+        // 2. Unknown lib 404
+        let resp = reserved_response(&vault, "_herbarium/lib/unknown_lib_xyz.js").unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        // 3. Render placeholder without server
+        let src = herbarium_core::reserved::render_src("graphviz", "digraph{a->b}").unwrap();
+        let resp = reserved_response(&vault, &src).unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(resp.headers().get("Content-Type").unwrap(), "image/svg+xml");
+        assert_eq!(resp.headers().get("Cache-Control").unwrap(), "no-store");
+        assert_eq!(
+            resp.headers().get("Content-Security-Policy").unwrap(),
+            "default-src 'none'; style-src 'unsafe-inline'"
+        );
+        assert_eq!(
+            resp.headers().get("X-Content-Type-Options").unwrap(),
+            "nosniff"
+        );
+        let body = String::from_utf8(resp.body().to_vec()).unwrap();
+        assert!(body.contains("<svg"), "body must be an SVG placeholder");
+        assert!(
+            body.contains("Set a diagram server in Settings → Vault to draw this graphviz diagram"),
+            "placeholder must contain instruction message: {body}"
+        );
+
+        // Non-reserved path returns None
+        assert!(reserved_response(&vault, "local_image.png").is_none());
+
+        let _ = std::fs::remove_dir_all(&vault);
     }
 }

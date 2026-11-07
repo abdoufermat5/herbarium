@@ -60,7 +60,7 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 
 **Bring pages in**
 
-- **Import** by drag and drop, file picker, paste, or `herbarium add <file|-|url>` from a terminal. Bring in every artifact from a **Claude or ChatGPT data export** with `herbarium import <export>`, and keep the conversation, tool and prompt as the page's source.
+- **Import** by drag and drop, file picker, paste, or `herbarium add <file|-|url>` from a terminal. Bring in every HTML, SVG, **Mermaid and Markdown artifact** from a **Claude or ChatGPT data export** with `herbarium import <export>`, and keep the conversation, tool and prompt as the page's source.
 - **Save from the browser**: the extension finds the artifacts in a Claude, ChatGPT or Gemini conversation and saves them in one click, saves any page or selection with its images and styles inlined, shows when a page is already saved, and searches your vault from the address bar (`h` + space). Load it from Settings → Browser.
 - **Quick capture**: a global shortcut saves the clipboard as a page, and new HTML files in Downloads are offered for saving.
 - **Start with a tour**: add three sample pages as a "Getting started" reading path — an interactive welcome, the forgetting curve and a playground that remembers.
@@ -72,7 +72,10 @@ macOS and Windows: download from the [releases page](https://github.com/abdoufer
 - **Quiz** yourself: answers a page marks with `data-herbarium-recall` stay hidden until you reveal them, in a review session or with "Quiz me".
 - **Look closer** with the page's contents, zoom from 50 to 200%, and a focus mode that hides everything else.
 - **Edit** the HTML in the app or in your own editor. Every in-app or agent edit keeps the previous version, with a side-by-side diff to compare and restore.
-- **Check** why a page might not work — missing local assets, remote resources with network off, hosts outside the CDN allowlist, broken links, very large or untitled pages — and make it self-contained in one click.
+- **Offline diagrams, math and code highlighting**: draw diagrams, typeset math, highlight syntax and plot charts with network access turned off. Herbarium bundles Mermaid 11, KaTeX 0.16, highlight.js 11 and Chart.js 4, served locally by the app under `_herbarium/lib/` (Mermaid, KaTeX and highlight.js also as ES modules).
+- **Optional diagram server**: point Herbarium at a Kroki server in Settings → Vault to render PlantUML, D2, Graphviz and more. Rendered SVGs are cached in your vault so diagrams stay viewable offline.
+- **Save copies** of what a page loads: download remote scripts, styles, fonts and module graphs into your vault in one click, rewriting the page so it works completely offline and with network access turned off.
+- **Check** why a page might not work — missing local assets, remote resources, unconfigured diagram server, hosts outside the CDN allowlist, broken links, very large or untitled pages — and make it self-contained or save offline copies in one click.
 - **Link** pages with `herbarium-app://open/<id>`, see backlinks in the details panel, and open linked pages without leaving the app.
 
 **Remember them**
@@ -114,6 +117,8 @@ Generated HTML runs code, so every page is treated as untrusted. It runs in a sa
 Pages saved from the browser start with network access off, with their images and styles inlined. API keys and the GitHub token stay in a file only you can read and are sent only to the service they belong to; nothing is published without your confirmation.
 
 Network access is a per-page switch. When on, a page can load scripts and fonts from well-known CDNs and images from any website, which means it can tell its author when you open it. Keep it off for pages you don't trust.
+
+When using an optional diagram server (Settings → Vault), only the diagram's source text is sent, and only to the Kroki server URL you explicitly configured.
 
 ## Use with AI agents
 

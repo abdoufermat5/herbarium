@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 percent-encoding = "2.3"
 chrono = { version = "0.4.45", features = ["serde"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 scraper = "0.27.0"
 serde.workspace = true

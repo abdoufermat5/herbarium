@@ -38,6 +38,13 @@ When writing a page for Herbarium (pages_create / pages_set_html):
   `allowCdn: true`. Files stored next to the page in its vault folder (images, \
   styles, scripts) load by relative path. Remote images require `allowCdn: true`; \
   on default pages without network, use data: URLs or vault-relative files.
+- Pages may use bundled offline libraries by relative path: \
+  `_herbarium/lib/mermaid.js` (global `mermaid`; as an ES module import `./_herbarium/lib/mermaid.mjs`, with the leading `./`), \
+  `katex.js` + `katex.css` + `katex-auto-render.js`, \
+  `highlight.js` + `highlight.css`, and `chart.js` — they work without network; \
+  and diagrams such as PlantUML, D2 or Graphviz via \
+  `<img src=\"_herbarium/render/<kind>/<unpadded base64url of the source>.svg\">`, \
+  drawn by the user's diagram server.
 - Links open in the user's browser only after they confirm; pages cannot \
   navigate their own frame elsewhere.
 - Pages run in a sandbox: no fetch/XHR to arbitrary hosts, no forms, and no \

@@ -26,6 +26,7 @@
     setPageInPath,
     refreshPathProgress,
     openPathView,
+    openSettings,
     readerActions,
   } from "../lib/state.svelte";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
@@ -836,6 +837,31 @@
       toast(t("health.inlined"), "success");
     } catch (e) {
       toast(`${t("health.fixFailed")}: ${errorMessage(e)}`, "error");
+    }
+  }
+
+  let vendoringDeps = $state(false);
+
+  async function vendorDependencies() {
+    const p = page;
+    if (!p || pageGone || vendoringDeps) return;
+    if (!(await confirmDiscardUnsaved())) return;
+    vendoringDeps = true;
+    try {
+      const report = await api.vendorDeps(p.meta.id);
+      await load();
+      const nCopied = report.vendored.length;
+      const mBundled = report.bundled.length;
+      const kFailed = report.failed.length;
+      if (kFailed === 0) {
+        toast(t("health.vendorSuccess", { copied: nCopied, bundled: mBundled }), "success");
+      } else {
+        toast(t("health.vendorPartial", { copied: nCopied, bundled: mBundled, failed: kFailed }), "info");
+      }
+    } catch (e) {
+      toast(`${t("health.fixFailed")}: ${errorMessage(e)}`, "error");
+    } finally {
+      vendoringDeps = false;
     }
   }
 
@@ -1998,6 +2024,14 @@
                       <button class="btn btn-xs" onclick={toggleNetwork} disabled={pageGone}>{t("health.enableNetwork")}</button>
                     {:else if issue.fix === "inline-assets"}
                       <button class="btn btn-xs" onclick={inlineAssets} disabled={pageGone}>{t("health.inline")}</button>
+                    {:else if issue.fix === "vendor-deps"}
+                      <button class="btn btn-xs" onclick={vendorDependencies} disabled={pageGone || vendoringDeps}>
+                        {vendoringDeps ? t("health.savingCopies") : t("health.saveCopies")}
+                      </button>
+                    {:else if issue.fix === "configure-render"}
+                      <button class="btn btn-xs" onclick={() => void openSettings("vault")} disabled={pageGone}>
+                        {t("health.configureRender")}
+                      </button>
                     {/if}
                   </li>
                 {/each}

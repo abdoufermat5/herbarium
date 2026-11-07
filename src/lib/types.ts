@@ -191,10 +191,23 @@ export type HighlightColor = "yellow" | "green" | "blue" | "pink";
 
 /** Something that may stop a page from working (`health.check`). */
 export interface HealthIssue {
-  kind: "missing-asset" | "needs-network" | "blocked-host" | "broken-links" | "local-assets" | "large" | "untitled";
+  kind: "missing-asset" | "needs-network" | "blocked-host" | "broken-links" | "local-assets" | "large" | "untitled" | "remote-assets" | "needs-render-server";
   level: "error" | "warn" | "info";
   items?: string[];
-  fix?: "enable-network" | "inline-assets";
+  fix?: "enable-network" | "inline-assets" | "vendor-deps" | "configure-render";
+}
+
+/** Summary of dependencies downloaded or mapped for a page (`vendor_page_deps`). */
+export interface VendorReport {
+  vendored: string[];
+  bundled: string[];
+  failed: { url: string; reason: string }[];
+  meta: PageMeta;
+}
+
+/** Vault-wide diagram server settings (`.herbarium/render.json`). */
+export interface RenderSettings {
+  krokiUrl: string | null;
 }
 
 /** A named search (`.herbarium/searches.json`); `query` may include filters. */

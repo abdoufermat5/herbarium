@@ -4,7 +4,7 @@
 // answers. Injected before main.ts only in the `web-preview` Vite mode; never
 // part of the app build. `?onboarding` starts without a vault.
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
-import type { Config, ImportFile, PreviewDigest } from "../lib/types";
+import type { Config, ImportFile, PageMeta, PreviewDigest } from "../lib/types";
 
 const params = new URLSearchParams(location.search);
 const PREVIEWS_KEY = `herbarium.preview.digests:${location.port}`;
@@ -85,6 +85,11 @@ const desktop: Record<string, (args: Record<string, unknown>) => unknown> = {
   github_settings: () => ({ hasToken: false, login: null, repo: "" }),
   check_update: () => null,
   update_managed_by: () => null,
+  vendor_page_deps: async (args) => {
+    const page = (await op("pages.get", { id: args.pageId, format: "meta" })) as { meta: PageMeta };
+    return { vendored: [], bundled: [], failed: [], meta: page.meta };
+  },
+  render_test: () => null,
   "plugin:app|version": () => "preview",
   "plugin:app|name": () => "Herbarium",
   "plugin:notification|is_permission_granted": () => false,

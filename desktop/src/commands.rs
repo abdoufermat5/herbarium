@@ -41,7 +41,7 @@ impl Default for AppState {
     }
 }
 
-type CmdResult<T> = Result<T, String>;
+pub(crate) type CmdResult<T> = Result<T, String>;
 
 /// Open a vault (create dir if needed), index it, persist it in the config.
 ///
@@ -199,6 +199,11 @@ fn archive_dir<W: std::io::Write + std::io::Seek>(
         if rel_str == ".herbarium/trash" || rel_str.starts_with(".herbarium/trash/") {
             continue;
         }
+        // 2b. Exclude the render cache: diagrams are rebuilt from their source
+        // (vendored deps under .herbarium/deps are kept).
+        if rel_str == ".herbarium/cache" || rel_str.starts_with(".herbarium/cache/") {
+            continue;
+        }
         // 3. Exclude the destination archive and its in-progress temp file
         // when they live inside the vault.
         if !excluded.is_empty()
@@ -304,17 +309,114 @@ fn export_vault_to(vault: &Path, dest: &Path) -> Result<(), String> {
     })
 }
 
-fn export_page_to(html_file: &Path, page_id: &str, dest: &Path) -> Result<(), String> {
+/// `(key, file)` of every `<prefix><key>/<file>` in `text`. A key is 16
+/// lowercase hex digits (`deps::key_for`); the file ends at the first
+/// character that cannot be part of a stored name or a URL attribute.
+fn dep_refs_in(text: &str, prefix: &str) -> Vec<(String, String)> {
+    let mut found = Vec::new();
+    for (at, _) in text.match_indices(prefix) {
+        let rest = &text[at + prefix.len()..];
+        let Some(key) = rest.get(..16) else { continue };
+        if !key
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+            || rest.as_bytes().get(16) != Some(&b'/')
+        {
+            continue;
+        }
+        let tail = &rest[17..];
+        let end = tail
+            .find(|c: char| {
+                c.is_whitespace()
+                    || matches!(
+                        c,
+                        '"' | '\''
+                            | '`'
+                            | ')'
+                            | '('
+                            | '<'
+                            | '>'
+                            | '?'
+                            | '#'
+                            | ','
+                            | ';'
+                            | '\\'
+                            | '/'
+                    )
+            })
+            .unwrap_or(tail.len());
+        let file = &tail[..end];
+        if file.is_empty() || file.starts_with('.') {
+            continue;
+        }
+        found.push((key.to_owned(), file.to_owned()));
+    }
+    found
+}
+
+/// The stored deps a page needs, as `(key, file)`: those its HTML names plus,
+/// for modules that import others, whatever they import (`../<key>/<file>`).
+/// Deps that are not on disk are left out.
+fn page_dep_files(vault: &Path, html: &str) -> Vec<(String, String)> {
+    let deps_dir = vault.join(".herbarium").join("deps");
+    let mut queue = dep_refs_in(html, "_herbarium/deps/");
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    while let Some((key, file)) = queue.pop() {
+        if !seen.insert((key.clone(), file.clone())) {
+            continue;
+        }
+        let path = deps_dir.join(&key).join(&file);
+        if !path.is_file() {
+            continue;
+        }
+        let imports = std::fs::read_to_string(deps_dir.join(&key).join("dep.json"))
+            .ok()
+            .and_then(|s| serde_json::from_str::<Value>(&s).ok())
+            .is_some_and(|m| m["hasImports"] == json!(true));
+        if imports && let Ok(src) = std::fs::read_to_string(&path) {
+            queue.extend(dep_refs_in(&src, "../"));
+        }
+        out.push((key, file));
+    }
+    out
+}
+
+fn export_page_to(
+    vault: &Path,
+    html_file: &Path,
+    page_id: &str,
+    dest: &Path,
+) -> Result<(), String> {
     if !html_file.is_file() {
         return Err(format!("page file not found: {}", html_file.display()));
     }
+    let html = std::fs::read(html_file).map_err(|e| e.to_string())?;
+    let deps = page_dep_files(vault, &String::from_utf8_lossy(&html));
     write_zip_atomically(dest, |zip, _temp_path| {
         let options =
             SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
         zip.start_file(format!("{page_id}.html"), options)
             .map_err(|e| e.to_string())?;
-        let mut f = std::fs::File::open(html_file).map_err(|e| e.to_string())?;
-        std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+        std::io::Write::write_all(zip, &html).map_err(|e| e.to_string())?;
+        // Each dep keeps its vault-relative place, so unpacking the zip into a
+        // vault leaves `_herbarium/deps/…` resolvable.
+        let mut added = std::collections::BTreeSet::new();
+        for (key, file) in deps {
+            for name in [file.as_str(), "dep.json"] {
+                let rel = format!(".herbarium/deps/{key}/{name}");
+                if !added.insert(rel.clone()) {
+                    continue;
+                }
+                let path = vault.join(&rel);
+                if !path.is_file() {
+                    continue;
+                }
+                zip.start_file(&rel, options).map_err(|e| e.to_string())?;
+                let mut f = std::fs::File::open(&path).map_err(|e| e.to_string())?;
+                std::io::copy(&mut f, zip).map_err(|e| e.to_string())?;
+            }
+        }
         Ok(())
     })
 }
@@ -344,7 +446,7 @@ pub async fn export_page(
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
         let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
-        export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
+        export_page_to(&vault, &html_file, &page_id, &PathBuf::from(&dest_zip))
     })
     .await
     .map_err(|e| e.to_string())?
@@ -967,6 +1069,74 @@ mod tests {
 
         assert!(zip_names(&dest).contains(&"page.html".to_string()));
         assert!(!std::fs::read(&dest).unwrap().starts_with(b"not a zip"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The vault zip carries vendored deps (a page opened from the backup
+    /// still renders offline) but not the regenerable render cache.
+    #[test]
+    fn vault_zip_keeps_deps_and_skips_render_cache() {
+        let dir = temp_dir("deps_vault");
+        std::fs::create_dir_all(dir.join(".herbarium/deps/0123456789abcdef")).unwrap();
+        std::fs::create_dir_all(dir.join(".herbarium/cache/render")).unwrap();
+        std::fs::write(dir.join("page.html"), b"<p>1</p>").unwrap();
+        std::fs::write(dir.join(".herbarium/deps/0123456789abcdef/dep.json"), b"{}").unwrap();
+        std::fs::write(dir.join(".herbarium/deps/0123456789abcdef/x.js"), b"1").unwrap();
+        std::fs::write(dir.join(".herbarium/cache/render/a.svg"), b"<svg/>").unwrap();
+        let dest = dir.join("out.zip");
+        export_vault_to(&dir, &dest).unwrap();
+        let names = zip_names(&dest);
+        assert!(names.contains(&".herbarium/deps/0123456789abcdef/x.js".to_string()));
+        assert!(names.contains(&".herbarium/deps/0123456789abcdef/dep.json".to_string()));
+        assert!(!names.iter().any(|n| n.starts_with(".herbarium/cache")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A page zip adds the deps its HTML names, plus the modules those
+    /// import (`../<key>/<file>`), each with its `dep.json`, and nothing else.
+    #[test]
+    fn page_zip_adds_referenced_deps_transitively() {
+        let dir = temp_dir("deps_page");
+        let deps = dir.join(".herbarium/deps");
+        let (a, b, other) = ("aaaaaaaaaaaaaaaa", "bbbbbbbbbbbbbbbb", "cccccccccccccccc");
+        for key in [a, b, other] {
+            std::fs::create_dir_all(deps.join(key)).unwrap();
+            std::fs::write(deps.join(key).join("dep.json"), b"{}").unwrap();
+        }
+        std::fs::write(
+            deps.join(a).join("dep.json"),
+            br#"{"module":true,"hasImports":true}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            deps.join(a).join("a.mjs"),
+            format!("import x from \"../{b}/b.mjs\"; import m from \"../../lib/mermaid.mjs\";"),
+        )
+        .unwrap();
+        std::fs::write(deps.join(b).join("b.mjs"), b"export default 1").unwrap();
+        std::fs::write(deps.join(other).join("o.js"), b"1").unwrap();
+        let page = dir.join("p.html");
+        std::fs::write(
+            &page,
+            format!(
+                "<script type=module>import a from '_herbarium/deps/{a}/a.mjs'</script>\
+                 <link href=\"_herbarium/deps/missing0missing0/none.css\">"
+            ),
+        )
+        .unwrap();
+        let dest = dir.join("out.zip");
+        export_page_to(&dir, &page, "p", &dest).unwrap();
+        let mut names = zip_names(&dest);
+        names.sort();
+        let mut want = vec![
+            "p.html".to_string(),
+            format!(".herbarium/deps/{a}/a.mjs"),
+            format!(".herbarium/deps/{a}/dep.json"),
+            format!(".herbarium/deps/{b}/b.mjs"),
+            format!(".herbarium/deps/{b}/dep.json"),
+        ];
+        want.sort();
+        assert_eq!(names, want);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
