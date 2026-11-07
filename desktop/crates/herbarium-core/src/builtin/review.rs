@@ -237,7 +237,7 @@ pub(crate) fn read_settings(vault: &Path) -> OpResult<ReviewSettings> {
 /// invalid file is logged and defaults are used.
 pub(crate) fn load_settings(vault: &Path) -> ReviewSettings {
     read_settings(vault).unwrap_or_else(|e| {
-        eprintln!("herbarium: {e}");
+        tracing::warn!("{e}");
         ReviewSettings::default()
     })
 }

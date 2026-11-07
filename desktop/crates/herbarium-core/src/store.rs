@@ -105,9 +105,7 @@ impl Store {
         conn.pragma_update(None, "busy_timeout", 5000).ok();
         let wal: Result<String, _> = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0));
         if !matches!(wal.as_deref(), Ok("wal")) {
-            eprintln!(
-                "herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher"
-            );
+            tracing::warn!("journal_mode is not WAL ({wal:?}); writer contention may be higher");
         }
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         migrate(&conn)?;

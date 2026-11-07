@@ -541,7 +541,7 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
         .unwrap_or_else(|_| store.vault.clone());
     let (mut entries, skipped_dirs) = walk_html(&store.vault, &root)?;
     if !skipped_dirs.is_empty() {
-        eprintln!("herbarium: skipped hidden dirs {skipped_dirs:?}");
+        tracing::debug!("skipped hidden dirs {skipped_dirs:?}");
     }
     entries.sort_by(|a, b| a.rel.cmp(&b.rel));
 
@@ -661,7 +661,7 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
                 Ok(Some(meta)) => (meta.clone(), Some(meta), false),
                 Ok(None) => (PageMeta::new(stem.clone()), None, false),
                 Err(e) => {
-                    eprintln!("herbarium: {e}; indexing the page without overwriting it");
+                    tracing::warn!("{e}; indexing the page without overwriting it");
                     (PageMeta::new(stem.clone()), None, true)
                 }
             };
@@ -1181,8 +1181,8 @@ pub fn restore_page(vault: &Path, id: &str) -> VaultResult<PageMeta> {
         Ok(raw) => match serde_json::from_str::<PageMeta>(&raw) {
             Ok(meta) => meta,
             Err(_) => {
-                eprintln!(
-                    "herbarium: trash sidecar {id}.json is invalid; restoring with fallback metadata"
+                tracing::warn!(
+                    "trash sidecar {id}.json is invalid; restoring with fallback metadata"
                 );
                 damaged_sidecar = Some(raw);
                 PageMeta::new(id.to_string())

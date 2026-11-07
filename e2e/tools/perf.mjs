@@ -1,11 +1,27 @@
 // Not a test: time common interactions in the desktop app, from the input to
-// the next painted frame, on a given vault. usage: node e2e/tools/perf.mjs <vault>
+// the next painted frame, on a given vault.
+//
+//   # 1. a synthetic vault (1000 or 10000 pages; its search words, "tokio" and
+//   #    "Note 1234", and its folders, "rust-0" and so on, are what this script uses)
+//   cargo run --release --manifest-path desktop/Cargo.toml -p herbarium-core \
+//     --example gen_vault -- 10000 /tmp/perf-vault
+//   # 2. a built app (pnpm tauri build) and a display (a real one, or xvfb-run)
+//   xvfb-run -a node e2e/tools/perf.mjs /tmp/perf-vault
+//
+// The app is started on a throwaway HOME with the vault as its library. For the
+// backend alone, without a display, run `cargo bench -p herbarium-core --bench
+// vault` (docs/perf-baseline.md).
+import { existsSync } from "node:fs";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "../helpers.mjs";
 import { launchApp } from "../webdriver.mjs";
 
 const vault = process.argv[2];
+if (!vault || !existsSync(vault)) {
+  console.error("usage: node e2e/tools/perf.mjs <vault dir>  (see the comment at the top for a generated vault)");
+  process.exit(2);
+}
 const work = tempDir("perf");
 mkdirSync(join(work, "config", "io.herbarium.desktop"), { recursive: true });
 writeFileSync(
@@ -94,7 +110,7 @@ try {
       poll();
     });
   await measure("library search 'tokio' until results shown (incl. 120 ms debounce)", search, "tokio");
-  await measure("library search 'notes 1234' until results shown", search, "notes 1234");
+  await measure("library search 'Note 1234' until results shown", search, "Note 1234");
   await measure("clear search until all pages shown", search, "");
   await measure("switch to list layout", () => document.querySelector("[aria-label*='List'], [title*='List']")?.click());
   await measure("switch to grid layout", () => document.querySelector("[aria-label*='Grid'], [title*='Grid']")?.click());
@@ -114,7 +130,7 @@ try {
   await measure("open a page", () => document.querySelector("article .open-overlay").click());
   await sleep(1500);
   await measure("back to library", () => document.querySelector("[aria-label*='Back'], .bar > button")?.click());
-  await measure("expand a folder in sidebar", () => [...document.querySelectorAll("aside button, nav button")].find((b) => b.textContent.includes("topic-1"))?.click());
+  await measure("expand a folder in sidebar", () => [...document.querySelectorAll("aside button, nav button")].find((b) => b.textContent.includes("rust-0"))?.click());
   await jank("idle 5 s", 5000);
 } catch (e) {
   console.error(e.message);

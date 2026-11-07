@@ -112,8 +112,8 @@ pub fn load() -> Result<Config, String> {
     let raw = match std::fs::read_to_string(&config_path) {
         Ok(s) => s,
         Err(e) => {
-            eprintln!(
-                "herbarium: failed to read config file {}: {}",
+            tracing::warn!(
+                "failed to read config file {}: {}",
                 config_path.display(),
                 e
             );
@@ -123,15 +123,11 @@ pub fn load() -> Result<Config, String> {
     match serde_json::from_str::<Config>(&raw) {
         Ok(cfg) => Ok(cfg),
         Err(e) => {
-            eprintln!(
-                "herbarium: corrupt config file {}: {}",
-                config_path.display(),
-                e
-            );
+            tracing::warn!("corrupt config file {}: {}", config_path.display(), e);
             let bak_path = config_path.with_file_name("config.json.bak");
             if let Err(err) = std::fs::rename(&config_path, &bak_path) {
-                eprintln!(
-                    "herbarium: failed to rename corrupt config file to {}: {}",
+                tracing::warn!(
+                    "failed to rename corrupt config file to {}: {}",
                     bak_path.display(),
                     err
                 );

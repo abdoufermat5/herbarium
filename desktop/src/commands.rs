@@ -58,8 +58,8 @@ fn open_vault(app: &tauri::AppHandle, path: &str) -> CmdResult<Config> {
         state.protocol.set_vault(vault);
     }
     let canonical = canonical.map(|p| p.to_string_lossy().into_owned());
-    eprintln!(
-        "herbarium: vault opened at {} (indexed {}, removed {}, total {})",
+    tracing::info!(
+        "vault opened at {} (indexed {}, removed {}, total {})",
         canonical.as_deref().unwrap_or_default(),
         report.indexed,
         report.removed,

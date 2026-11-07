@@ -117,6 +117,17 @@ impl Host {
     }
 
     pub fn call(&self, caller: Caller, name: &str, args: Value) -> OpResult<Value> {
+        let _span = tracing::debug_span!("host.call", op = name, caller = caller.tag()).entered();
+        let started = std::time::Instant::now();
+        let result = self.call_inner(caller, name, args);
+        tracing::debug!(
+            elapsed_ms = started.elapsed().as_secs_f64() * 1e3,
+            ok = result.is_ok()
+        );
+        result
+    }
+
+    fn call_inner(&self, caller: Caller, name: &str, args: Value) -> OpResult<Value> {
         let op = self
             .registry
             .get(name)
@@ -145,8 +156,17 @@ impl Default for Host {
 }
 
 pub(crate) fn reindex(store: &Store) -> OpResult<IndexReport> {
+    let started = std::time::Instant::now();
     let outcome = vault::index_vault(store)?;
     let total = store.count().map_err(|e| e.to_string())?;
+    tracing::info!(
+        indexed = outcome.indexed,
+        removed = outcome.removed,
+        skipped = outcome.skipped.len(),
+        total,
+        elapsed_ms = started.elapsed().as_secs_f64() * 1e3,
+        "index_vault"
+    );
     Ok(IndexReport {
         indexed: outcome.indexed,
         removed: outcome.removed,

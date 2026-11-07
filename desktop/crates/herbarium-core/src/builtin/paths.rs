@@ -41,7 +41,7 @@ pub(crate) fn load(vault: &Path) -> Vec<ReadingPath> {
         return Vec::new();
     };
     serde_json::from_str(&raw).unwrap_or_else(|e| {
-        eprintln!("herbarium: ignoring invalid {}: {e}", path.display());
+        tracing::warn!("ignoring invalid {}: {e}", path.display());
         Vec::new()
     })
 }
