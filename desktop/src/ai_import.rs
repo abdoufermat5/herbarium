@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::io::Read;
 use std::path::Path;
+use std::sync::Mutex;
 
 use herbarium_core::importer::{self, Candidate, Scan};
 use herbarium_core::{Caller, Host};
@@ -107,18 +108,38 @@ pub struct ImportReport {
     pub errors: Vec<String>,
 }
 
+/// Access to a [`Host`] for a short step. A plain `Host` is used directly; a
+/// `Mutex<Host>` is locked per step, so a long import never holds the app's
+/// host lock across pages and other operations interleave between them.
+pub trait HostAccess {
+    fn with_host<T>(&self, f: impl FnOnce(&Host) -> T) -> Result<T, String>;
+}
+
+impl HostAccess for Host {
+    fn with_host<T>(&self, f: impl FnOnce(&Host) -> T) -> Result<T, String> {
+        Ok(f(self))
+    }
+}
+
+impl HostAccess for Mutex<Host> {
+    fn with_host<T>(&self, f: impl FnOnce(&Host) -> T) -> Result<T, String> {
+        let host = self.lock().map_err(|e| e.to_string())?;
+        Ok(f(&host))
+    }
+}
+
 /// Save `candidates` (those in `only`, or all when it is None) into `folder`,
 /// skipping any already imported. `allow_cdn` overrides the vault's network
 /// default (None follows it).
-pub fn import(
-    host: &Host,
+pub fn import<H: HostAccess>(
+    host: &H,
     candidates: &[Candidate],
     only: Option<&HashSet<String>>,
     folder: Option<&str>,
     allow_cdn: Option<bool>,
 ) -> Result<ImportReport, String> {
-    let store = host.store().ok_or("no vault open")?;
-    let mut have = importer::imported_keys(store)?;
+    let mut have =
+        host.with_host(|host| importer::imported_keys(host.store().ok_or("no vault open")?))??;
     let mut report = ImportReport::default();
     for c in candidates {
         if only.is_some_and(|keys| !keys.contains(&c.key)) {
@@ -146,7 +167,7 @@ pub fn import(
         if let Some(allow) = allow_cdn {
             args["allowCdn"] = json!(allow);
         }
-        match host.call(Caller::Ui, "pages.create", args) {
+        match host.with_host(|host| host.call(Caller::Ui, "pages.create", args))? {
             Ok(_) => {
                 report.imported += 1;
                 have.insert(c.key.clone());
@@ -204,7 +225,11 @@ mod tests {
         let page = &pages[0];
         assert_eq!(page["folder"], "Imported");
         assert_eq!(page["tags"], json!(["claude"]));
-        assert_eq!(page["ext"]["source"]["prompt"], "Make a page");
+        // Lists carry a slim meta; the prompt is on the full page.
+        let full = host
+            .call(Caller::Ui, "pages.get", json!({ "id": page["id"] }))
+            .unwrap();
+        assert_eq!(full["meta"]["ext"]["source"]["prompt"], "Make a page");
 
         let (scan, listing) = scan_file(&host, &zip_path).unwrap();
         assert!(listing.candidates[0].already_imported);

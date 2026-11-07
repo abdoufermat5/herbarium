@@ -86,6 +86,17 @@ impl Host {
         Ok(report)
     }
 
+    /// Attach a read-only handle to the index of a vault that another host
+    /// (this process or another) has already opened and indexed. It never
+    /// indexes, migrates, locks or writes, so it answers read operations
+    /// (see `READ_ONLY_OPS`) while a writer is busy; calling a mutating
+    /// operation on it fails at the first write.
+    pub fn open_vault_read_only(&mut self, vault: &Path) -> OpResult<()> {
+        let store = Store::open_read_only(vault.to_path_buf()).map_err(|e| e.to_string())?;
+        self.store = Some(store);
+        Ok(())
+    }
+
     pub fn vault_path(&self) -> Option<&Path> {
         self.store.as_ref().map(|s| s.vault.as_path())
     }
