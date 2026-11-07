@@ -223,21 +223,40 @@ impl Extension for Previews {
                 object(json!({}), &[]),
                 |ctx: &mut Ctx, _: NoArgs| {
                     let vault = ctx.store.vault.clone();
+                    // One directory listing; parse each preview file once.
+                    let mut stored: BTreeMap<String, Stored> = BTreeMap::new();
+                    if let Ok(entries) = std::fs::read_dir(dir(&vault)) {
+                        for entry in entries.flatten() {
+                            let name = entry.file_name().to_string_lossy().into_owned();
+                            let Some(id) = name.strip_suffix(".json") else {
+                                continue;
+                            };
+                            let Ok(raw) = std::fs::read_to_string(entry.path()) else {
+                                continue;
+                            };
+                            if let Ok(s) = serde_json::from_str::<Stored>(&raw) {
+                                stored.insert(id.to_string(), s);
+                            }
+                        }
+                    }
                     let mut previews: BTreeMap<String, Value> = BTreeMap::new();
                     let mut missing = Vec::new();
                     for meta in ctx.store.all().map_err(|e| e.to_string())? {
-                        let stored: Option<Stored> = file(&vault, &meta.id)
-                            .ok()
-                            .and_then(|p| std::fs::read_to_string(p).ok())
-                            .and_then(|raw| serde_json::from_str(&raw).ok());
-                        match stored {
+                        match stored.get(&meta.id) {
                             Some(s) if s.updated_at == meta.updated_at => {
-                                previews.insert(meta.id, serde_json::to_value(s.digest).unwrap_or(Value::Null));
+                                previews.insert(
+                                    meta.id,
+                                    serde_json::to_value(&s.digest).unwrap_or(Value::Null),
+                                );
                             }
                             _ => {
-                                let size = std::fs::metadata(vault::html_path(&vault, &meta.id, meta.folder.as_deref()))
-                                    .map(|m| m.len())
-                                    .unwrap_or(0);
+                                let size = std::fs::metadata(vault::html_path(
+                                    &vault,
+                                    &meta.id,
+                                    meta.folder.as_deref(),
+                                ))
+                                .map(|m| m.len())
+                                .unwrap_or(0);
                                 if size <= MAX_PAGE_BYTES {
                                     missing.push(meta.id);
                                 }

@@ -18,6 +18,11 @@ pub type VaultResult<T> = Result<T, String>;
 /// How many HTML versions are kept per page before the oldest are pruned.
 pub const HISTORY_LIMIT: usize = 50;
 
+/// Total byte budget per page's history directory. When the newest snapshots
+/// (kept by [`HISTORY_LIMIT`]) exceed this, the oldest are pruned until the
+/// budget is met.
+pub const HISTORY_BYTES: u64 = 20 * 1024 * 1024;
+
 struct TempFileGuard<'a> {
     path: &'a Path,
     active: bool,
@@ -375,45 +380,79 @@ fn decode_windows_1252(b: u8) -> char {
     }
 }
 
+/// A `.html` file found by [`walk_html`], with its `symlink_metadata` captured
+/// once so the indexer can fingerprint it without another stat.
+struct HtmlEntry {
+    rel: PathBuf,
+    meta: fs::Metadata,
+}
+
+/// Modified time (seconds) of a `Metadata`, or 0 when unavailable.
+fn meta_mtime_secs(m: &fs::Metadata) -> i64 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Modified time (milliseconds) of a `Metadata`, or 0 when unavailable.
+fn meta_mtime_ms(m: &fs::Metadata) -> i64 {
+    m.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 /// Rescan the whole vault into the store: import new/changed/moved files,
 /// refresh titles/text, and drop indexes for removed files. Returns IndexOutcome.
 pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
     let mut indexed_count = 0usize;
     let mut skipped = Vec::new();
 
-    let (mut html_files, skipped_dirs) = walk_html(&store.vault)?;
+    let (html_entries, skipped_dirs) = walk_html(&store.vault)?;
     if !skipped_dirs.is_empty() {
         eprintln!("herbarium: skipped hidden dirs {skipped_dirs:?}");
     }
-    html_files.sort();
+    let mut entries = html_entries;
+    entries.sort_by(|a, b| a.rel.cmp(&b.rel));
 
-    // stem -> folders holding `{stem}.html`, in sorted path order
-    let mut by_stem: BTreeMap<String, Vec<Option<String>>> = BTreeMap::new();
-    for rel in &html_files {
-        let Some(stem) = rel.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+    // stem -> (folder, html metadata) for every `{stem}.html`, in sorted path order
+    let mut by_stem: BTreeMap<String, Vec<(Option<String>, fs::Metadata)>> = BTreeMap::new();
+    for entry in &entries {
+        let Some(stem) = entry.rel.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
             continue;
         };
         if stem.is_empty() || stem.starts_with('.') {
             continue;
         }
-        let folder = rel
+        let folder = entry
+            .rel
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
             .map(|p| p.to_string_lossy().replace('\\', "/"));
-        by_stem.entry(stem).or_default().push(folder);
+        by_stem.entry(stem).or_default().push((folder, entry.meta.clone()));
     }
 
+    // One query for every indexed row's (folder, source_title, mtime, fingerprint).
+    let rows = store.index_rows().map_err(|e| e.to_string())?;
+
     let mut keep = HashSet::new();
+    let mut batch: Vec<(PageMeta, String, i64, String, String)> = Vec::new();
+
     for (stem, folders) in by_stem {
-        let indexed = store.get_meta(&stem).map_err(|e| e.to_string())?;
-        let folder = match &indexed {
-            Some(m) if folders.contains(&m.folder) => m.folder.clone(),
-            _ => folders[0].clone(),
+        let indexed = rows.get(&stem);
+        let folder = match indexed {
+            Some(r) if folders.iter().any(|(f, _)| f.as_deref() == r.folder.as_deref()) => {
+                r.folder.clone()
+            }
+            _ => folders[0].0.clone(),
         };
         if folders.len() > 1 {
             let chosen_display = folder.as_deref().unwrap_or("root");
-            for f in &folders {
-                if *f != folder {
+            for (f, _) in &folders {
+                if f.as_deref() != folder.as_deref() {
                     let dup_path = match f.as_deref() {
                         Some(fld) => format!("{fld}/{stem}.html"),
                         None => format!("{stem}.html"),
@@ -435,24 +474,26 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
             None => format!("{stem}.html"),
         };
 
-        // Determine modification state using mtime and fingerprint
-        let mtime = page_mtime(
-            &store.vault,
-            &PageMeta {
-                id: stem.clone(),
-                folder: folder.clone(),
-                ..PageMeta::new(stem.clone())
-            },
-        );
-        let cur_fp = page_fingerprint(&store.vault, &stem, folder.as_deref());
-        let stored_mtime = store.mtime_for(&stem).map_err(|e| e.to_string())?;
-        let stored_fp = store.fingerprint_for(&stem).map_err(|e| e.to_string())?;
+        let html_meta = folders
+            .iter()
+            .find(|(f, _)| f.as_deref() == folder.as_deref())
+            .map(|(_, m)| m.clone());
+        let sidecar_meta = fs::symlink_metadata(meta_path(&store.vault, &stem, folder.as_deref())).ok();
+        let cur_fp = fingerprint_from(html_meta.clone(), sidecar_meta.clone());
+        let cur_mtime = match (&html_meta, &sidecar_meta) {
+            (Some(h), Some(m)) => meta_mtime_secs(h).max(meta_mtime_secs(m)),
+            (Some(h), None) => meta_mtime_secs(h),
+            (None, Some(m)) => meta_mtime_secs(m),
+            (None, None) => 0,
+        };
 
         // Fast path: unchanged file, still in the indexed folder.
-        if indexed.as_ref().is_some_and(|m| m.folder == folder) {
-            let unchanged = match (&stored_fp, &cur_fp) {
-                (Some(s_fp), c_fp) if !s_fp.is_empty() && !c_fp.is_empty() => s_fp == c_fp,
-                _ => stored_mtime == Some(mtime),
+        if indexed.is_some_and(|r| r.folder.as_deref() == folder.as_deref()) {
+            let stored_fp = indexed.map(|r| r.fingerprint.as_str()).unwrap_or("");
+            let stored_mtime = indexed.map(|r| r.mtime);
+            let unchanged = match (stored_fp.is_empty(), cur_fp.is_empty()) {
+                (false, false) => stored_fp == cur_fp.as_str(),
+                _ => stored_mtime == Some(cur_mtime),
             };
             if unchanged {
                 continue;
@@ -471,7 +512,8 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
         };
 
         let html = decode_html(&raw_bytes);
-        if !content::looks_like_html(&html) {
+        let analysis = content::analyze(&html);
+        if !analysis.looks_like_html {
             skipped.push(SkippedFile {
                 path: rel_str,
                 reason: "not an HTML document".to_string(),
@@ -487,54 +529,69 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
                 (PageMeta::new(stem.clone()), false)
             }
         };
-        meta.id = stem;
-        meta.folder = folder;
+        meta.id = stem.clone();
+        meta.folder = folder.clone();
         if meta.source_title.is_none()
-            && let Some(existing) = &indexed
+            && let Some(existing) = indexed
         {
             meta.source_title = existing.source_title.clone();
         }
 
-        let html_ms = file_mtime_ms(&abs).unwrap_or(0);
-        let extracted_title = content::extract_title(&html);
+        let html_ms = html_meta.as_ref().map(meta_mtime_ms).unwrap_or(0);
+        let extracted_title = &analysis.title;
 
         // Check if HTML changed on disk
         let is_new = indexed.is_none();
         let prev_text = store.text_for(&meta.id).ok().flatten();
-        let cur_text = content::extract_text(&html);
+        let cur_text = &analysis.text;
         let html_changed =
-            is_new || prev_text.as_ref() != Some(&cur_text) || html_ms > meta.updated_at;
+            is_new || prev_text.as_ref() != Some(cur_text) || html_ms > meta.updated_at;
 
         if html_changed {
             meta.updated_at = html_ms;
-            let user_never_renamed = meta
-                .source_title
-                .as_ref()
-                .is_some_and(|st| st == &meta.title);
-            if user_never_renamed || meta.title.is_empty() {
-                meta.title = if extracted_title.is_empty() {
-                    meta.id.clone()
-                } else {
-                    extracted_title.clone()
-                };
-            }
+            let new_title = content::follow_document_title(&meta, extracted_title);
+            meta.title = if new_title.is_empty() {
+                meta.id.clone()
+            } else {
+                new_title
+            };
         }
         // Always refresh source_title
-        meta.source_title = Some(extracted_title);
+        meta.source_title = Some(extracted_title.clone());
 
         // Persist the sidecar first so the fingerprint stored by `upsert`
         // reflects the final file state (otherwise every rescan sees a change).
-        let mtime = if write_sidecar {
+        // Only rewrite the sidecar when the meta actually changed (write_sidecar
+        // is false for a damaged sidecar we must not clobber).
+        let (mtime, fingerprint, html_fingerprint) = if write_sidecar {
             let _ = write_meta(&store.vault, &meta);
-            page_mtime(&store.vault, &meta)
+            let sidecar = fs::symlink_metadata(meta_path(&store.vault, &stem, folder.as_deref())).ok();
+            let mtime = match (&html_meta, &sidecar) {
+                (Some(h), Some(m)) => meta_mtime_secs(h).max(meta_mtime_secs(m)),
+                (Some(h), None) => meta_mtime_secs(h),
+                (None, Some(m)) => meta_mtime_secs(m),
+                (None, None) => 0,
+            };
+            (
+                mtime,
+                fingerprint_from(html_meta.clone(), sidecar),
+                file_stat_fingerprint(html_meta),
+            )
         } else {
-            mtime
+            (
+                cur_mtime,
+                cur_fp.clone(),
+                file_stat_fingerprint(html_meta),
+            )
         };
-        store
-            .upsert(&meta, &cur_text, mtime)
-            .map_err(|e| e.to_string())?;
+
+        batch.push((meta, cur_text.clone(), mtime, fingerprint, html_fingerprint));
         indexed_count += 1;
     }
+
+    store
+        .upsert_many(&batch)
+        .map_err(|e| e.to_string())?;
 
     let removed = store.remove_all_except(&keep).map_err(|e| e.to_string())?;
     store.set_synced_at();
@@ -545,8 +602,9 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
     })
 }
 
-/// Recursively list `.html` files relative to `vault`, skipping hidden dirs.
-fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
+/// Recursively list `.html` files relative to `vault` (with their
+/// `symlink_metadata`), skipping hidden dirs.
+fn walk_html(vault: &Path) -> VaultResult<(Vec<HtmlEntry>, Vec<String>)> {
     let mut files = Vec::new();
     let mut skipped = Vec::new();
     let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
@@ -554,7 +612,7 @@ fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
         dir: &Path,
         base: &Path,
         vault_canonical: &Path,
-        files: &mut Vec<PathBuf>,
+        files: &mut Vec<HtmlEntry>,
         skipped: &mut Vec<String>,
     ) -> VaultResult<()> {
         for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
@@ -589,15 +647,17 @@ fn walk_html(vault: &Path) -> VaultResult<(Vec<PathBuf>, Vec<String>)> {
                 }
                 walk(&path, base, vault_canonical, files, skipped)?;
             } else if name.ends_with(".html") {
-                if !is_within_vault(&path, vault_canonical) {
-                    skipped.push(name);
+                // Symlinks were filtered above and every ancestor directory was
+                // already confirmed to lie within the vault, so a regular file
+                // here cannot escape; one `symlink_metadata` is all we need.
+                let Ok(meta) = fs::symlink_metadata(&path) else {
                     continue;
-                }
+                };
                 let rel = path
                     .strip_prefix(base)
                     .map_err(|e| e.to_string())?
                     .to_path_buf();
-                files.push(rel);
+                files.push(HtmlEntry { rel, meta });
             }
         }
         Ok(())
@@ -709,29 +769,31 @@ fn file_stat_fingerprint(meta: Option<fs::Metadata>) -> String {
     }
 }
 
-/// Compute a reliable fingerprint of the page files (html + sidecar), capturing
-/// sub-second mtime changes, file lengths, or missing files.
-pub fn page_fingerprint(vault: &Path, id: &str, folder: Option<&str>) -> String {
-    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
-    let hp = html_path(vault, id, folder);
-    let mp = meta_path(vault, id, folder);
-
-    let h_meta = if hp.exists() && is_within_vault(&hp, &vault_canonical) {
-        fs::metadata(&hp).ok()
-    } else {
-        None
-    };
-    let m_meta = if mp.exists() && is_within_vault(&mp, &vault_canonical) {
-        fs::metadata(&mp).ok()
-    } else {
-        None
-    };
-
+/// Combine the html and sidecar `symlink_metadata` into the stable page
+/// fingerprint used for change detection.
+fn fingerprint_from(h: Option<fs::Metadata>, m: Option<fs::Metadata>) -> String {
     format!(
         "h:{}:m:{}",
-        file_stat_fingerprint(h_meta),
-        file_stat_fingerprint(m_meta)
+        file_stat_fingerprint(h),
+        file_stat_fingerprint(m)
     )
+}
+
+/// Compute a reliable fingerprint of the page files (html + sidecar), capturing
+/// sub-second mtime changes, file lengths, or missing files. Uses
+/// `symlink_metadata` (no symlink following, no canonicalize) — pages are only
+/// ever regular files inside the vault.
+pub fn page_fingerprint(vault: &Path, id: &str, folder: Option<&str>) -> String {
+    let h = html_path(vault, id, folder).symlink_metadata().ok();
+    let m = meta_path(vault, id, folder).symlink_metadata().ok();
+    fingerprint_from(h, m)
+}
+
+/// Fingerprint of the HTML file only (size + nanosecond mtime), used for link
+/// staleness so that metadata/review/storage writes do not invalidate links.
+pub fn html_fingerprint(vault: &Path, id: &str, folder: Option<&str>) -> String {
+    let h = html_path(vault, id, folder).symlink_metadata().ok();
+    file_stat_fingerprint(h)
 }
 
 /// Return the disk's effective updated_at: sidecar updated_at if present and newer than
@@ -1118,38 +1180,37 @@ fn parse_history_name(name: &str) -> Option<(i64, &str)> {
     Some((at.parse().ok()?, caller))
 }
 
-/// True when a snapshot for `at` already exists (any caller).
-fn history_at_taken(dir: &Path, at: i64) -> bool {
-    let prefix = format!("{at}.");
-    fs::read_dir(dir)
-        .map(|entries| {
-            entries
-                .flatten()
-                .any(|e| e.file_name().to_string_lossy().starts_with(&prefix))
-        })
-        .unwrap_or(false)
-}
-
-/// Keep only the newest [`HISTORY_LIMIT`] snapshots in `dir`.
-fn prune_history(dir: &Path) -> VaultResult<()> {
-    let mut files: Vec<(i64, PathBuf)> = Vec::new();
+/// Every snapshot in `dir` as `(at, bytes, path)`, in directory order.
+fn history_entries(dir: &Path) -> VaultResult<Vec<(i64, u64, PathBuf)>> {
+    let mut out = Vec::new();
     for entry in fs::read_dir(dir).map_err(|e| e.to_string())? {
         let entry = entry.map_err(|e| e.to_string())?;
         if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
             continue;
         }
         let name = entry.file_name().to_string_lossy().into_owned();
-        if let Some((at, _)) = parse_history_name(&name) {
-            files.push((at, entry.path()));
+        let Some((at, _)) = parse_history_name(&name) else {
+            continue;
+        };
+        let bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        out.push((at, bytes, entry.path()));
+    }
+    Ok(out)
+}
+
+/// Remove the oldest snapshots so `dir` holds at most [`HISTORY_LIMIT`] files
+/// and at most [`HISTORY_BYTES`] total bytes, newest first.
+fn prune_history_entries(mut entries: Vec<(i64, u64, PathBuf)>) -> VaultResult<()> {
+    entries.sort_by_key(|(at, _, _)| std::cmp::Reverse(*at));
+    let mut total: u64 = 0;
+    let mut kept = 0usize;
+    for (_, bytes, path) in entries {
+        if kept >= HISTORY_LIMIT || total + bytes > HISTORY_BYTES {
+            fs::remove_file(&path).map_err(|e| format!("cannot prune history: {e}"))?;
+            continue;
         }
-    }
-    if files.len() <= HISTORY_LIMIT {
-        return Ok(());
-    }
-    // Newest first, so everything past the cap is obsolete.
-    files.sort_by_key(|f| std::cmp::Reverse(f.0));
-    for (_, path) in files.into_iter().skip(HISTORY_LIMIT) {
-        fs::remove_file(&path).map_err(|e| format!("cannot prune history: {e}"))?;
+        total += bytes;
+        kept += 1;
     }
     Ok(())
 }
@@ -1186,12 +1247,17 @@ pub fn snapshot_history(
     }
 
     let caller = if caller == "agent" { "agent" } else { "ui" };
+    // One pass over the directory gives us both the collision check and the
+    // byte/count totals for pruning.
+    let mut entries = history_entries(&dir)?;
     let mut at = crate::time::now_ms();
-    while history_at_taken(&dir, at) {
+    while entries.iter().any(|(a, _, _)| *a == at) {
         at += 1;
     }
-    write_atomic(&dir.join(history_file_name(at, caller)), current.as_bytes())?;
-    prune_history(&dir)?;
+    let path = dir.join(history_file_name(at, caller));
+    write_atomic(&path, current.as_bytes())?;
+    entries.push((at, current.len() as u64, path));
+    prune_history_entries(entries)?;
     Ok(true)
 }
 
