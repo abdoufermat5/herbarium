@@ -5,6 +5,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-07
+
 ### Changed
 - Large vaults stay fast. Measured on a synthetic 1 000-page vault: opening a vault without an index is about 8× faster (one HTML parse per page, one transaction per scan), an unchanged rescan 4× faster, the library list 4× faster and 50× smaller, Today 5× faster, a search matching every page 8× faster, and looking up a page by URL (the browser extension's badge) or searching a word no page contains takes microseconds instead of tens of milliseconds. Only the 50 best search hits get a highlighted snippet. Full numbers in `docs/perf-baseline.md`.
 - The window no longer reloads the whole library after every change: the app pushes each page change to the window, which updates just that page. Coming back to the window rescans the vault at most every 2 seconds and reloads only if a file changed, and the minute-by-minute refresh pauses while the window is hidden. Grading a page in a review session no longer refreshes the library.
@@ -218,7 +220,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - In-app updates require a signing key pair on the repository (`HERBARIUM_UPDATER_PUBLIC_KEY` variable and `TAURI_SIGNING_PRIVATE_KEY` secret); without them the check reports the missing key and installs must come from the releases page.
 - No sync, mobile app, Markdown notes, page linking, or plugin loader yet — the extension API is in place, but the WASM runtime that would load third-party extensions is future work.
 
-[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/abdoufermat5/herbarium/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/abdoufermat5/herbarium/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/abdoufermat5/herbarium/compare/v0.4.2...v0.5.0
 [0.4.2]: https://github.com/abdoufermat5/herbarium/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/abdoufermat5/herbarium/compare/v0.4.0...v0.4.1
