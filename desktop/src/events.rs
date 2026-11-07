@@ -56,7 +56,11 @@ fn payload(event: &Event) -> Value {
         .map(|m| m.summary());
     let report = (event.name == events::VAULT_INDEXED).then_some(&event.payload);
     // Only HTML edits make a page's preview stale (core sets the flag).
-    let html_changed = event.payload.get("htmlChanged").and_then(Value::as_bool).unwrap_or(false);
+    let html_changed = event
+        .payload
+        .get("htmlChanged")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     json!({ "kind": event.name, "id": id, "meta": meta, "report": report, "htmlChanged": html_changed })
 }
 
