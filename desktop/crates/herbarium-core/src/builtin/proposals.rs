@@ -39,7 +39,7 @@ fn load_settings(vault: &Path) -> AgentSettings {
         return AgentSettings::default();
     };
     serde_json::from_str(&raw).unwrap_or_else(|e| {
-        eprintln!("herbarium: ignoring invalid {}: {e}", path.display());
+        tracing::warn!("ignoring invalid {}: {e}", path.display());
         AgentSettings::default()
     })
 }

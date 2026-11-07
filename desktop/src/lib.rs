@@ -8,6 +8,7 @@ mod config;
 mod editors;
 mod export;
 mod locate;
+pub mod logging;
 mod native_host;
 mod navigation;
 mod organize;
@@ -132,7 +133,7 @@ pub fn run() {
             // extension's host missing or pointing at a gone executable.
             std::thread::spawn(|| {
                 for line in native_host::refresh() {
-                    eprintln!("herbarium: browser connection updated: {line}");
+                    tracing::info!("browser connection updated: {line}");
                 }
             });
 
@@ -149,7 +150,7 @@ pub fn run() {
                 .clipboard
                 .store(cfg.watch_clipboard, std::sync::atomic::Ordering::Relaxed);
             if let Err(e) = capture::set_shortcut(app.handle(), cfg.capture_shortcut.as_deref()) {
-                eprintln!("herbarium: {e}");
+                tracing::warn!("{e}");
             }
             capture::start_watchers(app.handle(), watchers);
 
@@ -276,8 +277,8 @@ pub fn run_mcp(args: &[String]) -> Result<(), String> {
 
     let mut host = Host::new();
     let report = host.open_vault(&vault)?;
-    eprintln!(
-        "herbarium mcp: serving vault {} ({} pages)",
+    tracing::info!(
+        "mcp: serving vault {} ({} pages)",
         host.vault_path()
             .map(|p| p.display().to_string())
             .unwrap_or_default(),

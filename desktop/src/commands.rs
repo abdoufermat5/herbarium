@@ -44,8 +44,8 @@ fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
     let mut host = state.host.lock().map_err(|e| e.to_string())?;
     let report = host.open_vault(path)?;
     let canonical = host.vault_path().map(|p| p.to_string_lossy().into_owned());
-    eprintln!(
-        "herbarium: vault opened at {} (indexed {}, removed {}, total {})",
+    tracing::info!(
+        "vault opened at {} (indexed {}, removed {}, total {})",
         canonical.as_deref().unwrap_or_default(),
         report.indexed,
         report.removed,

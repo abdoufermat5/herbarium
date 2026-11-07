@@ -1,0 +1,27 @@
+{
+  "n": 1000,
+  "tolerance": 0.25,
+  "calibrationNs": 257056.7302188552,
+  "medianNs": {
+    "vault/open_cold": 17856421015,
+    "vault/open_warm": 136822270.83333334,
+    "vault/rescan_unchanged": 137656776.5,
+    "ops/pages.list_all": 168692883,
+    "ops/pages.search_common": 2213587834.5,
+    "ops/pages.search_zero_hit": 34606640.5,
+    "ops/pages.find_by_url": 126485802.5,
+    "ops/today.summary": 248805517.5,
+    "ops/review.stats": 106760644.5,
+    "ops/review.complete": 7860615.75,
+    "ops/storage.write_100kb": 8754420.875,
+    "ops/pages.create": 15108198.75
+  },
+  "payloadBytes": {
+    "pages": 1000,
+    "pages.list_all": 21342043,
+    "pages.search_all": 21342043,
+    "pages.search_common": 21442160,
+    "review.stats": 11936,
+    "today.summary": 684678
+  }
+}

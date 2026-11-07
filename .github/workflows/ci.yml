@@ -42,6 +42,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm test
+      - run: pnpm build
+      - name: Bundle size budget
+        run: node scripts/bundle-budget.mjs
       - run: cargo fmt --manifest-path desktop/Cargo.toml --all -- --check
       - run: cargo clippy --manifest-path desktop/Cargo.toml --workspace --all-targets -- -D warnings
       - run: cargo test --manifest-path desktop/Cargo.toml --workspace
@@ -52,6 +55,44 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: "false"
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
         run: pnpm tauri build --bundles deb
+
+  perf:
+    name: Performance (N=1000)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          key: perf
+
+      # Builds a synthetic 1000-page vault on first use (about a minute), then
+      # times the core operations through Host::call.
+      - name: Run the vault benchmarks
+        run: >
+          cargo bench --manifest-path desktop/Cargo.toml -p herbarium-core --bench vault
+          -- --warm-up-time 1 --measurement-time 3
+        env:
+          HERB_BENCH_N: "1000"
+          HERB_BENCH_DIR: ${{ runner.temp }}/bench-vaults
+          CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
+      - name: Compare with docs/perf-baseline.json (fails on >25% regression)
+        run: node scripts/perf-check.mjs
+        env:
+          CARGO_TARGET_DIR: ${{ github.workspace }}/desktop/target
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: criterion
+          path: desktop/target/criterion
+          if-no-files-found: ignore
 
   e2e:
     name: End-to-end

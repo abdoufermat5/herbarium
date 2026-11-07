@@ -72,7 +72,7 @@ pub fn decide<R: Runtime>(webview: &Webview<R>, url: &Url) -> bool {
         return true;
     }
     if page_link(url).is_none() {
-        eprintln!("herbarium: blocked navigation to {url}");
+        tracing::warn!("blocked navigation to {url}");
     }
     offer(webview, url);
     false
@@ -107,7 +107,7 @@ pub fn build_main_window<R: Runtime>(
     let handle = app.handle().clone();
     let window = tauri::WebviewWindowBuilder::from_config(app, &config)?
         .on_new_window(move |url, _| {
-            eprintln!("herbarium: blocked new window for {url}");
+            tracing::warn!("blocked new window for {url}");
             offer(&handle, &url);
             tauri::webview::NewWindowResponse::Deny
         })
@@ -124,7 +124,7 @@ fn guard_frames<R: Runtime>(window: &tauri::WebviewWindow<R>) -> tauri::Result<(
     let handle = window.clone();
     window.with_webview(move |platform| {
         if let Err(e) = windows_frames::install(&platform.controller(), handle) {
-            eprintln!("herbarium: cannot guard frame navigation: {e}");
+            tracing::warn!("cannot guard frame navigation: {e}");
         }
     })
 }

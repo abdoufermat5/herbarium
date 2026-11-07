@@ -256,6 +256,7 @@ fn serve<R: tauri::Runtime>(
     request: &Request<Vec<u8>>,
 ) -> Response<Cow<'static, [u8]>> {
     let uri = request.uri();
+    let _timed = crate::logging::Timed::new("protocol request", uri.to_string());
     let referer = request
         .headers()
         .get("referer")
