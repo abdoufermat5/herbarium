@@ -44,6 +44,34 @@ moves about 21 KB per page; the common-term search and `today.summary` grow
 faster than linearly; `find_by_url` and `review.stats` are full scans; a cold
 index is dominated by HTML parsing and one SQLite transaction per page.
 
+## After the performance program
+
+Same benchmark, same machine, N = 1000, on the merged `perf/integrate` branch
+(the release profile now builds the HTML parser, SQLite, serde_json and the
+core at `opt-level = 3`). These numbers are what `docs/perf-baseline.json`
+gates against.
+
+| Benchmark | Before | After | Speed-up |
+| --- | ---: | ---: | ---: |
+| `vault/open_cold` | 17 856 ms | 2 271 ms | 7.9× |
+| `vault/open_warm` | 137 ms | 33.9 ms | 4.0× |
+| `vault/rescan_unchanged` | 138 ms | 32.4 ms | 4.3× |
+| `pages.list` (all) | 169 ms | 45.2 ms | 3.7× |
+| `pages.search` common term | 2 214 ms | 273 ms | 8.1× |
+| `pages.search` zero-hit term | 34.6 ms | 0.073 ms | 470× |
+| `pages.find_by_url` | 126 ms | 0.015 ms | 8 400× |
+| `today.summary` | 249 ms | 51.2 ms | 4.9× |
+| `review.stats` | 107 ms | 37.9 ms | 2.8× |
+| `review.complete` | 7.9 ms | 4.2 ms | 1.9× |
+| `storage.write` 100 KB | 8.8 ms | 3.9 ms | 2.3× |
+| `pages.create` | 15.1 ms | 5.8 ms | 2.6× |
+
+| Payload | Before | After |
+| --- | ---: | ---: |
+| `pages.list` (all) | 21 342 043 B | 423 133 B |
+| `pages.search` common term | 21 442 160 B | 523 250 B |
+| `today.summary` | 684 678 B | 9 801 B |
+
 ## Reproducing
 
 ```sh
@@ -80,4 +108,4 @@ reference machine with `node scripts/perf-check.mjs --update`.
 
 `scripts/bundle-budget.mjs` (run after `pnpm build`, also in CI) fails when
 the main JS chunk is larger than `mainJsKB` in `scripts/bundle-budget.json`
-(currently 777 KB, 5% over the 739.7 KB it is today).
+(currently 515 KB; the main chunk is 489.7 KB after lazy-loading the heavy views).

@@ -1,27 +1,27 @@
 {
   "n": 1000,
   "tolerance": 0.25,
-  "calibrationNs": 257056.7302188552,
+  "calibrationNs": 194519.95040983608,
   "medianNs": {
-    "vault/open_cold": 17856421015,
-    "vault/open_warm": 136822270.83333334,
-    "vault/rescan_unchanged": 137656776.5,
-    "ops/pages.list_all": 168692883,
-    "ops/pages.search_common": 2213587834.5,
-    "ops/pages.search_zero_hit": 34606640.5,
-    "ops/pages.find_by_url": 126485802.5,
-    "ops/today.summary": 248805517.5,
-    "ops/review.stats": 106760644.5,
-    "ops/review.complete": 7860615.75,
-    "ops/storage.write_100kb": 8754420.875,
-    "ops/pages.create": 15108198.75
+    "vault/open_cold": 2270568393.5,
+    "vault/open_warm": 33852642.5625,
+    "vault/rescan_unchanged": 32400790,
+    "ops/pages.list_all": 45203179,
+    "ops/pages.search_common": 272796912.5,
+    "ops/pages.search_zero_hit": 73162.01805555556,
+    "ops/pages.find_by_url": 14696.672042535643,
+    "ops/today.summary": 51191179.5,
+    "ops/review.stats": 37863484,
+    "ops/review.complete": 4170461.3125,
+    "ops/storage.write_100kb": 3893781.125,
+    "ops/pages.create": 5766126.833333334
   },
   "payloadBytes": {
     "pages": 1000,
-    "pages.list_all": 21342043,
-    "pages.search_all": 21342043,
-    "pages.search_common": 21442160,
-    "review.stats": 11936,
-    "today.summary": 684678
+    "pages.list_all": 423133,
+    "pages.search_all": 423133,
+    "pages.search_common": 428138,
+    "review.stats": 11938,
+    "today.summary": 9801
   }
 }
