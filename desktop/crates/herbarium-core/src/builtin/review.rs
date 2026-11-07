@@ -237,7 +237,7 @@ pub(crate) fn read_settings(vault: &Path) -> OpResult<ReviewSettings> {
 /// invalid file is logged and defaults are used.
 pub(crate) fn load_settings(vault: &Path) -> ReviewSettings {
     read_settings(vault).unwrap_or_else(|e| {
-        eprintln!("herbarium: {e}");
+        tracing::warn!("{e}");
         ReviewSettings::default()
     })
 }
@@ -341,7 +341,7 @@ impl History {
 fn history(meta: &PageMeta) -> History {
     meta.ext
         .get(HISTORY_KEY)
-        .and_then(|v| serde_json::from_value::<History>(v.clone()).ok())
+        .and_then(|v| History::deserialize(v).ok())
         .map(|mut h| {
             if h.count < h.log.len() as u64 {
                 h.count = h.log.len() as u64;
@@ -504,15 +504,20 @@ fn streaks(counts: &[usize]) -> (usize, usize) {
     (current, longest)
 }
 
-/// Consecutive days with a review, up to today.
-pub(crate) fn current_streak(ctx: &Ctx) -> OpResult<usize> {
-    stats(ctx, None).map(|s| s.streak)
+/// Consecutive days with a review up to `now`, over pages already loaded.
+pub(crate) fn current_streak(settings: &ReviewSettings, pages: &[PageMeta], now: i64) -> usize {
+    stats_over(settings, pages, now).streak
 }
 
 fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
     let now = fixed_now.unwrap_or_else(now_ms);
-    let today = utc_midnight(now);
     let settings = load_settings(&ctx.store.vault);
+    let pages = ctx.store.all().map_err(|e| e.to_string())?;
+    Ok(stats_over(&settings, &pages, now))
+}
+
+fn stats_over(settings: &ReviewSettings, pages: &[PageMeta], now: i64) -> Stats {
+    let today = utc_midnight(now);
     let mut due_total = 0;
     let first_day = today - (ACTIVITY_DAYS - 1) * DAY_MS;
     let mut per_day: BTreeMap<i64, usize> = BTreeMap::new();
@@ -523,8 +528,8 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
         })
         .collect();
     let (mut overdue, mut reviewed_today, mut total_reviews) = (0, 0, 0);
-    for meta in ctx.store.all().map_err(|e| e.to_string())? {
-        let h = history(&meta);
+    for meta in pages {
+        let h = history(meta);
         let mut days: Vec<i64> = h.days.keys().copied().collect();
         days.extend(h.log.iter().map(|e| utc_midnight(e.at)));
         days.sort_unstable();
@@ -532,7 +537,7 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
         for day in days.into_iter().filter(|d| *d >= first_day && *d <= today) {
             *per_day.entry(day).or_default() += h.on_day(day) as usize;
         }
-        if settings.excludes(&meta) {
+        if settings.excludes(meta) {
             total_reviews += h.count;
             reviewed_today += h.on_day(today) as usize;
             continue;
@@ -564,7 +569,7 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
         .collect();
     let counts: Vec<usize> = activity.iter().map(|d| d.count).collect();
     let (streak, longest_streak) = streaks(&counts);
-    Ok(Stats {
+    Stats {
         due_total,
         overdue,
         reviewed_today,
@@ -573,7 +578,7 @@ fn stats(ctx: &Ctx, fixed_now: Option<i64>) -> OpResult<Stats> {
         activity,
         streak,
         longest_streak,
-    })
+    }
 }
 
 #[derive(Deserialize)]
@@ -698,7 +703,7 @@ impl Extension for Review {
                 if let Some(limit) = settings.queue_limit {
                     due.truncate(limit);
                 }
-                Ok(due)
+                Ok(due.iter().map(PageMeta::review_summary).collect::<Vec<_>>())
             },
         ))?;
 

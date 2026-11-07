@@ -10,10 +10,10 @@ import { applyTypography } from "./lib/typography";
 
 initTheme();
 applyTypography(prefs.typeStyle, prefs.textScale);
-initLocale();
 initLinkPrompts();
 initApp().catch((err) => console.error("Init failed:", err));
 
-const app = mount(App, { target: document.getElementById("app")! });
+// Mount once the starting catalog is in memory, so no raw keys flash.
+const app = initLocale().then(() => mount(App, { target: document.getElementById("app")! }));
 
 export default app;

@@ -339,7 +339,7 @@ fn call(host: &Host, id: Value, params: &Value) -> Value {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     match host.call(Caller::Agent, &op.name, args) {
         Ok(out) => {
-            let text = serde_json::to_string_pretty(&out).unwrap_or_default();
+            let text = serde_json::to_string(&out).unwrap_or_default();
             success(
                 id,
                 json!({
@@ -374,14 +374,15 @@ fn resources_list(host: &Host, id: Value, params: &Value) -> Value {
             None => return error(id, -32602, "invalid cursor"),
         },
     };
-    let pages = match store.all() {
-        Ok(pages) => pages,
+    // One extra row tells whether another window follows.
+    let mut rows = match store.listing_window(start, RESOURCES_PAGE + 1) {
+        Ok(rows) => rows,
         Err(e) => return error(id, -32603, &e.to_string()),
     };
-    let resources: Vec<Value> = pages
+    let more = rows.len() > RESOURCES_PAGE;
+    rows.truncate(RESOURCES_PAGE);
+    let resources: Vec<Value> = rows
         .iter()
-        .skip(start)
-        .take(RESOURCES_PAGE)
         .map(|meta| {
             let mut place = meta.folder.clone().unwrap_or_default();
             if !meta.tags.is_empty() {
@@ -403,9 +404,8 @@ fn resources_list(host: &Host, id: Value, params: &Value) -> Value {
         })
         .collect();
     let mut result = json!({ "resources": resources });
-    let next = start + RESOURCES_PAGE;
-    if next < pages.len() {
-        result["nextCursor"] = Value::String(next.to_string());
+    if more {
+        result["nextCursor"] = Value::String((start + RESOURCES_PAGE).to_string());
     }
     success(id, result)
 }

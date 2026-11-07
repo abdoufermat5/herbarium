@@ -2,6 +2,21 @@
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    let is_app = !matches!(
+        args.first().map(String::as_str),
+        Some(
+            "mcp"
+                | "add"
+                | "import"
+                | "remix"
+                | "publish"
+                | "native-host"
+                | "help"
+                | "--help"
+                | "-h"
+        )
+    ) && !herbarium_lib::is_browser_launch(&args);
+    herbarium_lib::logging::init(is_app);
     // A browser starting the native messaging host for the extension.
     if herbarium_lib::is_browser_launch(&args) {
         std::process::exit(herbarium_lib::run_native_host(&args));

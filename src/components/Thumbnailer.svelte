@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import { api } from "../lib/api";
-  import { app } from "../lib/state.svelte";
+  import { app, mergePreviews, onPageEvents } from "../lib/state.svelte";
   import type { PreviewDigest } from "../lib/types";
 
   /**
@@ -64,43 +64,90 @@
     });
   }
 
+  /** Pages whose preview is missing or stale, found from pushed events. */
+  const queued = new Set<string>();
+  /** Ask the backend which previews exist: the first run and after a rescan found changes. */
+  let needsList = true;
+  let listedRevision = app.vaultRevision;
+
+  async function make(id: string): Promise<boolean> {
+    await quiet();
+    if (stopped || !app.config?.vaultPath) return false;
+    const loaded = waitForLoad();
+    src = `herbarium://page/${encodeURIComponent(id)}?v=preview-${++nonce}`;
+    await loaded;
+    await new Promise((r) => setTimeout(r, SETTLE_MS));
+    const digest = await askDigest();
+    if (!digest) return true;
+    try {
+      await api.savePreview(id, digest);
+      mergePreviews({ [id]: digest });
+    } catch (e) {
+      console.warn("preview not saved", id, e);
+    }
+    return true;
+  }
+
   async function run() {
     if (running || stopped || !app.config?.vaultPath) return;
     running = true;
     try {
-      const { previews, missing } = await api.listPreviews();
-      app.previews = previews;
-      for (const id of missing) {
-        await quiet();
-        if (stopped || !app.config?.vaultPath) break;
-        const loaded = waitForLoad();
-        src = `herbarium://page/${encodeURIComponent(id)}?v=preview-${++nonce}`;
-        await loaded;
-        await new Promise((r) => setTimeout(r, SETTLE_MS));
-        const digest = await askDigest();
-        if (!digest) continue;
-        try {
-          await api.savePreview(id, digest);
-          app.previews[id] = digest;
-        } catch (e) {
-          console.warn("preview not saved", id, e);
-        }
+      let todo: string[] = [];
+      if (needsList || listedRevision !== app.vaultRevision) {
+        needsList = false;
+        listedRevision = app.vaultRevision;
+        const { previews, missing } = await api.listPreviews();
+        app.previews = previews;
+        todo = missing;
+        for (const id of missing) queued.delete(id);
+      }
+      // Pages changed since: only those need a new preview, not a whole-map refetch.
+      while (!stopped && (todo.length > 0 || queued.size > 0)) {
+        const id = todo.shift() ?? queued.values().next().value!;
+        queued.delete(id);
+        if (!app.library.some((p) => p.id === id)) continue;
+        if (!(await make(id))) break;
       }
     } catch (e) {
       console.error(e);
+      needsList = true;
     } finally {
       src = "about:blank";
       running = false;
     }
   }
 
-  // Run after each library load or rescan, once the window is idle.
+  // Run on the first load, in a newly opened vault and after a rescan found
+  // changes, once the window is idle.
+  let listedVault = app.config?.vaultPath;
   $effect(() => {
-    void app.library.length;
     void app.vaultRevision;
+    // Another vault: nothing queued or listed so far applies to it.
+    if (app.config?.vaultPath !== listedVault) {
+      listedVault = app.config?.vaultPath;
+      needsList = true;
+      queued.clear();
+    }
     const timer = setTimeout(() => void run(), 1500);
     return () => clearTimeout(timer);
   });
+
+  // A page created or changed here needs a preview; a deleted one loses it.
+  $effect(() =>
+    onPageEvents((events) => {
+      for (const event of events) {
+        const id = event.meta.id;
+        if (event.kind === "page.deleted") {
+          queued.delete(id);
+        } else if (event.kind === "page.created" || event.htmlChanged) {
+          // A previous digest stays until the new one replaces it. Metadata
+          // edits (grades, tags, notes) leave the rendering unchanged.
+          queued.add(id);
+        }
+      }
+      if (queued.size > 0) setTimeout(() => void run(), 1500);
+    }),
+  );
 
   onDestroy(() => {
     stopped = true;

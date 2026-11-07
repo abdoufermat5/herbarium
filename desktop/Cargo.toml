@@ -11,6 +11,7 @@ herbarium-core = { path = "crates/herbarium-core" }
 herbarium-mcp = { path = "crates/herbarium-mcp" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+tracing = { version = "0.1", default-features = false, features = ["std", "attributes"] }
 
 [package]
 name = "herbarium"
@@ -32,6 +33,8 @@ reqwest = { version = "0.13", default-features = false, features = ["blocking", 
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 serde.workspace = true
 serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter"] }
 tauri = { version = "2.12.1", features = ["tray-icon", "image-png"] }
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-deep-link = "2"
@@ -58,3 +61,26 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Keep the binary size-optimised overall, but spend the compile on the crates
+# that dominate the hot paths (HTML parsing, SQLite, JSON, the core kernel).
+[profile.release.package.html5ever]
+opt-level = 3
+
+[profile.release.package.markup5ever]
+opt-level = 3
+
+[profile.release.package.scraper]
+opt-level = 3
+
+[profile.release.package.rusqlite]
+opt-level = 3
+
+[profile.release.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.release.package.serde_json]
+opt-level = 3
+
+[profile.release.package.herbarium-core]
+opt-level = 3

@@ -6,7 +6,7 @@ use std::sync::Mutex;
 
 use herbarium_core::{Caller, Host};
 use serde_json::{Value, json};
-use tauri::State;
+use tauri::{Manager, State};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
@@ -19,6 +19,9 @@ pub struct AppState {
     pub models: Mutex<std::collections::HashMap<String, Vec<crate::ai::Model>>>,
     /// The last AI export scanned, waiting for the user to pick what to import.
     pub ai_scan: Mutex<Option<herbarium_core::importer::Scan>>,
+    /// Read-only vault metadata for serving `herbarium://` pages and assets
+    /// without taking the host lock.
+    pub protocol: crate::protocol::ProtocolState,
 }
 
 impl AppState {
@@ -27,6 +30,7 @@ impl AppState {
             host: Mutex::new(Host::new()),
             models: Mutex::new(std::collections::HashMap::new()),
             ai_scan: Mutex::new(None),
+            protocol: crate::protocol::ProtocolState::default(),
         }
     }
 }
@@ -40,12 +44,22 @@ impl Default for AppState {
 type CmdResult<T> = Result<T, String>;
 
 /// Open a vault (create dir if needed), index it, persist it in the config.
-fn open_vault(state: &State<'_, AppState>, path: &str) -> CmdResult<Config> {
-    let mut host = state.host.lock().map_err(|e| e.to_string())?;
-    let report = host.open_vault(path)?;
-    let canonical = host.vault_path().map(|p| p.to_string_lossy().into_owned());
-    eprintln!(
-        "herbarium: vault opened at {} (indexed {}, removed {}, total {})",
+///
+/// The index walk runs on a fresh host, outside the app's host lock, so the
+/// vault already open keeps answering while a big vault is scanned; the lock is
+/// held only for the swap. A failed open leaves the current vault untouched.
+fn open_vault(app: &tauri::AppHandle, path: &str) -> CmdResult<Config> {
+    let state = app.state::<AppState>();
+    let mut fresh = crate::events::new_host(app)?;
+    let report = fresh.open_vault(path)?;
+    let canonical = fresh.vault_path().map(Path::to_path_buf);
+    *state.host.lock().map_err(|e| e.to_string())? = fresh;
+    if let Some(vault) = &canonical {
+        state.protocol.set_vault(vault);
+    }
+    let canonical = canonical.map(|p| p.to_string_lossy().into_owned());
+    tracing::info!(
+        "vault opened at {} (indexed {}, removed {}, total {})",
         canonical.as_deref().unwrap_or_default(),
         report.indexed,
         report.removed,
@@ -67,13 +81,15 @@ pub async fn get_config() -> CmdResult<Config> {
 }
 
 #[tauri::command]
-pub async fn set_vault(state: State<'_, AppState>, path: String) -> CmdResult<Config> {
-    open_vault(&state, &path)
+pub async fn set_vault(app: tauri::AppHandle, path: String) -> CmdResult<Config> {
+    tauri::async_runtime::spawn_blocking(move || open_vault(&app, &path))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn create_vault(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     parent_dir: String,
     name: String,
 ) -> CmdResult<Config> {
@@ -81,8 +97,13 @@ pub async fn create_vault(
     if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) {
         return Err("invalid folder name".into());
     }
-    let target = PathBuf::from(&parent_dir).join(name);
-    open_vault(&state, &target.to_string_lossy())
+    let target = PathBuf::from(&parent_dir)
+        .join(name)
+        .to_string_lossy()
+        .into_owned();
+    tauri::async_runtime::spawn_blocking(move || open_vault(&app, &target))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -104,14 +125,21 @@ pub async fn set_close_to_tray(enabled: bool) -> CmdResult<Config> {
 }
 
 #[tauri::command]
-pub async fn reveal_page(state: State<'_, AppState>, page_id: String) -> CmdResult<()> {
-    let path = {
+pub async fn reveal_page(app: tauri::AppHandle, page_id: String) -> CmdResult<()> {
+    let path = tauri::async_runtime::spawn_blocking(move || -> CmdResult<PathBuf> {
+        let state = app.state::<AppState>();
         let host = state.host.lock().map_err(|e| e.to_string())?;
         let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
-        herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref())
-    };
+        Ok(herbarium_core::vault::html_path(
+            &vault,
+            &page_id,
+            folder.as_deref(),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if !path.is_file() {
         return Err(format!("page file not found: {}", path.display()));
     }
@@ -119,11 +147,14 @@ pub async fn reveal_page(state: State<'_, AppState>, page_id: String) -> CmdResu
 }
 
 #[tauri::command]
-pub async fn reveal_vault(state: State<'_, AppState>) -> CmdResult<()> {
-    let vault = {
+pub async fn reveal_vault(app: tauri::AppHandle) -> CmdResult<()> {
+    let vault = tauri::async_runtime::spawn_blocking(move || -> CmdResult<PathBuf> {
+        let state = app.state::<AppState>();
         let host = state.host.lock().map_err(|e| e.to_string())?;
-        host.vault_path().ok_or("no vault open")?.to_path_buf()
-    };
+        Ok(host.vault_path().ok_or("no vault open")?.to_path_buf())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if !vault.is_dir() {
         return Err(format!("vault directory not found: {}", vault.display()));
     }
@@ -289,29 +320,34 @@ fn export_page_to(html_file: &Path, page_id: &str, dest: &Path) -> Result<(), St
 }
 
 #[tauri::command]
-pub async fn export_vault(state: State<'_, AppState>, dest_zip: String) -> CmdResult<()> {
-    let vault = {
+pub async fn export_vault(app: tauri::AppHandle, dest_zip: String) -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
         let host = state.host.lock().map_err(|e| e.to_string())?;
-        host.vault_path().ok_or("no vault open")?.to_path_buf()
-    };
-    export_vault_to(&vault, &PathBuf::from(&dest_zip))
+        let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+        export_vault_to(&vault, &PathBuf::from(&dest_zip))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub async fn export_page(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     page_id: String,
     dest_zip: String,
 ) -> CmdResult<()> {
-    let (vault, folder) = {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
         let host = state.host.lock().map_err(|e| e.to_string())?;
         let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
-        (vault, folder)
-    };
-    let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
-    export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
+        let html_file = herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref());
+        export_page_to(&html_file, &page_id, &PathBuf::from(&dest_zip))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 /// Read pages for an export while holding the vault lock only as long as
 /// needed. `folder` limits it to a folder and its subfolders.
@@ -320,28 +356,36 @@ fn pages_for_export(
     folder: Option<&str>,
     only: Option<&str>,
 ) -> CmdResult<(PathBuf, Vec<crate::export::ExportPage>)> {
-    let host = state.host.lock().map_err(|e| e.to_string())?;
-    let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
-    let ids: Vec<String> = match only {
-        Some(id) => vec![id.to_string()],
-        None => {
-            let list = host.call(Caller::Ui, "pages.list", json!({ "folder": folder }))?;
-            list.as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|m| m["id"].as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default()
-        }
+    let (vault, ids) = {
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
+        let ids: Vec<String> = match only {
+            Some(id) => vec![id.to_string()],
+            None => {
+                let list = host.call(Caller::Ui, "pages.list", json!({ "folder": folder }))?;
+                list.as_array()
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|m| m["id"].as_str().map(str::to_string))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+        };
+        (vault, ids)
     };
     let mut pages = Vec::with_capacity(ids.len());
     for id in ids {
-        let page = host.call(
-            Caller::Ui,
-            "pages.get",
-            json!({ "id": id, "format": "html" }),
-        )?;
+        // Hold the host lock only while this one page is read so a large
+        // export never blocks the UI between pages.
+        let page = {
+            let host = state.host.lock().map_err(|e| e.to_string())?;
+            host.call(
+                Caller::Ui,
+                "pages.get",
+                json!({ "id": id, "format": "html" }),
+            )?
+        };
         let meta = &page["meta"];
         pages.push(crate::export::ExportPage {
             title: meta["title"].as_str().unwrap_or(&id).to_string(),
@@ -364,84 +408,105 @@ fn pages_for_export(
 /// Save one page as a self-contained HTML file (local assets inlined).
 #[tauri::command]
 pub async fn export_page_html(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     page_id: String,
     dest: String,
 ) -> CmdResult<()> {
-    let (vault, pages) = pages_for_export(&state, None, Some(&page_id))?;
-    let page = pages.first().ok_or("page not found")?;
-    let html = crate::export::standalone(&vault, page);
-    herbarium_core::vault::write_atomic(&PathBuf::from(dest), html.as_bytes())
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (vault, pages) = pages_for_export(&state, None, Some(&page_id))?;
+        let page = pages.first().ok_or("page not found")?;
+        let html = crate::export::standalone(&vault, page);
+        herbarium_core::vault::write_atomic(&PathBuf::from(dest), html.as_bytes())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Publish the vault, or one folder of it, as a static website in `dest_dir`
 /// (a new or empty folder).
 #[tauri::command]
 pub async fn export_site(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     folder: Option<String>,
     title: String,
     dest_dir: String,
 ) -> CmdResult<crate::export::SiteReport> {
-    let (vault, pages) = pages_for_export(&state, folder.as_deref(), None)?;
-    if pages.is_empty() {
-        return Err("there are no pages to publish".into());
-    }
-    crate::export::write_site(&vault, &title, &pages, &PathBuf::from(dest_dir))
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let (vault, pages) = pages_for_export(&state, folder.as_deref(), None)?;
+        if pages.is_empty() {
+            return Err("there are no pages to publish".into());
+        }
+        crate::export::write_site(&vault, &title, &pages, &PathBuf::from(dest_dir))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// List the HTML artifacts in a Claude or ChatGPT data export (.zip or
 /// conversations.json) and mark those already imported.
 #[tauri::command]
 pub async fn scan_ai_export(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     path: String,
 ) -> CmdResult<crate::ai_import::Listing> {
-    // Parsing a large export happens before the vault is locked.
-    let scan =
-        herbarium_core::importer::scan(&crate::ai_import::read_conversations(Path::new(&path))?)?;
-    let have = {
-        let host = state.host.lock().map_err(|e| e.to_string())?;
-        herbarium_core::importer::imported_keys(host.store().ok_or("no vault open")?)?
-    };
-    let listing = crate::ai_import::Listing {
-        candidates: scan
-            .candidates
-            .iter()
-            .map(|c| crate::ai_import::Listed {
-                already_imported: have.contains(&c.key),
-                candidate: c.clone(),
-            })
-            .collect(),
-        conversations: scan.conversations,
-        unsupported: scan.unsupported,
-    };
-    *state.ai_scan.lock().map_err(|e| e.to_string())? = Some(scan);
-    Ok(listing)
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        // Parsing a large export happens before the vault is locked.
+        let scan = herbarium_core::importer::scan(&crate::ai_import::read_conversations(
+            Path::new(&path),
+        )?)?;
+        let have = {
+            let host = state.host.lock().map_err(|e| e.to_string())?;
+            herbarium_core::importer::imported_keys(host.store().ok_or("no vault open")?)?
+        };
+        let listing = crate::ai_import::Listing {
+            candidates: scan
+                .candidates
+                .iter()
+                .map(|c| crate::ai_import::Listed {
+                    already_imported: have.contains(&c.key),
+                    candidate: c.clone(),
+                })
+                .collect(),
+            conversations: scan.conversations,
+            unsupported: scan.unsupported,
+        };
+        *state.ai_scan.lock().map_err(|e| e.to_string())? = Some(scan);
+        Ok(listing)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Import the chosen artifacts (by key) of the last scanned export.
 #[tauri::command]
 pub async fn import_ai_export(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     keys: Vec<String>,
     folder: Option<String>,
 ) -> CmdResult<crate::ai_import::ImportReport> {
-    let scan = state
-        .ai_scan
-        .lock()
-        .map_err(|e| e.to_string())?
-        .take()
-        .ok_or("scan the export again before importing")?;
-    let keys: std::collections::HashSet<String> = keys.into_iter().collect();
-    let host = state.host.lock().map_err(|e| e.to_string())?;
-    crate::ai_import::import(
-        &host,
-        &scan.candidates,
-        Some(&keys),
-        folder.as_deref(),
-        None,
-    )
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let scan = state
+            .ai_scan
+            .lock()
+            .map_err(|e| e.to_string())?
+            .take()
+            .ok_or("scan the export again before importing")?;
+        let keys: std::collections::HashSet<String> = keys.into_iter().collect();
+        // The host is locked per page, not for the whole import.
+        crate::ai_import::import(
+            &state.host,
+            &scan.candidates,
+            Some(&keys),
+            folder.as_deref(),
+            None,
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Where the copies of the extension live: one for Chromium browsers, one
@@ -608,6 +673,9 @@ pub async fn set_capture(
     watchers
         .clipboard
         .store(cfg.watch_clipboard, Ordering::Relaxed);
+    // Wake the watcher threads so a newly enabled watcher starts right away;
+    // disabled ones re-park without polling.
+    watchers.wake();
     Ok(cfg)
 }
 
@@ -695,9 +763,14 @@ pub async fn connect_browsers() -> CmdResult<Vec<String>> {
 }
 
 #[tauri::command]
-pub async fn invoke_op(state: State<'_, AppState>, name: String, args: Value) -> CmdResult<Value> {
-    let host = state.host.lock().map_err(|e| e.to_string())?;
-    host.call(Caller::Ui, &name, args)
+pub async fn invoke_op(app: tauri::AppHandle, name: String, args: Value) -> CmdResult<Value> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        let host = state.host.lock().map_err(|e| e.to_string())?;
+        host.call(Caller::Ui, &name, args)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Text editors installed on this system, best candidates first.
@@ -711,18 +784,25 @@ pub async fn list_editors() -> Vec<EditorInfo> {
 /// neither, the first detected editor is used.
 #[tauri::command]
 pub async fn open_in_editor(
-    state: State<'_, AppState>,
+    app: tauri::AppHandle,
     page_id: String,
     editor: Option<String>,
     custom: Option<String>,
 ) -> CmdResult<String> {
-    let path = {
+    let path = tauri::async_runtime::spawn_blocking(move || -> CmdResult<PathBuf> {
+        let state = app.state::<AppState>();
         let host = state.host.lock().map_err(|e| e.to_string())?;
         let vault = host.vault_path().ok_or("no vault open")?.to_path_buf();
         let page = host.call(Caller::Ui, "pages.get", json!({ "id": page_id }))?;
         let folder = page["meta"]["folder"].as_str().map(str::to_owned);
-        herbarium_core::vault::html_path(&vault, &page_id, folder.as_deref())
-    };
+        Ok(herbarium_core::vault::html_path(
+            &vault,
+            &page_id,
+            folder.as_deref(),
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if !path.is_file() {
         return Err(format!("page file not found: {}", path.display()));
     }
@@ -1079,7 +1159,6 @@ pub async fn set_claude_code_path(path: Option<String>) -> CmdResult<ClaudeCodeS
 #[tauri::command]
 pub async fn remix_page(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
     id: String,
     preset: String,
     instructions: String,
@@ -1087,8 +1166,18 @@ pub async fn remix_page(
     use tauri::Emitter;
 
     let running = crate::remix::start(&id)?;
-    let (prompt, base_updated_at) =
-        crate::remix::prompt_for(&state.host, &id, &preset, &instructions)?;
+    let (prompt, base_updated_at) = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let id = id.clone();
+        let preset = preset.clone();
+        let instructions = instructions.clone();
+        move || {
+            let state = app.state::<AppState>();
+            crate::remix::prompt_for(&state.host, &id, &preset, &instructions)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     let cfg = config::load().unwrap_or_default();
     let key = crate::secrets::load().ai_key(&cfg.ai_provider);
@@ -1121,9 +1210,14 @@ pub async fn remix_page(
     .await
     .map_err(|e| e.to_string())??;
 
-    let proposal = crate::remix::propose(&state.host, &id, &remixed, base_updated_at);
+    let proposal = tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<AppState>();
+        crate::remix::propose(&state.host, &id, &remixed, base_updated_at)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     drop(running);
-    proposal
+    Ok(proposal)
 }
 
 #[tauri::command]
@@ -1140,7 +1234,6 @@ pub const ORGANIZE_KEY: &str = "organize:library";
 #[tauri::command]
 pub async fn organize_plan(
     app: tauri::AppHandle,
-    state: State<'_, AppState>,
     scope: String,
     instructions: String,
 ) -> CmdResult<crate::organize::Plan> {
@@ -1148,7 +1241,15 @@ pub async fn organize_plan(
 
     let scope = crate::organize::Scope::parse(&scope)?;
     let running = crate::remix::start(ORGANIZE_KEY)?;
-    let library = crate::organize::gather(&state.host, scope)?;
+    let library = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        move || {
+            let state = app.state::<AppState>();
+            crate::organize::gather(&state.host, scope)
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     if library.entries.is_empty() {
         return Err("there are no pages to organize".into());
     }

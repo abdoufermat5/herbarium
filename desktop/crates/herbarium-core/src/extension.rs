@@ -187,27 +187,35 @@ impl<'a> Ctx<'a> {
         });
     }
 
+    /// The page's metadata. If its files changed on disk since they were
+    /// indexed (another process saved it), the sidecar is read afresh instead
+    /// of handing back the stale index copy.
     pub fn page(&self, id: &str) -> OpResult<PageMeta> {
-        self.store
+        let indexed = self
+            .store
             .get_meta(id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("page not found: {id}"))
+            .ok_or_else(|| format!("page not found: {id}"))?;
+        let recorded = self.store.fingerprint_for(id).map_err(|e| e.to_string())?;
+        let current = vault::page_fingerprint(&self.store.vault, id, indexed.folder.as_deref());
+        if recorded.as_deref() != Some(current.as_str())
+            && let Ok(Some(fresh)) =
+                vault::read_meta(&self.store.vault, id, indexed.folder.as_deref())
+        {
+            return Ok(fresh);
+        }
+        Ok(indexed)
     }
 
-    /// Persist metadata (sidecar + index), keeping the indexed text, and emit
-    /// `page.updated`.
+    /// Persist metadata only (sidecar + index row), leaving the indexed text
+    /// untouched, and emit `page.updated`.
     pub fn save(&mut self, meta: &PageMeta) -> OpResult<()> {
         vault::write_meta(&self.store.vault, meta)?;
-        let text = self
-            .store
-            .text_for(&meta.id)
-            .map_err(|e| e.to_string())?
-            .unwrap_or_default();
-        let mtime = vault::page_mtime(&self.store.vault, meta);
-        self.store
-            .upsert(meta, &text, mtime)
-            .map_err(|e| e.to_string())?;
-        self.emit(events::PAGE_UPDATED, serde_json::json!({ "page": meta }));
+        self.store.update_meta(meta).map_err(|e| e.to_string())?;
+        self.emit(
+            events::PAGE_UPDATED,
+            serde_json::json!({ "page": meta, "htmlChanged": false }),
+        );
         Ok(())
     }
 }

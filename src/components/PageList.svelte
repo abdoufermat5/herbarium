@@ -4,8 +4,7 @@
 </script>
 
 <script lang="ts">
-  import { onDestroy, untrack } from "svelte";
-  import { flip } from "svelte/animate";
+  import { onDestroy, tick, untrack } from "svelte";
   import { fade, fly } from "svelte/transition";
   import { backOut, cubicIn, cubicOut } from "svelte/easing";
   import { Tween } from "svelte/motion";
@@ -42,6 +41,7 @@
   import type { DropdownMenuItem } from "./DropdownMenu.svelte";
   import { dueInfo, fmtDuration, plural, startOfToday } from "../lib/format";
   import { t } from "../lib/i18n.svelte";
+  import { buildOffsets, rowAt, rowRange, stepIndex } from "../lib/windowing";
 
   /** Search hits carry an optional `[match]`-marked snippet on top of the page meta. */
   type Row = PageMeta & { snippet?: string };
@@ -60,35 +60,134 @@
 
   const pages = $derived(visiblePages(app.pages) as Row[]);
 
-  /* Windowed rendering: a big library draws the first cards at once and
-     the rest as they come near the viewport, so searching, filtering and
-     switching views stay instant whatever the vault's size. */
-  const WINDOW = 24;
-  let limit = $state(WINDOW);
-  const shown = $derived(pages.length > limit ? pages.slice(0, limit) : pages);
-  let sentinel: HTMLDivElement | undefined = $state();
+  /* Windowed rendering: only the rows near the viewport are in the DOM, in both
+     layouts, however large the vault. Rows differ in height (wrapping tags,
+     clamped notes), so each row's height is measured once it has been on
+     screen; a constant estimate stands in for the rest. Spacers above and below
+     (the grid's padding) keep the scrollbar honest. */
+  const OVERSCAN = 600;
+  const CARD_MIN = 220;
+  const GRID_GAP = 16;
+  let paneEl: HTMLElement | undefined = $state();
+  let stageEl: HTMLElement | undefined = $state();
+  let gridEl: HTMLElement | undefined = $state();
+  let stageWidth = $state(0);
+  let viewH = $state(typeof window === "undefined" ? 800 : window.innerHeight);
+  let scrollY = $state(0);
+  /** Distance from the scroll container's top edge to the grid's top edge, scroll included. */
+  let gridTop = $state(0);
+  /** Measured row heights; bumping `measured` tells the offsets to rebuild. */
+  let heights: number[] = [];
+  let measured = $state(0);
+  let estimate = $state(0);
+  let estimateLocked = false;
 
-  // A new search, filter, sort or layout starts from the top.
+  const cols = $derived(
+    app.layout === "list" ? 1 : Math.max(1, Math.floor((stageWidth + GRID_GAP) / (CARD_MIN + GRID_GAP))),
+  );
+  const gap = $derived(app.layout === "list" ? 0 : GRID_GAP);
+  const rowCount = $derived(Math.ceil(pages.length / cols));
+  const offsets = $derived.by(() => {
+    void measured;
+    return buildOffsets(rowCount, heights, estimate || (app.layout === "list" ? 64 : 270), gap);
+  });
+  const range = $derived(
+    rowRange(offsets, scrollY - gridTop - OVERSCAN, scrollY - gridTop + viewH + OVERSCAN),
+  );
+  const shown = $derived(pages.slice(range.first * cols, (range.last + 1) * cols));
+  const padTop = $derived(offsets[range.first] ?? 0);
+  const padBottom = $derived(Math.max(0, (offsets[rowCount] ?? 0) - (offsets[range.last + 1] ?? 0)));
+
+  function forgetHeights() {
+    heights = [];
+    estimate = 0;
+    estimateLocked = false;
+    measured++;
+  }
+
+  // A new search, filter, sort, layout or card width starts from fresh measurements.
   $effect(() => {
     void app.search;
     void app.folderFilter;
     void app.tagFilter;
     void app.sort;
     void app.layout;
-    limit = WINDOW;
+    void cols;
+    untrack(forgetHeights);
+  });
+
+  function readViewport() {
+    if (!paneEl) return;
+    scrollY = paneEl.scrollTop;
+    viewH = paneEl.clientHeight;
+    if (gridEl) gridTop = gridEl.getBoundingClientRect().top - paneEl.getBoundingClientRect().top + paneEl.scrollTop;
+  }
+
+  let scrollFrame = 0;
+  function onPaneScroll() {
+    if (scrollFrame) return;
+    scrollFrame = requestAnimationFrame(() => {
+      scrollFrame = 0;
+      readViewport();
+    });
+  }
+
+  $effect(() => {
+    const pane = paneEl;
+    if (!pane) return;
+    const io = new ResizeObserver(readViewport);
+    io.observe(pane);
+    return () => io.disconnect();
   });
 
   $effect(() => {
-    const el = sentinel;
-    if (!el) return;
-    const io = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((e) => e.isIntersecting)) limit += WINDOW * 2;
-      },
-      { rootMargin: "1200px 0px" },
-    );
-    io.observe(el);
+    const stage = stageEl;
+    if (!stage) return;
+    const io = new ResizeObserver((entries) => {
+      stageWidth = entries[0]?.contentRect.width ?? stage.clientWidth;
+      readViewport();
+    });
+    io.observe(stage);
     return () => io.disconnect();
+  });
+
+  // After each render, record the real height of the rows on screen. A row that
+  // changes above the viewport would shift what the reader is looking at, so the
+  // scroll position is moved by the same amount.
+  $effect(() => {
+    void shown;
+    const grid = gridEl;
+    const pane = paneEl;
+    if (!grid || !pane) return;
+    untrack(() => {
+      readViewport();
+      const anchorRow = rowAt(offsets, scrollY - gridTop);
+      let delta = 0;
+      let changed = false;
+      for (let r = range.first; r <= range.last; r++) {
+        const card = grid.children[(r - range.first) * cols] as HTMLElement | undefined;
+        const h = card ? Math.round(card.getBoundingClientRect().height) : 0;
+        if (h <= 0) continue;
+        if (!estimateLocked) {
+          estimate = h;
+          estimateLocked = true;
+          changed = true;
+        }
+        const before = heights[r] || estimate;
+        if (heights[r] === h) continue;
+        heights[r] = h;
+        changed = true;
+        if (r < anchorRow) delta += h - before;
+      }
+      if (!changed) return;
+      measured++;
+      if (delta !== 0) {
+        void tick().then(() => {
+          pane.scrollTop += delta;
+          readViewport();
+        });
+      }
+    });
   });
   const selectedIds = $derived([...selected]);
   const searching = $derived(!!app.search.trim());
@@ -169,7 +268,7 @@
 
   // First cards of the session: cascade them, then settle.
   $effect(() => {
-    if (!entered && shown.length > 0) armCascade();
+    if (!entered && pages.length > 0) armCascade();
   });
 
   let filterKey: string | null = null;
@@ -191,19 +290,14 @@
 
   /** Marks a card as it mounts; later re-renders of the same card never replay it. */
   function enter(node: HTMLElement, index: number) {
-    if (quiet) return;
+    // Cards mounted by scrolling are not arrivals.
+    if (quiet || scrollY > 8) return;
     if (entryMode === "stagger") {
       node.style.setProperty("--i", String(Math.min(index, 10)));
       node.classList.add("enter");
     } else {
       node.classList.add("fresh");
     }
-  }
-
-  /** Cards slide to their new place on reorder; a very large list just snaps. */
-  const flipMs = $derived(shown.length > 100 || reducedMotion() ? 0 : 220);
-  function glide(node: Element, pos: { from: DOMRect; to: DOMRect }) {
-    return flip(node, pos, { duration: flipMs, easing: cubicOut });
   }
 
   /** Grid and list trade places by crossfading; the leaving one stops taking clicks. */
@@ -389,7 +483,6 @@
         toast(t("list.tagsDone", { count: result.updated.length }), "success");
       }
       tagDraft = "";
-      await reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("list.tagsFailed", { detail: errorMessage(e) }), "error");
@@ -418,7 +511,6 @@
     } else {
       toast(t("list.scheduled", { count: done }), "success");
     }
-    await reloadPages(true);
   }
 
   /* ---------------------------------------------------------------- context */
@@ -499,7 +591,6 @@
     try {
       await api.scheduleReview(id, minutes);
       toast(t("list.scheduled", { count: 1 }), "success");
-      await reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("list.scheduleFailed", { detail: errorMessage(e) }), "error");
@@ -522,28 +613,20 @@
     };
   }
 
-  /** Nearest card in a direction: along the sequence for left/right, by column across rows for up/down. */
-  function neighbour(cards: HTMLElement[], from: number, dir: "up" | "down" | "left" | "right"): HTMLElement | undefined {
-    if (dir === "left") return cards[from - 1];
-    if (dir === "right") return cards[from + 1];
-    const step = dir === "down" ? 1 : -1;
-    const here = cards[from].getBoundingClientRect();
-    const cx = here.left + here.width / 2;
-    let rowTop: number | null = null;
-    let best: HTMLElement | undefined;
-    let bestGap = Infinity;
-    for (let i = from + step; i >= 0 && i < cards.length; i += step) {
-      const r = cards[i].getBoundingClientRect();
-      if (Math.abs(r.top - here.top) < 4) continue;
-      if (rowTop === null) rowTop = r.top;
-      else if (Math.abs(r.top - rowTop) >= 4) break;
-      const gap = Math.abs(r.left + r.width / 2 - cx);
-      if (gap < bestGap) {
-        bestGap = gap;
-        best = cards[i];
-      }
-    }
-    return best;
+  /** Move focus to the card at `index`, scrolling its row into view and mounting it first when it is outside the window. */
+  async function focusCard(index: number) {
+    const pane = paneEl;
+    const id = pages[index]?.id;
+    if (!pane || !id) return;
+    readViewport();
+    const row = Math.floor(index / cols);
+    const top = gridTop + offsets[row];
+    const bottom = top + (heights[row] || estimate || 0);
+    if (top < pane.scrollTop + 8) pane.scrollTop = Math.max(0, top - 24);
+    else if (bottom > pane.scrollTop + pane.clientHeight) pane.scrollTop = bottom - pane.clientHeight + 24;
+    readViewport();
+    await tick();
+    gridEl?.querySelector<HTMLElement>(`[data-id="${CSS.escape(id)}"] .open-overlay`)?.focus();
   }
 
   /** Keys on a focused card: arrows move between cards, X selects, S schedules, Delete trashes. */
@@ -557,11 +640,9 @@
       | "right"
       | undefined;
     if (dir) {
-      const grid = (e.currentTarget as HTMLElement).parentElement;
-      const cards = [...(grid?.querySelectorAll<HTMLElement>(".open-overlay") ?? [])];
-      const next = neighbour(cards, cards.indexOf(target), dir);
       e.preventDefault();
-      next?.focus();
+      const next = stepIndex(pages.findIndex((q) => q.id === p.id), dir, cols, pages.length);
+      if (next !== null) void focusCard(next);
     } else if (e.key.toLowerCase() === "x" && !e.shiftKey) {
       e.preventDefault();
       toggleSelect(p.id, false);
@@ -595,7 +676,7 @@
   {#each markParts(text) as part, i (i)}{#if part.mark}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
 {/snippet}
 
-<section class="pane" aria-label={t("list.label")}>
+<section class="pane" aria-label={t("list.label")} bind:this={paneEl} onscroll={onPaneScroll}>
   <div class="inner">
     <header class="head">
       <div class="head-text">
@@ -769,16 +850,20 @@
         </div>
       </div>
     {:else}
-      <div class="stage">
+      <div class="stage" bind:this={stageEl}>
         {#key app.layout}
           <div
             class="grid"
+            bind:this={gridEl}
+            style:padding-top="{padTop}px"
+            style:padding-bottom="{padBottom}px"
             class:list={app.layout === "list"}
             class:selecting={selected.size > 0}
             in:swap
             out:swap
           >
             {#each shown as p, i (p.id)}
+              {@const index = range.first * cols + i}
               {@const due = dueInfo(p.nextReview)}
               {@const tone = dueTone(p.nextReview)}
               {@const selectedRow = selected.has(p.id)}
@@ -786,8 +871,10 @@
               <article
                 class="page"
                 class:selected={selectedRow}
-                use:enter={i}
-                animate:glide
+                use:enter={index}
+                aria-posinset={index + 1}
+                aria-setsize={pages.length}
+                data-id={p.id}
                 draggable="true"
                 ondragstart={(e) => onDragStart(e, p)}
                 oncontextmenu={(e) => openPageMenu(e, p)}
@@ -919,9 +1006,6 @@
           </div>
         {/key}
       </div>
-      {#if shown.length < pages.length}
-        <div class="more" bind:this={sentinel} aria-hidden="true"></div>
-      {/if}
     {/if}
 
     {#if selectedIds.length > 0}
@@ -1211,14 +1295,8 @@
     align-content: start;
   }
 
-  .more {
-    height: 1px;
-  }
   .page {
     position: relative;
-    /* Off-screen cards skip layout and paint. */
-    content-visibility: auto;
-    contain-intrinsic-size: auto 240px;
     display: flex;
     flex-direction: column;
     min-width: 0;

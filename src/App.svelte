@@ -3,7 +3,12 @@
   import { getCurrentWindow } from "@tauri-apps/api/window";
   import { listen } from "@tauri-apps/api/event";
   import { invoke } from "@tauri-apps/api/core";
-  import { app, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi, openPlantPath } from "./lib/state.svelte";
+  import { app, applyVaultEvent, pendingFiles, initApp, clearFilters, toggleSidebar, goView, openPage, reloadPages, toast, errorMessage, openAi, openPlantPath } from "./lib/state.svelte";
+  import {
+    loadGraphView, loadSettingsView, loadTrashView, loadPathView, loadAiPanel,
+    loadImportDialog, loadAiImportDialog, loadHealthDialog, loadPlantPathDialog,
+  } from "./lib/lazy";
+  import { isTypingTarget } from "./lib/typing";
   import { navigate } from "./lib/navigation.svelte";
   import { folderPickerState } from "./lib/folder-picker.svelte";
   import { api } from "./lib/api";
@@ -12,16 +17,8 @@
   import PageList from "./components/PageList.svelte";
   import ReviewView from "./components/ReviewView.svelte";
   import TodayView from "./components/TodayView.svelte";
-  import GraphView from "./components/GraphView.svelte";
-  import SettingsView from "./components/SettingsView.svelte";
-  import TrashView from "./components/TrashView.svelte";
-  import PathView from "./components/PathView.svelte";
   import ReadView from "./components/ReadView.svelte";
-  import ImportDialog from "./components/ImportDialog.svelte";
-  import AiImportDialog from "./components/AiImportDialog.svelte";
   import LookDialog from "./components/LookDialog.svelte";
-  import HealthDialog from "./components/HealthDialog.svelte";
-  import AiPanel from "./components/ai/AiPanel.svelte";
   import Thumbnailer from "./components/Thumbnailer.svelte";
   import Onboarding from "./components/Onboarding.svelte";
   import CommandPalette from "./components/CommandPalette.svelte";
@@ -29,13 +26,13 @@
   import Toasts from "./components/Toasts.svelte";
   import ConfirmDialog from "./components/ConfirmDialog.svelte";
   import ShortcutsDialog from "./components/ShortcutsDialog.svelte";
-  import PlantPathDialog from "./components/PlantPathDialog.svelte";
   import { confirmState } from "./lib/confirm.svelte";
   import Icon from "./lib/Icon.svelte";
   import Logo from "./lib/Logo.svelte";
   import { rafThrottle, reducedMotion } from "./lib/motion";
   import type { ShortcutContext } from "./lib/shortcuts";
   import type { CaptureOffer } from "./lib/types";
+  import type { VaultEvent } from "./lib/vault-events";
   import { t } from "./lib/i18n.svelte";
 
   let dragging = $state(false);
@@ -89,18 +86,6 @@
     app.importOpen = true;
   }
 
-  function isTyping(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    const tag = el.tagName;
-    return (
-      tag === "INPUT" ||
-      tag === "TEXTAREA" ||
-      tag === "SELECT" ||
-      el.isContentEditable
-    );
-  }
-
   function onKeydown(e: KeyboardEvent) {
     // A confirmation or folder chooser owns the keyboard until it settles.
     if (confirmState.pending || folderPickerState.pending) return;
@@ -142,7 +127,7 @@
       if (app.importOpen) return; // handled by the dialog
       if (app.readId) {
         // Leaving a field keeps the inspector draft; a second Escape closes.
-        if (isTyping(e.target)) {
+        if (isTypingTarget(e.target)) {
           (e.target as HTMLElement).blur();
           return;
         }
@@ -160,7 +145,7 @@
       return;
     }
 
-    if (isTyping(e.target) || e.defaultPrevented || e.repeat) return;
+    if (isTypingTarget(e.target) || e.defaultPrevented || e.repeat) return;
     // Single-key shortcuts never act behind an open dialog.
     if (document.querySelector('[aria-modal="true"]')) return;
 
@@ -329,6 +314,8 @@
     // Quick capture: pages saved from outside the window, and offers from
     // the Downloads and clipboard watchers.
     keep(listen("vault-changed", () => void reloadPages(true)));
+    // Changes this process made, pushed by the backend: patch the lists in place.
+    keep(listen<VaultEvent>("vault-event", (event) => applyVaultEvent(event.payload)));
     keep(
       listen<CaptureOffer>("download-offer", (event) => {
         const offer = event.payload;
@@ -429,16 +416,16 @@
       {:else if app.view === "today"}
         <TodayView />
       {:else if app.view === "graph"}
-        <GraphView />
+        {#await loadGraphView() then View}<View />{/await}
       {:else if app.view === "review"}
         <ReviewView />
       {:else if app.view === "settings"}
-        <SettingsView />
+        {#await loadSettingsView() then View}<View />{/await}
       {:else if app.view === "trash"}
-        <TrashView />
+        {#await loadTrashView() then View}<View />{/await}
       {:else if app.view === "path"}
         {#key app.pathView}
-          <PathView />
+          {#await loadPathView() then View}<View />{/await}
         {/key}
       {:else}
         <PageList />
@@ -454,7 +441,7 @@
   <Thumbnailer />
 {/if}
 {#if app.healthOpen}
-  <HealthDialog />
+  {#await loadHealthDialog() then Dialog}<Dialog />{/await}
 {/if}
 {#if app.lookEdit}
   {#key app.lookEdit}
@@ -463,23 +450,23 @@
 {/if}
 {#if app.ai}
   <div inert={app.paletteOpen || !!confirmState.pending}>
-    <AiPanel start={app.ai} />
+    {#await loadAiPanel() then Panel}<Panel start={app.ai} />{/await}
   </div>
 {/if}
 {#if app.aiImportOpen}
   <div inert={app.paletteOpen || !!confirmState.pending}>
-    <AiImportDialog />
+    {#await loadAiImportDialog() then Dialog}<Dialog />{/await}
   </div>
 {/if}
 {#if app.importOpen}
   <div inert={app.paletteOpen || shortcutsOpen || !!confirmState.pending || !!folderPickerState.pending}>
-    <ImportDialog />
+    {#await loadImportDialog() then Dialog}<Dialog />{/await}
   </div>
 {/if}
 
 {#if app.plant}
   <div inert={app.paletteOpen || !!confirmState.pending || !!folderPickerState.pending}>
-    <PlantPathDialog />
+    {#await loadPlantPathDialog() then Dialog}<Dialog />{/await}
   </div>
 {/if}
 

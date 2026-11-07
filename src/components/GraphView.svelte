@@ -7,7 +7,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from "svelte";
   import { api } from "../lib/api";
-  import { app, errorMessage, openPage } from "../lib/state.svelte";
+  import { app, errorMessage, onPageEvents, openPage } from "../lib/state.svelte";
   import { t } from "../lib/i18n.svelte";
   import { folderLook } from "../lib/appearance";
   import { Simulation, groupAnchors, seedPosition, type SimNode } from "../lib/graph-sim";
@@ -1002,10 +1002,22 @@
     // Wait for the theme's tokens to land on the page.
     requestAnimationFrame(() => readColors());
   });
+  // Reload when a rescan found changes, and shortly after pages change here
+  // (a burst of edits rebuilds the graph once).
   $effect(() => {
     void app.vaultRevision;
-    void app.library.length;
     void load();
+  });
+  $effect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const off = onPageEvents(() => {
+      clearTimeout(timer);
+      timer = setTimeout(() => void load(), 600);
+    });
+    return () => {
+      off();
+      clearTimeout(timer);
+    };
   });
 
   let observer: ResizeObserver | null = null;

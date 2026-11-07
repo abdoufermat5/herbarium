@@ -33,7 +33,7 @@ fn load_settings(vault: &Path) -> NetworkSettings {
         return NetworkSettings::default();
     };
     serde_json::from_str(&raw).unwrap_or_else(|e| {
-        eprintln!("herbarium: ignoring invalid {}: {e}", path.display());
+        tracing::warn!("ignoring invalid {}: {e}", path.display());
         NetworkSettings::default()
     })
 }

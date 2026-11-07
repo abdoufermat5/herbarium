@@ -8,7 +8,6 @@
     dueLabel,
     errorMessage,
     toast,
-    reloadPages,
     rescanVault,
     openPage,
     openPathView,
@@ -24,10 +23,11 @@
     duplicatePage,
     openAi,
     switchVault,
+    readerActions,
   } from "../lib/state.svelte";
+  import { topN } from "../lib/collate";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { api } from "../lib/api";
-  import { confirmAction } from "../lib/confirm.svelte";
   import { currentEditor, loadEditors } from "../lib/editors.svelte";
   import { fmtDuration, modKey, vaultLabels, vaultName } from "../lib/format";
   import { pathGrowth } from "../lib/grove";
@@ -137,41 +137,10 @@
     }
   }
 
-  /** Whether the page saved anything (its `ext.storage` has at least one key). */
-  function hasStoredData(meta: PageMeta): boolean {
-    const raw = (meta.ext as Record<string, unknown> | undefined)?.["storage"];
-    if (!raw || typeof raw !== "object") return false;
-    for (const area of ["local", "personal", "shared"]) {
-      const map = (raw as Record<string, unknown>)[area];
-      if (map && typeof map === "object" && Object.keys(map).length > 0) return true;
-    }
-    return false;
-  }
-
-  async function resetStorage(page: PageMeta) {
-    const ok = await confirmAction({
-      title: t("read.resetStorageTitle"),
-      message: t("read.resetStorageMessage"),
-      confirmLabel: t("read.resetStorageConfirm"),
-      danger: true,
-    });
-    if (!ok) return;
-    try {
-      await api.clearStorage(page.id);
-      // The reader watches `vaultRevision`; it reloads the open frame with the
-      // cleared state on the next refresh.
-      app.vaultRevision++;
-      toast(t("read.resetDone"), "success");
-    } catch (e) {
-      toast(`${t("read.resetFailed")}: ${errorMessage(e)}`, "error");
-    }
-  }
-
   async function gradePage(page: PageMeta, grade: ReviewGrade) {
     try {
       const meta = await api.completeReview(page.id, grade);
       toast(t("toast.reviewed", { when: fmtDuration(meta.intervalMinutes ?? 1) }), "success");
-      void reloadPages(true);
     } catch (e) {
       console.error(e);
       toast(t("read.scheduleFailed"), "error");
@@ -425,13 +394,14 @@
           run: () => deletePages([page.id]),
         },
       );
-      if (hasStoredData(page)) {
+      if (app.readId === page.id && app.readStorageKeys > 0 && readerActions.resetStorage) {
+        const reset = readerActions.resetStorage;
         list.push({
           key: "page-reset-storage",
           group: pg,
           label: t("palette.resetStorage"),
           icon: "trash-2",
-          run: () => resetStorage(page),
+          run: () => void reset(),
         });
       }
     }
@@ -444,9 +414,7 @@
       ? results.query === query
         ? results.hits
         : []
-      : [...app.library]
-          .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
-          .slice(0, 8);
+      : topN(app.library, 8, (a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     return source.map((p) => ({
       key: `page-${p.id}`,
       group: t("palette.pages"),
