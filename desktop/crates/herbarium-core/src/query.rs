@@ -144,6 +144,44 @@ impl Query {
         !self.filters.is_empty()
     }
 
+    /// The first positive `folder:` and `tag:` filters, if any. These are the
+    /// only filters that can be pushed into SQL; negated filters and any
+    /// filter beyond the first of each kind are left to `matches`.
+    pub fn sql_filters(&self) -> (Option<String>, Option<String>) {
+        let mut folder = None;
+        let mut tag = None;
+        for (negated, filter) in &self.filters {
+            if *negated {
+                continue;
+            }
+            match filter {
+                Filter::Folder(f) if folder.is_none() => folder = Some(f.clone()),
+                Filter::Tag(t) if tag.is_none() => tag = Some(t.clone()),
+                _ => {}
+            }
+        }
+        (folder, tag)
+    }
+
+    /// Whether any filter must still be applied in Rust after the SQL query:
+    /// negated filters, non-folder/tag filters (`tool:`, `is:`, `has:`, date
+    /// ranges), or more than one positive `folder:`/`tag:` filter.
+    pub fn needs_rust_filtering(&self) -> bool {
+        let mut folders = 0;
+        let mut tags = 0;
+        for (negated, filter) in &self.filters {
+            if *negated {
+                return true;
+            }
+            match filter {
+                Filter::Folder(_) => folders += 1,
+                Filter::Tag(_) => tags += 1,
+                _ => return true,
+            }
+        }
+        folders > 1 || tags > 1
+    }
+
     /// Whether `meta` passes every filter at time `now` (unix ms).
     pub fn matches(&self, meta: &PageMeta, now: i64) -> bool {
         self.filters

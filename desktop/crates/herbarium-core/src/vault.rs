@@ -163,7 +163,61 @@ pub fn meta_path(vault: &Path, id: &str, folder: Option<&str>) -> PathBuf {
 }
 
 /// Write both files of a page (html first, then sidecar meta JSON, using write_atomic).
+///
+/// Crash safety: the html goes first. A crash before the sidecar lands leaves
+/// the new html next to the old sidecar; the rescan sees the html changed and
+/// re-derives title, text and `updatedAt` from it, while everything the user
+/// set (tags, folder, schedule) lives in the untouched sidecar. For a new page
+/// (`create_page`) the same order leaves a bare html file, which the rescan
+/// adopts like any file dropped into the vault.
 pub fn write_page(vault: &Path, meta: &PageMeta, html: &str) -> VaultResult<()> {
+    let hp = checked_page_path(vault, meta)?;
+    write_atomic(&hp, html.as_bytes())?;
+    write_meta(vault, meta)?;
+    Ok(())
+}
+
+/// Create a brand-new page under `meta.id`, or, if a file with that id turns
+/// up on disk meanwhile (another process, a folder the index does not know),
+/// under the next free `<id>-N`; `meta.id` is updated to the id used. The
+/// exclusive create means an existing page is never overwritten.
+pub fn create_page(store: &Store, meta: &mut PageMeta, html: &str) -> VaultResult<()> {
+    let base = meta.id.clone();
+    let mut n = 1;
+    loop {
+        match try_create_page(&store.vault, meta, html) {
+            Err(CreateError::PageExists) => {
+                n += 1;
+                meta.id = format!("{base}-{n}");
+                while !is_id_available(store, &meta.id) {
+                    n += 1;
+                    meta.id = format!("{base}-{n}");
+                }
+            }
+            Err(CreateError::Other(e)) => return Err(e),
+            Ok(()) => return Ok(()),
+        }
+    }
+}
+
+fn try_create_page(vault: &Path, meta: &PageMeta, html: &str) -> Result<(), CreateError> {
+    let hp = checked_page_path(vault, meta).map_err(CreateError::Other)?;
+    write_new_file(&hp, html.as_bytes())?;
+    if let Err(e) = write_meta(vault, meta) {
+        let _ = fs::remove_file(&hp);
+        return Err(CreateError::Other(e));
+    }
+    Ok(())
+}
+
+enum CreateError {
+    /// A page file with this id is already on disk.
+    PageExists,
+    Other(String),
+}
+
+/// Validate the target folder and return the page's html path.
+fn checked_page_path(vault: &Path, meta: &PageMeta) -> VaultResult<PathBuf> {
     let dir = dir_for(vault, meta.folder.as_deref());
     let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
     if !is_within_vault(&dir, &vault_canonical) {
@@ -177,9 +231,54 @@ pub fn write_page(vault: &Path, meta: &PageMeta, html: &str) -> VaultResult<()> 
     if hp.exists() && !is_within_vault(&hp, &vault_canonical) {
         return Err("file escapes vault".to_string());
     }
-    write_atomic(&hp, html.as_bytes())?;
-    write_meta(vault, meta)?;
-    Ok(())
+    Ok(hp)
+}
+
+/// Write `bytes` to `path` only if nothing is there yet. The content is
+/// fsynced under a temp name and hard-linked into place (atomic and
+/// exclusive, no empty-file window); filesystems without hard links fall back
+/// to an `O_EXCL` claim followed by an atomic rename over our own empty file.
+fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), CreateError> {
+    use std::io::Write;
+    let other =
+        |e: std::io::Error| CreateError::Other(format!("cannot create {}: {e}", path.display()));
+    let temp = path.with_file_name(format!(
+        ".{}.tmp-{}",
+        path.file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default(),
+        uuid::Uuid::new_v4()
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(other)?;
+    let staged = file.write_all(bytes).and_then(|()| file.sync_all());
+    drop(file);
+    let result = staged
+        .map_err(other)
+        .and_then(|()| match fs::hard_link(&temp, path) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => Err(CreateError::PageExists),
+            Err(_) => match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(path)
+            {
+                Ok(claim) => {
+                    drop(claim);
+                    fs::rename(&temp, path).map_err(|e| {
+                        let _ = fs::remove_file(path);
+                        other(e)
+                    })
+                }
+                Err(e) if e.kind() == ErrorKind::AlreadyExists => Err(CreateError::PageExists),
+                Err(e) => Err(other(e)),
+            },
+        });
+    let _ = fs::remove_file(&temp);
+    result
 }
 
 /// Write only the sidecar meta JSON using write_atomic.
@@ -381,6 +480,9 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
     let mut indexed_count = 0usize;
     let mut skipped = Vec::new();
 
+    // Only pages already indexed before the walk can be judged "gone": a page
+    // another process creates mid-walk is in neither the snapshot nor `keep`.
+    let indexed_before = store.ids().map_err(|e| e.to_string())?;
     let (mut html_files, skipped_dirs) = walk_html(&store.vault)?;
     if !skipped_dirs.is_empty() {
         eprintln!("herbarium: skipped hidden dirs {skipped_dirs:?}");
@@ -536,7 +638,9 @@ pub fn index_vault(store: &Store) -> VaultResult<IndexOutcome> {
         indexed_count += 1;
     }
 
-    let removed = store.remove_all_except(&keep).map_err(|e| e.to_string())?;
+    let removed = store
+        .remove_missing(&indexed_before, &keep)
+        .map_err(|e| e.to_string())?;
     store.set_synced_at();
     Ok(IndexOutcome {
         indexed: indexed_count,
@@ -1565,38 +1669,13 @@ pub fn slugify(title: &str) -> String {
     }
 }
 
+/// Whether `id` already names a file in the vault root. Pages in folders are
+/// found through the index (`is_id_available`); the exclusive create in
+/// `create_page` is the final arbiter for anything this misses.
 fn id_exists_on_disk(vault: &Path, id: &str) -> bool {
-    let vault_canonical = vault.canonicalize().unwrap_or_else(|_| vault.to_path_buf());
-    fn check_dir(dir: &Path, id: &str, vault_canonical: &Path) -> bool {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                let name = entry.file_name().to_string_lossy().into_owned();
-                let ft = match entry.file_type() {
-                    Ok(ft) => ft,
-                    Err(_) => continue,
-                };
-                if ft.is_symlink() && !is_within_vault(&path, vault_canonical) {
-                    continue;
-                }
-                if ft.is_symlink() && path.is_dir() {
-                    continue;
-                }
-                if ft.is_dir() {
-                    if !name.starts_with('.')
-                        && is_within_vault(&path, vault_canonical)
-                        && check_dir(&path, id, vault_canonical)
-                    {
-                        return true;
-                    }
-                } else if name == format!("{id}.html") || name == format!("{id}.json") {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    check_dir(vault, id, &vault_canonical)
+    ["html", "json"]
+        .iter()
+        .any(|ext| fs::symlink_metadata(vault.join(format!("{id}.{ext}"))).is_ok())
 }
 
 fn is_id_available(store: &Store, id: &str) -> bool {
@@ -1612,10 +1691,7 @@ fn is_id_available(store: &Store, id: &str) -> bool {
     {
         return false;
     }
-    if id_exists_on_disk(&store.vault, id) {
-        return false;
-    }
-    true
+    !id_exists_on_disk(&store.vault, id)
 }
 
 pub fn new_page_id(store: &Store, title: &str) -> String {

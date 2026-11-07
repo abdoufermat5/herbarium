@@ -68,7 +68,71 @@ impl PageMeta {
     }
 }
 
+/// `ext` keys a list view reads: the icon (`look`), the origin tool (`source`)
+/// and the review memory state behind the vitality leaf (`review`).
+const SUMMARY_EXT_KEYS: [&str; 3] = [LOOK_KEY, SOURCE_KEY, "review"];
+
 impl PageMeta {
+    /// The same metadata with `ext` cut down to what list views draw, so a
+    /// list stays small however much a page stores: no highlights, page
+    /// state, source prompt or per-day review counts. The review `log` is
+    /// dropped too (use [`PageMeta::review_summary`] where it is shown).
+    pub fn summary(&self) -> PageMeta {
+        self.project(false)
+    }
+
+    /// Like [`PageMeta::summary`] but keeps the review `log` that the review
+    /// queue lists per page.
+    pub fn review_summary(&self) -> PageMeta {
+        self.project(true)
+    }
+
+    fn project(&self, keep_review_log: bool) -> PageMeta {
+        let mut out = self.clone_without_ext();
+        for key in SUMMARY_EXT_KEYS {
+            let Some(value) = self.ext.get(key) else {
+                continue;
+            };
+            let value = match (key, value) {
+                (SOURCE_KEY, Value::Object(o)) => Value::Object(
+                    o.iter()
+                        .filter(|(k, _)| *k != "prompt")
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                ),
+                ("review", Value::Object(o)) => Value::Object(
+                    o.iter()
+                        .filter(|(k, _)| *k != "days" && (keep_review_log || *k != "log"))
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                ),
+                _ => value.clone(),
+            };
+            out.ext.insert(key.into(), value);
+        }
+        out
+    }
+
+    fn clone_without_ext(&self) -> PageMeta {
+        PageMeta {
+            schema_version: self.schema_version,
+            id: self.id.clone(),
+            title: self.title.clone(),
+            source_title: self.source_title.clone(),
+            tags: self.tags.clone(),
+            folder: self.folder.clone(),
+            note: self.note.clone(),
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+            interval_minutes: self.interval_minutes,
+            legacy_interval_days: None,
+            next_review: self.next_review,
+            last_review: self.last_review,
+            allow_cdn: self.allow_cdn,
+            ext: BTreeMap::new(),
+        }
+    }
+
     /// Bring metadata read from an older sidecar up to the current schema.
     pub(crate) fn upgrade(&mut self) {
         if let Some(days) = self.legacy_interval_days.take() {
@@ -290,4 +354,43 @@ pub struct IndexReport {
     pub removed: usize,
     pub total: usize,
     pub skipped: Vec<SkippedFile>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn summary_keeps_list_keys_and_drops_the_bulk() {
+        let mut meta = PageMeta::new("p".into());
+        meta.title = "T".into();
+        meta.ext.insert("look".into(), json!({ "icon": "x" }));
+        meta.ext.insert(
+            "source".into(),
+            json!({ "tool": "Claude", "url": "https://a.b", "prompt": "long" }),
+        );
+        meta.ext.insert(
+            "review".into(),
+            json!({ "count": 2, "log": [{ "at": 1 }], "days": { "1": 1 }, "stability": 3.0 }),
+        );
+        meta.ext
+            .insert("highlights".into(), json!([{ "text": "h" }]));
+        meta.ext
+            .insert("storage".into(), json!({ "local": { "k": "v" } }));
+
+        let s = meta.summary();
+        assert_eq!(s.title, "T");
+        assert_eq!(s.ext["look"], json!({ "icon": "x" }));
+        assert_eq!(
+            s.ext["source"],
+            json!({ "tool": "Claude", "url": "https://a.b" })
+        );
+        assert_eq!(s.ext["review"], json!({ "count": 2, "stability": 3.0 }));
+        assert!(!s.ext.contains_key("highlights") && !s.ext.contains_key("storage"));
+
+        let q = meta.review_summary();
+        assert_eq!(q.ext["review"]["log"], json!([{ "at": 1 }]));
+        assert!(q.ext["review"].get("days").is_none());
+    }
 }

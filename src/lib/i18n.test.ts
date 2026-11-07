@@ -12,25 +12,25 @@ describe("locale selection", () => {
     expect(systemLocale([])).toBe("en");
   });
 
-  it("changes document language and persists an explicit choice across toggles", () => {
+  it("changes document language and persists an explicit choice across toggles", async () => {
     const values = new Map<string, string>();
     const root = { lang: "" };
     vi.stubGlobal("document", { documentElement: root });
     vi.stubGlobal("localStorage", { setItem: (key: string, value: string) => values.set(key, value) });
-    setLocale("fr");
+    await setLocale("fr");
     expect(i18n.locale).toBe("fr");
     expect(root.lang).toBe("fr");
     expect(values.get("herbarium.locale")).toBe("fr");
-    toggleLocale();
+    await toggleLocale();
     expect(i18n.locale).toBe("en");
     expect(root.lang).toBe("en");
     expect(values.get("herbarium.locale")).toBe("en");
   });
 
-  it("retains a usable locale if preference storage refuses writes", () => {
+  it("retains a usable locale if preference storage refuses writes", async () => {
     vi.stubGlobal("document", { documentElement: { lang: "" } });
     vi.stubGlobal("localStorage", { setItem: () => { throw new Error("storage denied"); } });
-    setLocale("fr");
+    await setLocale("fr");
     expect(i18n.locale).toBe("fr");
     const message = t("edit.shortcut", { key: "⌘S" });
     expect(message).toContain("⌘S");

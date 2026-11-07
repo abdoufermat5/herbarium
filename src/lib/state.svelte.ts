@@ -2,13 +2,15 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api } from "./api";
 import { confirmAction } from "./confirm.svelte";
 import { pickFolder } from "./folder-picker.svelte";
-import { i18n, t, LOCALES } from "./i18n.svelte";
+import { compareTitles } from "./collate";
+import { t } from "./i18n.svelte";
 import { navigate } from "./navigation.svelte";
 import { dateFormat } from "./format";
 import { transition } from "./motion";
 import { notifyDue } from "./notifier";
 import { prefs } from "./prefs.svelte";
 import { vitality, type VitalityLevel } from "./vitality";
+import { affectsReviewQueue, applyPageEvents, introducesFolder, isPageEvent, tagCounts, type PageEvent, type VaultEvent } from "./vault-events";
 import type {
   BulkError,
   BulkUpdateResult,
@@ -178,6 +180,13 @@ function storedSidebar(): boolean {
 
 const initialThemeChoice = storedThemeChoice();
 
+// The big collections are replaced, never mutated: `$state.raw` keeps Svelte
+// from deep-proxying every page. `library` and `pages` also share one array
+// (and so one identity) when no search is active.
+let libraryRaw = $state.raw<PageMeta[]>([]);
+let pagesRaw = $state.raw<PageMeta[]>([]);
+let previewsRaw = $state.raw<Record<string, PreviewDigest>>({});
+
 export const app: AppState = $state({
   initialized: false,
   initError: null,
@@ -185,10 +194,20 @@ export const app: AppState = $state({
   reviewError: null,
   config: null,
   view: "list",
-  pages: [],
+  get pages() {
+    return pagesRaw;
+  },
+  set pages(value: PageMeta[]) {
+    pagesRaw = value;
+  },
   folders: [],
   tags: [],
-  library: [],
+  get library() {
+    return libraryRaw;
+  },
+  set library(value: PageMeta[]) {
+    libraryRaw = value;
+  },
   vaultRevision: 0,
   sidebarOpen: storedSidebar(),
   dueCount: 0,
@@ -210,7 +229,12 @@ export const app: AppState = $state({
   paths: [],
   pathProgress: {},
   appearance: { folders: {}, tags: {} },
-  previews: {},
+  get previews() {
+    return previewsRaw;
+  },
+  set previews(value: Record<string, PreviewDigest>) {
+    previewsRaw = value;
+  },
   pathId: null,
   pathView: null,
   plant: null,
@@ -365,6 +389,9 @@ function openSidebar() {
 }
 
 let refreshSeq = 0;
+/** Page events applied so far, and when the last full refresh finished. */
+let eventCount = 0;
+let lastRefresh = 0;
 
 /**
  * Reload folders, tags, the whole library, the review queue/stats and the
@@ -375,6 +402,7 @@ let refreshSeq = 0;
  */
 export async function refreshAll(): Promise<PageMeta[] | null> {
   const seq = ++refreshSeq;
+  const eventsAtStart = eventCount;
   const [tags, folders, due, library, settings, stats, proposals, searches, paths, looks, progress] = await Promise.allSettled([
     api.tags(),
     api.folders(),
@@ -431,7 +459,12 @@ export async function refreshAll(): Promise<PageMeta[] | null> {
     return null;
   }
   app.library = library.value;
+  // Without a search the list is the library; a search keeps its own hits.
+  if (!app.search.trim()) app.pages = library.value;
   armDueTimer(library.value);
+  lastRefresh = Date.now();
+  // A page changed while this fetch was in flight: it may predate that change.
+  if (eventCount !== eventsAtStart) scheduleRefresh();
   return library.value;
 }
 
@@ -498,6 +531,133 @@ export async function saveReviewSettings(next: ReviewSettings) {
   }
 }
 
+
+/* ------------------------------------------------------- backend push events */
+
+interface Debounced {
+  (): void;
+  cancel(): void;
+}
+
+function debounced(run: () => void, ms: number): Debounced {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const call = (() => {
+    clearTimeout(timer);
+    timer = setTimeout(run, ms);
+  }) as Debounced;
+  call.cancel = () => clearTimeout(timer);
+  return call;
+}
+
+/** Everything but the page list, for when only aggregates went stale. */
+const scheduleRefresh = debounced(() => void refreshAll(), 400);
+/** The vault changed under the lists (a rescan found changes, a folder was
+ *  renamed…): readers refetch, lists reload. */
+export const scheduleReindexed = debounced(() => {
+  app.vaultRevision++;
+  void reloadPages(true);
+}, 250);
+const scheduleStats = debounced(() => void refreshStats(), 300);
+const scheduleFolders = debounced(() => void refreshFolders(), 300);
+const scheduleProposals = debounced(() => void refreshProposals(), 300);
+const scheduleSearch = debounced(() => void searchLibrary(), 300);
+const flushEvents = debounced(applyPendingEvents, 30);
+
+let pendingEvents: PageEvent[] = [];
+const vaultListeners = new Set<(events: PageEvent[]) => void>();
+
+/** Call `listener` with each batch of page events once applied to the lists
+ *  (readers of one page watch for external edits this way). Returns the unsubscribe. */
+export function onPageEvents(listener: (events: PageEvent[]) => void): () => void {
+  vaultListeners.add(listener);
+  return () => vaultListeners.delete(listener);
+}
+
+async function refreshStats() {
+  try {
+    const stats = await api.reviewStats();
+    app.reviewStats = stats;
+    app.dueCount = stats.dueTotal;
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function refreshFolders() {
+  try {
+    app.folders = await api.folders();
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+async function refreshProposals() {
+  try {
+    const list = await api.listProposals();
+    app.proposals = list;
+    announceProposals(list);
+  } catch (e) {
+    console.error(e);
+  }
+}
+
+/**
+ * Apply a `vault-event` pushed by the backend. Page events patch the lists
+ * (batched, so a bulk edit renders once); the aggregates they cannot update
+ * locally are refreshed on a debounce; everything else falls back to a reload.
+ */
+export function applyVaultEvent(event: VaultEvent) {
+  if (!app.config?.vaultPath) return;
+  if (isPageEvent(event)) {
+    pendingEvents.push(event);
+    flushEvents();
+  } else if (event.kind === "vault.indexed") {
+    if (event.report && (event.report.indexed > 0 || event.report.removed > 0)) scheduleReindexed();
+  } else if (event.kind === "proposal.created" || event.kind === "proposal.resolved") {
+    scheduleProposals();
+  }
+}
+
+function applyPendingEvents() {
+  const events = pendingEvents;
+  pendingEvents = [];
+  if (events.length === 0 || !app.config?.vaultPath) return;
+  eventCount += events.length;
+
+  const before = new Map(libraryRaw.map((p) => [p.id, p]));
+  const next = applyPageEvents(libraryRaw, events, true);
+  if (next !== libraryRaw) {
+    const searching = app.search.trim() !== "";
+    app.library = next;
+    if (searching) {
+      app.pages = applyPageEvents(pagesRaw, events, false);
+      scheduleSearch();
+    } else {
+      app.pages = next;
+    }
+    app.tags = tagCounts(next);
+    armDueTimer(next);
+  }
+  if (events.some((e) => affectsReviewQueue(before.get(e.meta.id), e))) scheduleStats();
+  if (events.some((e) => introducesFolder(app.folders, e))) scheduleFolders();
+  for (const event of events) {
+    if (event.kind === "page.deleted") dropPreview(event.meta.id);
+  }
+  for (const listener of vaultListeners) listener(events);
+}
+
+/** Forget a page's preview so the thumbnailer makes a fresh one. */
+function dropPreview(id: string) {
+  if (!(id in previewsRaw)) return;
+  const { [id]: _gone, ...rest } = previewsRaw;
+  app.previews = rest;
+}
+
+/** Add or replace previews without rebuilding the whole map's consumers' inputs. */
+export function mergePreviews(digests: Record<string, PreviewDigest>) {
+  app.previews = { ...previewsRaw, ...digests };
+}
+
 let reloadSeq = 0;
 
 /**
@@ -553,24 +713,29 @@ export async function searchLibrary() {
 
 /** Pick up changes made while the window was in the background (agents over
  *  MCP, edits or sync tools touching the vault folder). */
+const RESYNC_MIN_MS = 2000;
+let lastResync = 0;
+
 async function resync() {
   if (!prefs.refreshOnFocus || !app.config?.vaultPath || app.busy) return;
+  // Alt-tabbing back is frequent: rescan at most once in a while.
+  const now = Date.now();
+  if (now - lastResync < RESYNC_MIN_MS) return;
+  lastResync = now;
   try {
     const report = await api.rescan();
     if (report.skipped.length > 0) console.warn("rescan skipped files", report.skipped);
+    // Only a rescan that found something is worth refetching for.
+    if (report.indexed > 0 || report.removed > 0) scheduleReindexed();
   } catch (e) {
     console.error(e);
-    return;
   }
-  app.vaultRevision++;
-  await reloadPages(true);
 }
 
 /** Re-read the vault from disk now and refresh every list. */
 export async function rescanVault() {
   const report = await api.rescan();
-  app.vaultRevision++;
-  await reloadPages(true);
+  if (report.indexed > 0 || report.removed > 0) scheduleReindexed();
   return report;
 }
 
@@ -579,6 +744,10 @@ export function resetWorkspace() {
   reloadSeq++;
   refreshSeq++;
   clearTimeout(dueTimer);
+  for (const timer of [scheduleRefresh, scheduleReindexed, scheduleStats, scheduleFolders, scheduleProposals, scheduleSearch, flushEvents]) {
+    timer.cancel();
+  }
+  pendingEvents = [];
   app.pages = [];
   app.library = [];
   app.folders = [];
@@ -660,8 +829,11 @@ export async function initApp() {
       backgroundStarted = true;
       window.addEventListener("focus", () => void resync());
       // Reviews can be minutes long: keep the "due" badge current while the window sits open.
+      // Pushed events cover this process's edits; the poll catches other processes' writes.
       setInterval(() => {
-        if (app.config?.vaultPath && !app.busy) void refreshAll();
+        if (!app.config?.vaultPath || app.busy || document.hidden) return;
+        if (Date.now() - lastRefresh < POLL_MS - 5000) return;
+        void refreshAll();
       }, POLL_MS);
     }
   }
@@ -684,12 +856,11 @@ export function visiblePages(pages: PageMeta[]): PageMeta[] {
   if (app.sort === "relevance" && app.search.trim()) return [...list];
   const sorted = [...list];
   switch (app.sort) {
-    case "title":
-      sorted.sort((a, b) => (a.title || t("common.untitled")).localeCompare(
-          b.title || t("common.untitled"),
-          LOCALES[i18n.locale].bcp47,
-        ));
+    case "title": {
+      const untitled = t("common.untitled");
+      sorted.sort((a, b) => compareTitles(a.title || untitled, b.title || untitled));
       break;
+    }
     case "review":
       sorted.sort((a, b) => (a.nextReview ?? Infinity) - (b.nextReview ?? Infinity));
       break;
@@ -787,7 +958,7 @@ export function goAll(): Promise<boolean> {
       clearFilters();
       app.search = "";
     },
-    () => (hadSearch ? reloadPages(true) : Promise.resolve()),
+    () => (hadSearch ? searchLibrary() : Promise.resolve()),
   );
 }
 
@@ -910,7 +1081,7 @@ export function runSearch(query: string): Promise<boolean> {
       clearFilters();
       app.search = query;
     },
-    () => reloadPages(true),
+    () => searchLibrary(),
   );
 }
 
@@ -1163,7 +1334,7 @@ export async function nextReviewPage(skipId?: string): Promise<boolean> {
 /* ------------------------------------------------------------- page actions */
 
 function titleOf(id: string): string {
-  const meta = app.library.find((p) => p.id === id) ?? app.pages.find((p) => p.id === id);
+  const meta = app.library.find((p) => p.id === id);
   return meta?.title || t("common.untitled");
 }
 
@@ -1197,7 +1368,6 @@ export async function movePages(ids: string[]): Promise<BulkUpdateResult | null>
     } else {
       toast(t("toast.moved", { count: done }), "success");
     }
-    await reloadPages(true);
     return result;
   } catch (e) {
     console.error(e);
@@ -1219,7 +1389,6 @@ async function restoreTrashed(ids: string[]) {
   }
   if (restored.length > 0) toast(t("toast.restored", { count: restored.length }), "success");
   if (errors.length > 0) toast(t("toast.restoreFailed", { detail: failureDetail(errors) }), "error");
-  await reloadPages(true);
 }
 
 /**
@@ -1229,7 +1398,7 @@ async function restoreTrashed(ids: string[]) {
  */
 export async function deletePages(ids: string[]): Promise<string[]> {
   if (ids.length === 0) return [];
-  const single = ids.length === 1 ? (app.library.find((p) => p.id === ids[0]) ?? app.pages.find((p) => p.id === ids[0])) : undefined;
+  const single = ids.length === 1 ? app.library.find((p) => p.id === ids[0]) : undefined;
   const confirmed = await confirmAction({
     title: t("confirm.trash.title", { count: ids.length }),
     message: t("confirm.trash.message"),
@@ -1277,7 +1446,6 @@ export async function deletePages(ids: string[]): Promise<string[]> {
       run: () => void restoreTrashed(restorable),
     });
   }
-  await reloadPages(true);
   return trashed;
 }
 
@@ -1286,7 +1454,6 @@ export async function duplicatePage(id: string): Promise<PageMeta | null> {
   try {
     const copy = await api.duplicatePage(id);
     toast(t("toast.duplicated", { title: copy.title || t("common.untitled") }), "success");
-    await reloadPages(true);
     return copy;
   } catch (e) {
     console.error(e);

@@ -12,6 +12,7 @@
     recordGrade,
     fmtClock,
     reloadPages,
+    onPageEvents,
     toast,
     errorMessage,
     deletePages,
@@ -28,6 +29,7 @@
   } from "../lib/state.svelte";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
+  import { isTypingTarget } from "../lib/typing";
   import { treeStage } from "../lib/tree";
   import PathTree from "./PathTree.svelte";
   import { registerLeaveGuard } from "../lib/navigation.svelte";
@@ -98,18 +100,6 @@
 
   function storageCount(state: PageStorage): number {
     return STORAGE_AREAS.reduce((n, area) => n + Object.keys(state[area]).length, 0);
-  }
-
-  /** Canonical form of the saved state, so writes only reload when values differ. */
-  function storageSignature(meta: PageMeta): string {
-    const state = storageOf(meta);
-    return JSON.stringify(
-      STORAGE_AREAS.map((area) =>
-        Object.keys(state[area])
-          .sort()
-          .map((key) => [key, state[area][key]]),
-      ),
-    );
   }
 
   /** Metadata comparison that ignores the page's saved state. */
@@ -727,7 +717,6 @@
         p.meta.allowCdn ? t("read.netEnabled") : t("read.netDisabled"),
         "success",
       );
-      void reloadPages();
     } catch (e) {
       toast(`${t("read.netFailed")} ${errorMessage(e)}`, "error");
     }
@@ -747,7 +736,6 @@
     try {
       p.meta = await api.setPageIcon(p.meta.id, icon);
       baseUpdatedAt = p.meta.updatedAt;
-      void reloadPages(true);
     } catch (e) {
       toast(`${t("look.failed")}: ${errorMessage(e)}`, "error");
     }
@@ -861,7 +849,6 @@
     try {
       await api.inlineAssets(p.meta.id);
       await load();
-      void reloadPages(true);
       toast(t("health.inlined"), "success");
     } catch (e) {
       toast(`${t("health.fixFailed")}: ${errorMessage(e)}`, "error");
@@ -999,7 +986,6 @@
       await flushStorage();
       previewNonce++;
       toast(t("edit.saved"), "success");
-      void reloadPages(true);
     } catch (e) {
       const msg = errorMessage(e);
       if (isConflict(msg)) conflict = { kind: "source" };
@@ -1037,7 +1023,6 @@
       if (dNote === sNote) dNote = p.meta.note;
       conflict = null;
       toast(t("read.saved"), "success");
-      void reloadPages();
     } catch (e) {
       const msg = errorMessage(e);
       if (isConflict(msg)) conflict = { kind: "meta" };
@@ -1065,7 +1050,6 @@
     try {
       await api.restoreHistory(p.meta.id, at, baseUpdatedAt);
       await load();
-      void reloadPages(true);
       toast(t("history.restored"), "success");
       return true;
     } catch (e) {
@@ -1099,7 +1083,6 @@
         await api.acceptProposal(p.meta.id, true);
       }
       await load();
-      await reloadPages(true);
       toast(t("proposal.accepted"), "success");
       return true;
     } catch (e) {
@@ -1113,7 +1096,6 @@
     if (!p) return false;
     try {
       await api.rejectProposal(p.meta.id);
-      await reloadPages(true);
       toast(t("proposal.rejected"), "success");
       return true;
     } catch (e) {
@@ -1178,13 +1160,10 @@
     pageGone = false;
     // A rescan runs every time the window regains focus; only a real change on
     // disk may reload the frame (which resets the page's interactive state).
-    // Page state is compared separately: the page's own writes apply locally,
-    // so they never look external, and only a reset from elsewhere (which
-    // leaves the stored state different from the local copy) reloads the frame.
     const htmlChanged = fresh.html !== p.html;
-    const metaChanged = metaSignature(fresh.meta) !== metaSignature(p.meta);
-    const storageChanged = storageSignature(fresh.meta) !== storageSignature(p.meta);
-    if (!htmlChanged && !metaChanged && !storageChanged) return;
+    const metaChanged =
+      fresh.meta.updatedAt !== p.meta.updatedAt || metaSignature(fresh.meta) !== metaSignature(p.meta);
+    if (!htmlChanged && !metaChanged) return;
     if (sourceDirty || dirty) {
       if (announce) toast(t("read.changedOnDisk"), "info");
       return;
@@ -1194,9 +1173,9 @@
     source = fresh.html;
     syncDraft(fresh.meta);
     conflict = null;
-    if (htmlChanged || storageChanged) {
+    if (htmlChanged) {
       previewNonce++;
-      if (htmlChanged && announce) toast(t("read.reloaded"), "info");
+      if (announce) toast(t("read.reloaded"), "info");
     }
   }
 
@@ -1224,6 +1203,20 @@
     lastRevision = rev;
     void refreshFromDisk(true);
   });
+
+  // An edit made elsewhere in this app (an accepted proposal, a restored
+  // version…) is pushed as an event. This reader's own writes arrive with the
+  // `updatedAt` it already holds (or while it is saving), so they are ignored.
+  $effect(() =>
+    onPageEvents((events) => {
+      const current = page;
+      if (!current || saving || savingSource) return;
+      const mine = events.filter((e) => e.meta.id === current.meta.id);
+      if (mine.some((e) => e.kind === "page.deleted" || e.meta.updatedAt !== current.meta.updatedAt)) {
+        void refreshFromDisk(true);
+      }
+    }),
+  );
 
   /* ----------------------------------------------------------- draft preview */
 
@@ -1278,7 +1271,6 @@
       baseUpdatedAt = p.meta.updatedAt;
       toast(t("toast.reviewScheduled", { when: fmtDuration(minutes) }), "success");
       pulseBar();
-      void reloadPages();
     } catch (e) {
       toast(`${t("read.scheduleFailed")} ${errorMessage(e)}`, "error");
     } finally {
@@ -1294,7 +1286,6 @@
       p.meta = await api.clearReview(p.meta.id);
       baseUpdatedAt = p.meta.updatedAt;
       toast(t("read.reviewCleared"), "success");
-      void reloadPages();
     } catch (e) {
       toast(`${t("read.clearFailed")} ${errorMessage(e)}`, "error");
     } finally {
@@ -1337,7 +1328,6 @@
       const [meta] = await Promise.all([api.completeReview(p.meta.id, g), leaving ? sleep(LEAVE_MS) : undefined]);
       p.meta = meta;
       baseUpdatedAt = meta.updatedAt;
-      void reloadPages();
       if (inSession) {
         // The HUD's intervals and the wash already say what happened.
         recordGrade(before, meta, g);
@@ -1376,14 +1366,6 @@
   }
 
   /* --------------------------------------------------------------- shortcuts */
-
-  function isTypingTarget(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    const tag = el.tagName;
-    if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable) return true;
-    return typeof el.closest === "function" && !!el.closest(".cm-editor");
-  }
 
   // Capture phase so the review-session keys win over the window-level app
   // shortcuts (which would otherwise close the reader on Escape).

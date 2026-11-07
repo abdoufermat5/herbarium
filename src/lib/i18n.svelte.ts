@@ -1,5 +1,4 @@
 import { en, type MessageKey, type PluralKey } from "./locales/en";
-import { fr } from "./locales/fr";
 
 export type Locale = "en" | "fr";
 
@@ -8,7 +7,18 @@ export const LOCALES: Record<Locale, { name: string; short: string; bcp47: strin
   fr: { name: "Français", short: "FR", bcp47: "fr-FR" },
 };
 
-const CATALOGS: Record<Locale, Record<string, string>> = { en, fr };
+/** English ships in the main bundle (it is also the fallback for missing keys);
+ *  other catalogs load on first use. */
+const CATALOGS: Partial<Record<Locale, Record<string, string>>> = { en };
+const LOADERS: Record<Locale, () => Promise<Record<string, string>>> = {
+  en: async () => en,
+  fr: () => import("./locales/fr").then((m) => m.fr),
+};
+
+/** Make sure a locale's catalog is in memory. */
+export async function loadCatalog(locale: Locale): Promise<void> {
+  CATALOGS[locale] ??= await LOADERS[locale]();
+}
 const STORAGE_KEY = "herbarium.locale";
 
 /** The OS language when it is one we ship, else English. */
@@ -53,7 +63,7 @@ function pluralForm(locale: Locale, count: number): Intl.LDMLPluralRule {
  * number, the `_one` / `_other` variant of the key is used.
  */
 export function t(key: MessageKey | PluralKey, params?: Params): string {
-  const catalog = CATALOGS[i18n.locale];
+  const catalog = CATALOGS[i18n.locale] ?? (en as Record<string, string>);
   let msg: string | undefined;
   if (typeof params?.count === "number") {
     const form = pluralForm(i18n.locale, params.count);
@@ -64,7 +74,10 @@ export function t(key: MessageKey | PluralKey, params?: Params): string {
   return msg.replace(/\{(\w+)\}/g, (_, name) => String(params[name] ?? `{${name}}`));
 }
 
-export function setLocale(locale: Locale) {
+/** Switch language. The new catalog loads first, so the interface never shows
+ *  raw keys between the choice and the switch. */
+export async function setLocale(locale: Locale): Promise<void> {
+  await loadCatalog(locale);
   i18n.locale = locale;
   document.documentElement.lang = locale;
   try {
@@ -78,11 +91,17 @@ export function otherLocale(): Locale {
   return i18n.locale === "en" ? "fr" : "en";
 }
 
-export function toggleLocale() {
-  setLocale(otherLocale());
+export function toggleLocale(): Promise<void> {
+  return setLocale(otherLocale());
 }
 
-export function initLocale() {
+/** Load the starting locale's catalog; call before mounting the UI. */
+export async function initLocale(): Promise<void> {
+  try {
+    await loadCatalog(i18n.locale);
+  } catch (e) {
+    console.error("Locale failed to load; using English", e);
+  }
   document.documentElement.lang = i18n.locale;
 }
 

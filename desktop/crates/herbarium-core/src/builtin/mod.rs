@@ -20,6 +20,7 @@ mod review;
 mod samples;
 mod searches;
 mod storage;
+pub use storage::page_storage_value;
 mod today;
 
 use serde_json::{Map, Value, json};

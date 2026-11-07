@@ -41,18 +41,12 @@ impl ProtocolState {
         }
     }
 
-    /// The metadata `serve` needs for a page: vault root, folder, CDN flag and
-    /// the persisted storage sidecar value.
-    fn meta(&self, id: &str) -> Option<(PathBuf, Option<String>, bool, Option<serde_json::Value>)> {
+    /// The metadata `serve` needs for a page: vault root, folder and CDN flag.
+    fn meta(&self, id: &str) -> Option<(PathBuf, Option<String>, bool)> {
         let guard = self.inner.lock().ok()?;
         let reader = guard.as_ref()?;
         let meta = reader.store.get_meta(id).ok().flatten()?;
-        Some((
-            reader.vault.clone(),
-            meta.folder.clone(),
-            meta.allow_cdn,
-            meta.ext.get("storage").cloned(),
-        ))
+        Some((reader.vault.clone(), meta.folder.clone(), meta.allow_cdn))
     }
 }
 
@@ -223,6 +217,9 @@ fn find_ci(haystack: &[u8], needle: &[u8]) -> Option<usize> {
         .position(|window| window.eq_ignore_ascii_case(needle))
 }
 
+/// Largest slice served for one `Range` request.
+const MAX_RANGE_CHUNK: u64 = 8 * 1024 * 1024;
+
 /// An HTTP byte-range request, resolved against a resource of `len` bytes.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 enum RangeSpec {
@@ -390,11 +387,10 @@ fn serve<R: tauri::Runtime>(
 
     // Page metadata comes from a separate read-only connection owned by the
     // protocol state, so serving never blocks on the app's write connection.
-    let (vault, folder, allow_cdn, storage) =
-        match app.state::<AppState>().protocol.meta(&parsed.page_id) {
-            Some(info) => info,
-            None => return not_found(),
-        };
+    let (vault, folder, allow_cdn) = match app.state::<AppState>().protocol.meta(&parsed.page_id) {
+        Some(info) => info,
+        None => return not_found(),
+    };
 
     // Step 2: Serve asset or page HTML (with NO host lock held!)
     if let Some(rel) = parsed.relative_path {
@@ -439,6 +435,9 @@ fn serve<R: tauri::Runtime>(
                 .body(Cow::Owned(Vec::new()))
                 .unwrap_or_else(|_| not_found()),
             RangeSpec::Partial { start, end } => {
+                // Answer at most one chunk: a player asking for `bytes=0-` of
+                // a multi-gigabyte video gets the next slice and asks again.
+                let end = end.min(start + MAX_RANGE_CHUNK - 1);
                 let mut file = match std::fs::File::open(&file_path) {
                     Ok(f) => f,
                     Err(_) => return not_found(),
@@ -482,6 +481,7 @@ fn serve<R: tauri::Runtime>(
             )
         };
         let html = inject_base_tag(&raw_html, &base_href);
+        let storage = herbarium_core::page_storage_value(&vault, &parsed.page_id);
         let html = inject_storage_shim(
             &html,
             &storage_state_json(storage.as_ref()),
