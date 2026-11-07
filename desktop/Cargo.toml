@@ -58,3 +58,26 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Keep the binary size-optimised overall, but spend the compile on the crates
+# that dominate the hot paths (HTML parsing, SQLite, JSON, the core kernel).
+[profile.release.package.html5ever]
+opt-level = 3
+
+[profile.release.package.markup5ever]
+opt-level = 3
+
+[profile.release.package.scraper]
+opt-level = 3
+
+[profile.release.package.rusqlite]
+opt-level = 3
+
+[profile.release.package.libsqlite3-sys]
+opt-level = 3
+
+[profile.release.package.serde_json]
+opt-level = 3
+
+[profile.release.package.herbarium-core]
+opt-level = 3

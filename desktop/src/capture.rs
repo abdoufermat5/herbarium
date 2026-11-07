@@ -40,6 +40,33 @@ pub struct Watchers {
     /// The page the clipboard watcher last offered: saving the offer saves
     /// this, even if something else was copied since.
     pub offered: std::sync::Mutex<Option<String>>,
+    /// Guards the watcher threads' park state; see [`Watchers::wake`].
+    park: std::sync::Mutex<()>,
+    wake: std::sync::Condvar,
+}
+
+impl Watchers {
+    /// Wake the watcher threads so they re-check their flags. The settings
+    /// command calls this after it flips a watcher on; threads park on `wake`
+    /// while their flag is off instead of waking every [`POLL`].
+    pub fn wake(&self) {
+        let _guard = self.park.lock().unwrap_or_else(|e| e.into_inner());
+        self.wake.notify_all();
+    }
+}
+
+/// Park the current thread until `flag` is set, then return whether it had to
+/// wait (i.e. the watcher was disabled and just turned on).
+fn park_until(watchers: &Watchers, flag: &AtomicBool) -> bool {
+    let guard = watchers.park.lock().unwrap_or_else(|e| e.into_inner());
+    if flag.load(Ordering::Relaxed) {
+        return false;
+    }
+    let _ = watchers
+        .wake
+        .wait_while(guard, |_| !flag.load(Ordering::Relaxed))
+        .unwrap_or_else(|e| e.into_inner());
+    true
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -239,21 +266,20 @@ pub fn start_watchers<R: Runtime>(app: &AppHandle<R>, watchers: Arc<Watchers>) {
         let since = SystemTime::now();
         let mut seen = HashSet::new();
         loop {
-            std::thread::sleep(POLL);
-            if !flags.downloads.load(Ordering::Relaxed) {
-                continue;
-            }
-            let Some(dir) = downloads_dir() else { continue };
-            for offer in new_html_files(&dir, since, &mut seen) {
-                if !window_visible(&handle) {
-                    notify(
-                        &handle,
-                        "HTML page downloaded",
-                        &format!("Open Herbarium to save “{}”.", offer.title),
-                    );
+            let _ = park_until(&flags, &flags.downloads);
+            if let Some(dir) = downloads_dir() {
+                for offer in new_html_files(&dir, since, &mut seen) {
+                    if !window_visible(&handle) {
+                        notify(
+                            &handle,
+                            "HTML page downloaded",
+                            &format!("Open Herbarium to save “{}”.", offer.title),
+                        );
+                    }
+                    let _ = handle.emit(DOWNLOAD_OFFER, offer);
                 }
-                let _ = handle.emit(DOWNLOAD_OFFER, offer);
             }
+            std::thread::sleep(POLL);
         }
     });
 
@@ -262,45 +288,39 @@ pub fn start_watchers<R: Runtime>(app: &AppHandle<R>, watchers: Arc<Watchers>) {
         let mut last = String::new();
         let mut primed = false;
         loop {
-            std::thread::sleep(POLL);
-            if !watchers.clipboard.load(Ordering::Relaxed) {
+            if park_until(&watchers, &watchers.clipboard) {
+                // Watching just (re)started: what's on the clipboard now is
+                // not "new".
                 primed = false;
-                continue;
             }
             let text = handle.clipboard().read_text().unwrap_or_default();
-            // What was on the clipboard when watching started is not "new".
             if !primed {
                 last = text;
                 primed = true;
-                continue;
-            }
-            if text == last {
-                continue;
-            }
-            last = text.clone();
-            if text.len() as u64 > MAX_BYTES || !is_whole_page(&text) {
-                continue;
-            }
-            let title = Some(extract_title(&text))
-                .filter(|t| !t.is_empty())
-                .unwrap_or_else(|| "HTML page".into());
-            if !window_visible(&handle) {
-                notify(
-                    &handle,
-                    "HTML page copied",
-                    &format!("Press the capture shortcut to save “{title}”."),
+            } else if text != last && text.len() as u64 <= MAX_BYTES && is_whole_page(&text) {
+                last = text.clone();
+                let title = Some(extract_title(&text))
+                    .filter(|t| !t.is_empty())
+                    .unwrap_or_else(|| "HTML page".into());
+                if !window_visible(&handle) {
+                    notify(
+                        &handle,
+                        "HTML page copied",
+                        &format!("Press the capture shortcut to save “{title}”."),
+                    );
+                }
+                *watchers.offered.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
+                let _ = handle.emit(
+                    CLIPBOARD_OFFER,
+                    Offer {
+                        title,
+                        bytes: text.len(),
+                        path: None,
+                        name: None,
+                    },
                 );
             }
-            *watchers.offered.lock().unwrap_or_else(|e| e.into_inner()) = Some(text.clone());
-            let _ = handle.emit(
-                CLIPBOARD_OFFER,
-                Offer {
-                    title,
-                    bytes: text.len(),
-                    path: None,
-                    name: None,
-                },
-            );
+            std::thread::sleep(POLL);
         }
     });
 }

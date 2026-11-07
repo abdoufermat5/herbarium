@@ -82,6 +82,19 @@ impl Store {
         Ok(Store { vault, conn })
     }
 
+    /// A read-only connection to the same index, for hot read paths (protocol
+    /// serving, native-host lookups) that must never contend with the app's
+    /// write connection. Falls back to a read/write handle (still used only for
+    /// reads) when a read-only WAL handle cannot be opened on this platform.
+    pub fn open_read_only(vault: PathBuf) -> rusqlite::Result<Store> {
+        let db = vault.join(".herbarium").join("index.sqlite");
+        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+        let conn = Connection::open_with_flags(&db, flags).or_else(|_| Connection::open(&db))?;
+        conn.pragma_update(None, "busy_timeout", 5000).ok();
+        Ok(Store { vault, conn })
+    }
+
     /// Insert or refresh one page (meta, text content and file mtime).
     pub fn upsert(&self, meta: &PageMeta, text: &str, mtime: i64) -> rusqlite::Result<()> {
         let tx = self.conn.unchecked_transaction()?;

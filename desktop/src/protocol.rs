@@ -2,8 +2,9 @@
 // iframe. Injects a Content-Security-Policy and never grants same-origin access.
 
 use std::borrow::Cow;
-#[cfg(test)]
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 pub use herbarium_core::assets::{mime_for_path, resolve_safe_asset_path};
 use percent_encoding::percent_decode_str;
@@ -11,6 +12,49 @@ use tauri::http::{Request, Response, StatusCode, Uri};
 use tauri::{AppHandle, Manager, UriSchemeContext, UriSchemeResponder};
 
 use crate::commands::AppState;
+
+/// A separate, read-only connection to the vault index, so page/asset serving
+/// never blocks on the app's write connection (which a rescan or save can hold
+/// for a long time).
+#[derive(Default)]
+pub struct ProtocolState {
+    inner: Mutex<Option<Reader>>,
+}
+
+struct Reader {
+    vault: PathBuf,
+    store: herbarium_core::store::Store,
+}
+
+impl ProtocolState {
+    /// Point the reader at a freshly opened vault. If a read-only handle cannot
+    /// be opened, the reader stays empty and `serve` answers 404 instead of
+    /// blocking the app.
+    pub fn set_vault(&self, vault: &Path) {
+        if let Ok(mut guard) = self.inner.lock() {
+            *guard = herbarium_core::store::Store::open_read_only(vault.to_path_buf())
+                .ok()
+                .map(|store| Reader {
+                    vault: vault.to_path_buf(),
+                    store,
+                });
+        }
+    }
+
+    /// The metadata `serve` needs for a page: vault root, folder, CDN flag and
+    /// the persisted storage sidecar value.
+    fn meta(&self, id: &str) -> Option<(PathBuf, Option<String>, bool, Option<serde_json::Value>)> {
+        let guard = self.inner.lock().ok()?;
+        let reader = guard.as_ref()?;
+        let meta = reader.store.get_meta(id).ok().flatten()?;
+        Some((
+            reader.vault.clone(),
+            meta.folder.clone(),
+            meta.allow_cdn,
+            meta.ext.get("storage").cloned(),
+        ))
+    }
+}
 
 /// Network allowed: known CDN hosts for scripts/fonts, `https:` for assets.
 pub const CSP_ALLOW: &str = "default-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; font-src 'self' data: https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; img-src 'self' https: data: blob:; media-src 'self' https: data: blob:; connect-src 'self' https://fonts.googleapis.com https://fonts.gstatic.com https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com https://code.jquery.com https://esm.sh; worker-src blob: 'self'; frame-src 'none'; object-src 'none'; base-uri 'self'; form-action 'none'";
@@ -151,11 +195,12 @@ pub fn extract_page_id_from_referer(referer: &str) -> Option<String> {
 
 pub fn inject_base_tag(html: &str, base_href: &str) -> String {
     let base_tag = format!("<base href=\"{base_href}\">");
-    let lower = html.to_ascii_lowercase();
+    let bytes = html.as_bytes();
 
-    if let Some(insert_at) = lower
-        .find("<head")
-        .and_then(|pos| lower[pos..].find('>').map(|close| pos + close + 1))
+    // Find "<head" case-insensitively, then the closing '>' of that tag, and
+    // insert the base tag right after it — without lower-casing the document.
+    if let Some(insert_at) = find_ci(bytes, b"<head")
+        .and_then(|pos| bytes[pos..].iter().position(|&b| b == b'>').map(|close| pos + close + 1))
     {
         let mut result = String::with_capacity(html.len() + base_tag.len() + 2);
         result.push_str(&html[..insert_at]);
@@ -166,6 +211,83 @@ pub fn inject_base_tag(html: &str, base_href: &str) -> String {
     }
 
     format!("{base_tag}\n{html}")
+}
+
+/// Byte offset of the first case-insensitive match of `needle` in `haystack`.
+fn find_ci(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack
+        .windows(needle.len())
+        .position(|window| window.eq_ignore_ascii_case(needle))
+}
+
+/// An HTTP byte-range request, resolved against a resource of `len` bytes.
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum RangeSpec {
+    /// No `Range` header: serve the whole resource.
+    None,
+    /// A single valid byte range, inclusive.
+    Partial { start: u64, end: u64 },
+    /// Malformed or unsatisfiable: reply 416.
+    Unsatisfiable,
+}
+
+/// Parse a `Range` header value (the part after "bytes=") against a resource of
+/// `len` bytes. Supports a single `start-end` range, an open-ended `start-`
+/// range, and the `-N` suffix form. Multiple ranges and malformed input are
+/// unsatisfiable.
+fn parse_range(header: Option<&str>, len: u64) -> RangeSpec {
+    let Some(value) = header else {
+        return RangeSpec::None;
+    };
+    let Some(spec) = value.trim().strip_prefix("bytes=") else {
+        return RangeSpec::Unsatisfiable;
+    };
+    let spec = spec.trim();
+    if len == 0 || spec.contains(',') {
+        return RangeSpec::Unsatisfiable;
+    }
+    let (start, end) = match spec.split_once('-') {
+        Some(parts) => parts,
+        None => return RangeSpec::Unsatisfiable,
+    };
+
+    // Suffix range "-N": the final N bytes.
+    if start.is_empty() {
+        let n: u64 = match end.parse() {
+            Ok(n) => n,
+            Err(_) => return RangeSpec::Unsatisfiable,
+        };
+        if n == 0 {
+            return RangeSpec::Unsatisfiable;
+        }
+        return RangeSpec::Partial {
+            start: len.saturating_sub(n),
+            end: len - 1,
+        };
+    }
+
+    let start: u64 = match start.parse() {
+        Ok(s) => s,
+        Err(_) => return RangeSpec::Unsatisfiable,
+    };
+    if start >= len {
+        return RangeSpec::Unsatisfiable;
+    }
+    let end = if end.is_empty() {
+        len - 1
+    } else {
+        match end.parse::<u64>() {
+            Ok(e) => e.min(len - 1),
+            Err(_) => return RangeSpec::Unsatisfiable,
+        }
+    };
+    if start > end {
+        return RangeSpec::Unsatisfiable;
+    }
+    RangeSpec::Partial { start, end }
 }
 
 /// Escape a JSON document for embedding inside an inline `<script>`. Only `<`
@@ -266,30 +388,13 @@ fn serve<R: tauri::Runtime>(
         None => return not_found(),
     };
 
-    // Step 1: Query Host/Store with early lock release
-    let lookup_result = {
-        let state = app.state::<AppState>();
-        let Ok(host) = state.host.lock() else {
-            return not_found();
+    // Page metadata comes from a separate read-only connection owned by the
+    // protocol state, so serving never blocks on the app's write connection.
+    let (vault, folder, allow_cdn, storage) =
+        match app.state::<AppState>().protocol.meta(&parsed.page_id) {
+            Some(info) => info,
+            None => return not_found(),
         };
-        let Some(store) = host.store() else {
-            return not_found();
-        };
-        match store.get_meta(&parsed.page_id) {
-            Ok(Some(meta)) => Some((
-                store.vault.clone(),
-                meta.folder.clone(),
-                meta.allow_cdn,
-                meta.ext.get("storage").cloned(),
-            )),
-            Ok(None) => None,
-            Err(_) => return not_found(),
-        }
-    }; // host lock dropped HERE, before disk I/O!
-    let (vault, folder, allow_cdn, storage) = match lookup_result {
-        Some(info) => info,
-        None => return not_found(),
-    };
 
     // Step 2: Serve asset or page HTML (with NO host lock held!)
     if let Some(rel) = parsed.relative_path {
@@ -305,19 +410,58 @@ fn serve<R: tauri::Runtime>(
             None => return not_found(),
         };
 
-        let bytes = match std::fs::read(&file_path) {
-            Ok(b) => b,
+        let len = match std::fs::metadata(&file_path) {
+            Ok(m) => m.len(),
             Err(_) => return not_found(),
         };
-
         let mime = mime_for_path(&file_path);
+        let range_header = request.headers().get("range").and_then(|v| v.to_str().ok());
 
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", mime)
-            .header("X-Content-Type-Options", "nosniff")
-            .body(Cow::Owned(bytes))
-            .unwrap_or_else(|_| not_found())
+        match parse_range(range_header, len) {
+            RangeSpec::None => {
+                let bytes = match std::fs::read(&file_path) {
+                    Ok(b) => b,
+                    Err(_) => return not_found(),
+                };
+                Response::builder()
+                    .status(StatusCode::OK)
+                    .header("Content-Type", mime)
+                    .header("Accept-Ranges", "bytes")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .body(Cow::Owned(bytes))
+                    .unwrap_or_else(|_| not_found())
+            }
+            RangeSpec::Unsatisfiable => Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header("Content-Range", format!("bytes */{len}"))
+                .header("Accept-Ranges", "bytes")
+                .header("X-Content-Type-Options", "nosniff")
+                .body(Cow::Owned(Vec::new()))
+                .unwrap_or_else(|_| not_found()),
+            RangeSpec::Partial { start, end } => {
+                let mut file = match std::fs::File::open(&file_path) {
+                    Ok(f) => f,
+                    Err(_) => return not_found(),
+                };
+                if file.seek(SeekFrom::Start(start)).is_err() {
+                    return not_found();
+                }
+                let count = (end - start + 1) as usize;
+                let mut buf = vec![0u8; count];
+                if file.read_exact(&mut buf).is_err() {
+                    return not_found();
+                }
+                Response::builder()
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header("Content-Type", mime)
+                    .header("Content-Range", format!("bytes {start}-{end}/{len}"))
+                    .header("Content-Length", count.to_string())
+                    .header("Accept-Ranges", "bytes")
+                    .header("X-Content-Type-Options", "nosniff")
+                    .body(Cow::Owned(buf))
+                    .unwrap_or_else(|_| not_found())
+            }
+        }
     } else {
         // Page HTML request
         let raw_html =
@@ -770,5 +914,59 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn parse_range_resolves_full_and_partial_ranges() {
+        // No header -> whole resource.
+        assert_eq!(parse_range(None, 1000), RangeSpec::None);
+
+        assert_eq!(
+            parse_range(Some("bytes=0-99"), 1000),
+            RangeSpec::Partial { start: 0, end: 99 }
+        );
+        assert_eq!(
+            parse_range(Some("bytes=500-"), 1000),
+            RangeSpec::Partial { start: 500, end: 999 }
+        );
+        assert_eq!(
+            parse_range(Some("bytes=-200"), 1000),
+            RangeSpec::Partial { start: 800, end: 999 }
+        );
+        assert_eq!(
+            parse_range(Some("bytes=900-2000"), 1000),
+            RangeSpec::Partial { start: 900, end: 999 }
+        );
+        assert_eq!(
+            parse_range(Some("bytes=0-9 "), 1000),
+            RangeSpec::Partial { start: 0, end: 9 }
+        );
+
+        // Start at/past the end, or an empty file, is unsatisfiable.
+        assert_eq!(parse_range(Some("bytes=1000-"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(parse_range(Some("bytes=2000-3000"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(parse_range(Some("bytes=0-0"), 0), RangeSpec::Unsatisfiable);
+
+        // Malformed input.
+        assert_eq!(parse_range(Some("items=0-9"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(parse_range(Some("bytes=0-1,5-6"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(parse_range(Some("bytes=abc-def"), 1000), RangeSpec::Unsatisfiable);
+        assert_eq!(parse_range(Some("bytes=-0"), 1000), RangeSpec::Unsatisfiable);
+    }
+
+    #[test]
+    fn inject_base_tag_is_case_insensitive_and_preserves_document_case() {
+        let html = "<!DOCTYPE html>\n<HTML LANG=\"en\"><HEAD><TITLE>T</TITLE></HEAD><BODY></BODY></HTML>";
+        let out = inject_base_tag(html, "herbarium://page/p/");
+
+        let head = out.find("<HEAD>").unwrap();
+        let close = out[head..].find('>').unwrap();
+        assert!(
+            out[head + close + 1..].starts_with("\n<base href="),
+            "{out}"
+        );
+        // The original document casing is preserved, not lower-cased.
+        assert!(out.contains("<HTML LANG=\"en\">"));
+        assert!(out.contains("<BODY>"));
     }
 }
