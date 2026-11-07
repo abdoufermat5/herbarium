@@ -6,7 +6,7 @@ use serde_json::json;
 use super::object;
 use crate::extension::{Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::host::reindex;
-use crate::models::PageMeta;
+use crate::models::{IndexReport, PageMeta};
 use crate::time::now_ms;
 use crate::vault;
 
@@ -82,7 +82,10 @@ fn edit_tagged(
         })
         .map_err(|e| e.to_string())?;
     for meta in changed {
-        ctx.emit(events::PAGE_UPDATED, json!({ "page": meta }));
+        ctx.emit(
+            events::PAGE_UPDATED,
+            json!({ "page": meta, "htmlChanged": false }),
+        );
     }
     Ok(updated)
 }
@@ -123,7 +126,19 @@ impl Extension for Library {
             ),
             |ctx: &mut Ctx, a: RenameArgs| {
                 let folder = vault::rename_folder(&ctx.store.vault, &a.from, &a.to)?;
-                let report = reindex(ctx.store)?;
+                let from_clean = vault::clean_folder(Some(&a.from))
+                    .ok()
+                    .flatten()
+                    .unwrap_or_default();
+                ctx.store
+                    .rename_folder(&from_clean, &folder)
+                    .map_err(|e| e.to_string())?;
+                let report = IndexReport {
+                    indexed: 0,
+                    removed: 0,
+                    total: ctx.store.count().map_err(|e| e.to_string())?,
+                    skipped: Vec::new(),
+                };
                 ctx.emit(events::VAULT_INDEXED, &report);
                 Ok(json!({ "folder": folder }))
             },

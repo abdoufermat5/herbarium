@@ -13,7 +13,7 @@ use serde_json::{Value, json};
 use super::pages::overwrite_html_by;
 use super::{id_prop, object};
 use crate::assets::{inline_local_assets, local_asset, page_folder};
-use crate::content::{extract_page_links, extract_title};
+use crate::content::extract_title;
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry};
 use crate::models::PageMeta;
 use crate::rewrite::{is_asset_attr, relative_path, rewrite_attrs};
@@ -122,10 +122,11 @@ pub fn check(ctx: &Ctx, meta: &PageMeta) -> OpResult<Vec<Issue>> {
             fix: None,
         });
     }
-    let broken: Vec<String> = extract_page_links(&html)
-        .into_iter()
-        .filter(|id| id != &meta.id && store.get_meta(id).ok().flatten().is_none())
-        .collect();
+    // Broken links come from the `links` table (kept fresh by `refresh_links`),
+    // so no per-link metadata lookup is needed.
+    let broken: Vec<String> = store
+        .broken_links_from(&meta.id)
+        .map_err(|e| e.to_string())?;
     if !broken.is_empty() {
         issues.push(Issue {
             kind: "broken-links",
@@ -189,6 +190,12 @@ impl Extension for Health {
                 &[],
             ),
             |ctx: &mut Ctx, a: CheckArgs| -> OpResult<Value> {
+                let store = ctx.store;
+                store
+                    .refresh_links(|meta| {
+                        vault::read_html(&store.vault, &meta.id, meta.folder.as_deref()).ok()
+                    })
+                    .map_err(|e| e.to_string())?;
                 if let Some(id) = a.id {
                     let meta = ctx.page(&id)?;
                     return Ok(json!({ "id": meta.id, "issues": check(ctx, &meta)? }));

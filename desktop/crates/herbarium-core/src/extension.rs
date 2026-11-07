@@ -212,7 +212,10 @@ impl<'a> Ctx<'a> {
     pub fn save(&mut self, meta: &PageMeta) -> OpResult<()> {
         vault::write_meta(&self.store.vault, meta)?;
         self.store.update_meta(meta).map_err(|e| e.to_string())?;
-        self.emit(events::PAGE_UPDATED, serde_json::json!({ "page": meta }));
+        self.emit(
+            events::PAGE_UPDATED,
+            serde_json::json!({ "page": meta, "htmlChanged": false }),
+        );
         Ok(())
     }
 }

@@ -1,7 +1,7 @@
 // SQLite index for pages. Rebuildable at any time from the vault files
 // (see `crate::vault::index_vault`). Not the source of truth, only an index.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, Params, Row, params};
@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS pages (
   source_title  TEXT,
   source_url    TEXT,
   search_note   TEXT NOT NULL DEFAULT '',
-  fingerprint   TEXT NOT NULL DEFAULT ''
+  fingerprint   TEXT NOT NULL DEFAULT '',
+  html_fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
   id UNINDEXED, title, tags, folder, search_note, text_content,
@@ -55,6 +56,25 @@ CREATE TABLE IF NOT EXISTS sync (
 pub struct Store {
     pub vault: PathBuf,
     conn: Connection,
+}
+
+/// The index fields the rescan fast path needs for every row, fetched in one
+/// query instead of a point lookup per page.
+pub(crate) struct IndexRow {
+    pub folder: Option<String>,
+    pub source_title: Option<String>,
+    pub mtime: i64,
+    pub fingerprint: String,
+}
+
+/// A page ready to be written by [`upsert_on`]: the fingerprints come from
+/// stats the caller already collected, so the store never stats a file.
+pub(crate) struct IndexedPage<'a> {
+    pub meta: &'a PageMeta,
+    pub text: &'a str,
+    pub mtime: i64,
+    pub fingerprint: &'a str,
+    pub html_fingerprint: &'a str,
 }
 
 fn row_to_meta(row: &Row) -> rusqlite::Result<PageMeta> {
@@ -85,7 +105,9 @@ impl Store {
         conn.pragma_update(None, "busy_timeout", 5000).ok();
         let wal: Result<String, _> = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0));
         if !matches!(wal.as_deref(), Ok("wal")) {
-            eprintln!("herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher");
+            eprintln!(
+                "herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher"
+            );
         }
         conn.pragma_update(None, "synchronous", "NORMAL").ok();
         migrate(&conn)?;
@@ -94,53 +116,41 @@ impl Store {
 
     /// Insert or refresh one page (meta, text content and file mtime).
     pub fn upsert(&self, meta: &PageMeta, text: &str, mtime: i64) -> rusqlite::Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
-        let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
-        let source_url = PageSource::of(meta)
-            .and_then(|s| s.url)
-            .map(|u| normalize_url(&u));
-        let search_note = fts_note(meta);
         let fingerprint =
             crate::vault::page_fingerprint(&self.vault, &meta.id, meta.folder.as_deref());
-        tx.execute(
-            &format!(
-                "INSERT INTO pages ({COLUMNS}, text_content, mtime, source_url, search_note, fingerprint)
-                 VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
-                 ON CONFLICT(id) DO UPDATE SET
-                   title=excluded.title, tags=excluded.tags, folder=excluded.folder,
-                   note=excluded.note, updated_at=excluded.updated_at,
-                   interval_minutes=excluded.interval_minutes, next_review=excluded.next_review,
-                   last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
-                   ext=excluded.ext, source_title=excluded.source_title,
-                   source_url=excluded.source_url, search_note=excluded.search_note,
-                   text_content=excluded.text_content, mtime=excluded.mtime,
-                   fingerprint=excluded.fingerprint"
-            ),
-            params![
-                meta.id,
-                meta.title,
-                tags,
-                meta.folder,
-                meta.note,
-                meta.created_at,
-                meta.updated_at,
-                meta.interval_minutes,
-                meta.next_review,
-                meta.last_review,
-                if meta.allow_cdn { 1 } else { 0 },
-                ext,
-                meta.source_title,
-                text,
-                mtime,
-                source_url,
-                search_note,
-                fingerprint,
-            ],
-        )?;
-        // The `pages_ai`/`pages_au` triggers keep `pages_fts` (an external-content
-        // table) in step with `pages`, so no separate FTS insert is needed here.
-        tx.commit()
+        let html_fingerprint =
+            crate::vault::html_fingerprint(&self.vault, &meta.id, meta.folder.as_deref());
+        self.batch(|tx| {
+            upsert_on(
+                tx,
+                &IndexedPage {
+                    meta,
+                    text,
+                    mtime,
+                    fingerprint: &fingerprint,
+                    html_fingerprint: &html_fingerprint,
+                },
+            )
+        })
+    }
+
+    /// One query for every page's (folder, source_title, mtime, fingerprint):
+    /// the fields the rescan fast path compares before reading anything.
+    pub(crate) fn index_rows(&self) -> rusqlite::Result<HashMap<String, IndexRow>> {
+        self.conn
+            .prepare("SELECT id, folder, source_title, mtime, fingerprint FROM pages")?
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    IndexRow {
+                        folder: r.get(1)?,
+                        source_title: r.get(2)?,
+                        mtime: r.get(3)?,
+                        fingerprint: r.get(4)?,
+                    },
+                ))
+            })?
+            .collect()
     }
 
     /// Update a page's metadata columns (and its searchable note) without
@@ -165,6 +175,26 @@ impl Store {
         let out = f(&tx)?;
         tx.commit()?;
         Ok(out)
+    }
+
+    /// The stamp of a page's HTML alone (size + mtime), `None` for an unknown
+    /// page. Unlike `updated_at` it moves only when the HTML file changes.
+    pub fn html_stamp_for(&self, id: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT html_fingerprint FROM pages WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    /// [`Store::html_stamp_for`] for every page, in one query.
+    pub fn html_stamps(&self) -> rusqlite::Result<HashMap<String, String>> {
+        self.conn
+            .prepare("SELECT id, html_fingerprint FROM pages")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
     }
 
     pub fn fingerprint_for(&self, id: &str) -> rusqlite::Result<Option<String>> {
@@ -259,7 +289,11 @@ impl Store {
             n += 2;
         }
         if let Some(t) = tag {
-            where_sql.push_str(if where_sql.is_empty() { "WHERE " } else { " AND " });
+            where_sql.push_str(if where_sql.is_empty() {
+                "WHERE "
+            } else {
+                " AND "
+            });
             where_sql.push_str(&format!(
                 "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?{n})"
             ));
@@ -271,7 +305,10 @@ impl Store {
         );
         args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), row_to_meta)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            row_to_meta,
+        )?;
         rows.collect()
     }
 
@@ -334,7 +371,10 @@ impl Store {
             let metas = self.list_filtered(folder, tag, limit)?;
             return Ok(metas
                 .into_iter()
-                .map(|meta| SearchHit { meta, snippet: None })
+                .map(|meta| SearchHit {
+                    meta,
+                    snippet: None,
+                })
                 .collect());
         }
         match self.fts_search(&expr, folder, tag, limit_param) {
@@ -385,17 +425,20 @@ impl Store {
         );
         args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())), |r| {
-            let meta = row_to_meta(r)?;
-            let snip: Option<String> = r.get(13)?;
-            let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
-            Ok(SearchHit { meta, snippet })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            |r| {
+                let meta = row_to_meta(r)?;
+                let snip: Option<String> = r.get(13)?;
+                let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
+                Ok(SearchHit { meta, snippet })
+            },
+        )?;
         rows.collect()
     }
 
-    /// Bring the link index up to date: rescan every page whose files changed
-    /// since its last scan (`html` reads a page's HTML; `None` skips it) and
+    /// Bring the link index up to date: rescan every page whose HTML changed
+    /// since its last scan (sidecar-only writes do not count) (`html` reads a page's HTML; `None` skips it) and
     /// forget pages that are gone. Cheap when nothing changed.
     pub fn refresh_links(
         &self,
@@ -404,9 +447,9 @@ impl Store {
         let stale: Vec<(String, String)> = self
             .conn
             .prepare(
-                "SELECT p.id, p.fingerprint FROM pages p
+                "SELECT p.id, p.html_fingerprint FROM pages p
                  LEFT JOIN link_scans s ON s.src = p.id
-                 WHERE s.fingerprint IS NULL OR s.fingerprint != p.fingerprint",
+                 WHERE s.fingerprint IS NULL OR s.fingerprint != p.html_fingerprint",
             )?
             .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
@@ -478,6 +521,52 @@ impl Store {
             ),
             params![id],
         )
+    }
+
+    /// Ids `id` links to that no longer exist in the index, in id order.
+    pub fn broken_links_from(&self, id: &str) -> rusqlite::Result<Vec<String>> {
+        self.conn
+            .prepare(
+                "SELECT l.dst FROM links l
+                 WHERE l.src = ?1 AND NOT EXISTS (SELECT 1 FROM pages p WHERE p.id = l.dst)
+                 ORDER BY l.dst",
+            )?
+            .query_map(params![id], |r| r.get(0))?
+            .collect()
+    }
+
+    /// Point the index at a renamed folder without rescanning: every page in
+    /// `from` or below it moves to the same place under `to`. The files were
+    /// moved (and their sidecars rewritten) by `vault::rename_folder`, so the
+    /// moved rows also take their new mtime/fingerprint from disk; the
+    /// `pages_au` trigger refreshes the FTS `folder` column. Returns the number
+    /// of rows moved. Prefixes are compared with `substr` (not `LIKE`) so folder
+    /// names containing `%`/`_` are literal.
+    pub fn rename_folder(&self, from: &str, to: &str) -> rusqlite::Result<usize> {
+        let prefix = format!("{from}/");
+        let prefix_len = prefix.chars().count() as i64;
+        self.batch(|tx| {
+            let moved: Vec<(String, Option<String>)> = tx
+                .prepare(
+                    "SELECT id, folder FROM pages
+                     WHERE folder = ?1 OR substr(folder, 1, ?2) = ?3",
+                )?
+                .query_map(params![from, prefix_len, prefix], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, old) in &moved {
+                let old = old.as_deref().unwrap_or_default();
+                let new = format!("{to}{}", &old[from.len()..]);
+                let fingerprint = crate::vault::page_fingerprint(&self.vault, id, Some(&new));
+                let mtime = crate::vault::stat_mtime(&self.vault, id, Some(&new));
+                tx.execute(
+                    "UPDATE pages SET folder = ?2, fingerprint = ?3, mtime = ?4 WHERE id = ?1",
+                    params![id, new, fingerprint, mtime],
+                )?;
+            }
+            Ok(moved.len())
+        })
     }
 
     /// Count of every page due for review at or before `now_ms`, with no cap.
@@ -585,10 +674,62 @@ fn delete_row(conn: &Connection, id: &str) -> rusqlite::Result<()> {
     Ok(())
 }
 
+/// Write one page row (metadata, text, mtime and both fingerprints) on any
+/// connection or transaction. The `pages_ai`/`pages_au` triggers keep
+/// `pages_fts` (an external-content table) in step, so no FTS write is needed.
+pub(crate) fn upsert_on(conn: &Connection, page: &IndexedPage) -> rusqlite::Result<()> {
+    let meta = page.meta;
+    let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
+    let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
+    let source_url = PageSource::of(meta)
+        .and_then(|s| s.url)
+        .map(|u| normalize_url(&u));
+    let search_note = fts_note(meta);
+    conn.prepare_cached(&format!(
+        "INSERT INTO pages ({COLUMNS}, text_content, mtime, source_url, search_note, fingerprint, html_fingerprint)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+         ON CONFLICT(id) DO UPDATE SET
+           title=excluded.title, tags=excluded.tags, folder=excluded.folder,
+           note=excluded.note, updated_at=excluded.updated_at,
+           interval_minutes=excluded.interval_minutes, next_review=excluded.next_review,
+           last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
+           ext=excluded.ext, source_title=excluded.source_title,
+           source_url=excluded.source_url, search_note=excluded.search_note,
+           text_content=excluded.text_content, mtime=excluded.mtime,
+           fingerprint=excluded.fingerprint, html_fingerprint=excluded.html_fingerprint"
+    ))?
+    .execute(params![
+        meta.id,
+        meta.title,
+        tags,
+        meta.folder,
+        meta.note,
+        meta.created_at,
+        meta.updated_at,
+        meta.interval_minutes,
+        meta.next_review,
+        meta.last_review,
+        if meta.allow_cdn { 1 } else { 0 },
+        ext,
+        meta.source_title,
+        page.text,
+        page.mtime,
+        source_url,
+        search_note,
+        page.fingerprint,
+        page.html_fingerprint,
+    ])?;
+    Ok(())
+}
+
 /// Write `meta`'s metadata columns (not `text_content`) to the index, on any
 /// connection (or transaction). The `pages_au` trigger refreshes its FTS row.
 /// `mtime`/`fingerprint` are recomputed because the sidecar changed on disk.
-pub(crate) fn update_meta_on(conn: &Connection, vault: &Path, meta: &PageMeta) -> rusqlite::Result<()> {
+pub(crate) fn update_meta_on(
+    conn: &Connection,
+    vault: &Path,
+    meta: &PageMeta,
+) -> rusqlite::Result<()> {
     let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
     let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
     let source_url = PageSource::of(meta)
@@ -686,6 +827,18 @@ fn migrate_steps(conn: &Connection) -> rusqlite::Result<()> {
         .exists([])?;
     if !has_fingerprint {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';")?;
+    }
+    // `html_fingerprint` covers the HTML file only: link staleness must not
+    // react to sidecar-only writes. Existing rows start from their combined
+    // fingerprint, which is what `link_scans` recorded.
+    let has_html_fingerprint = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'html_fingerprint'")?
+        .exists([])?;
+    if !has_html_fingerprint {
+        conn.execute_batch(
+            "ALTER TABLE pages ADD COLUMN html_fingerprint TEXT NOT NULL DEFAULT '';
+             UPDATE pages SET html_fingerprint = fingerprint;",
+        )?;
     }
     let has_note = conn
         .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'note'")?
@@ -1109,8 +1262,18 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].id, "p1");
 
-        assert!(store.find_by_url("https://example.com/other").unwrap().is_empty());
-        assert!(store.find_by_url("https://example.com/foo").unwrap().is_empty());
+        assert!(
+            store
+                .find_by_url("https://example.com/other")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .find_by_url("https://example.com/foo")
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Pushes vault changes made by this process (every UI operation) to the
 // window, so the frontend patches its lists instead of reloading them. An
 // extension subscribes to core's event bus and re-emits each event as the
-// Tauri event `vault-event`: `{ kind, id?, meta?, report? }`.
+// Tauri event `vault-event`: `{ kind, id?, meta?, report?, htmlChanged? }`.
 
 use herbarium_core::models::PageMeta;
 use herbarium_core::{Event, Extension, Host, OpResult, Registry, events};

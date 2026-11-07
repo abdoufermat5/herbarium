@@ -11,11 +11,11 @@ use super::proposals::{delete_proposal, overwrite_or_propose};
 use super::review::{apply_schedule, load_settings};
 use super::storage;
 use super::{id_prop, object};
-use crate::content::{extract_text, extract_title, looks_like_html};
+use crate::content::{analyze, extract_text, follow_document_title, looks_like_html};
 use crate::extension::{Caller, Ctx, Extension, OpResult, Operation, Registry, events};
 use crate::models::{ImportFile, ImportResult, MetaPatch, Page, PageMeta, PageSource, SearchHit};
 use crate::query::{FILTER_HELP, Query};
-use crate::store::{normalize_url, Store};
+use crate::store::{Store, normalize_url};
 use crate::time::now_ms;
 use crate::vault;
 
@@ -225,6 +225,13 @@ fn refresh_updated_at(vault: &Path, meta: &mut PageMeta) -> OpResult<()> {
 /// rejects as stale, so the reader's explicit overwrite could never succeed
 /// after an external edit. Returns the metadata to hand back.
 fn reconcile_with_disk(store: &Store, mut meta: PageMeta) -> OpResult<PageMeta> {
+    // Stat-only fast path: skip the read and sidecar parse when the files
+    // still match the fingerprint we indexed (the common case for `pages.get`).
+    let cur_fp = vault::page_fingerprint(&store.vault, &meta.id, meta.folder.as_deref());
+    let stored_fp = store.fingerprint_for(&meta.id).map_err(|e| e.to_string())?;
+    if stored_fp.as_deref() == Some(cur_fp.as_str()) {
+        return Ok(meta);
+    }
     let Some(disk) = vault::disk_updated_at(&store.vault, &meta) else {
         return Ok(meta);
     };
@@ -232,22 +239,15 @@ fn reconcile_with_disk(store: &Store, mut meta: PageMeta) -> OpResult<PageMeta> 
         return Ok(meta);
     }
     let html = vault::read_html(&store.vault, &meta.id, meta.folder.as_deref())?;
+    let analysis = analyze(&html);
     meta.updated_at = disk;
-    let extracted = extract_title(&html);
-    let user_never_renamed = meta.source_title.as_deref() == Some(meta.title.as_str());
-    if user_never_renamed || meta.title.is_empty() {
-        meta.title = if extracted.is_empty() {
-            meta.id.clone()
-        } else {
-            extracted.clone()
-        };
-    }
-    meta.source_title = Some(extracted);
+    meta.title = follow_document_title(&meta, &analysis.title);
+    meta.source_title = Some(analysis.title.clone());
     vault::write_meta(&store.vault, &meta)?;
     store
         .upsert(
             &meta,
-            &extract_text(&html),
+            &analysis.text,
             vault::page_mtime(&store.vault, &meta),
         )
         .map_err(|e| e.to_string())?;
@@ -297,7 +297,7 @@ fn summarize_hits(mut hits: Vec<SearchHit>) -> Vec<SearchHit> {
 
 /// Write a new page's files, index them, and emit `page.created`. The files
 /// are removed again if indexing fails, so disk and index stay in step.
-fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
+fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str, text: &str) -> OpResult<()> {
     let store = ctx.store;
     // `new_page_id` never reuses a trashed id, so an id with snapshots but no
     // trash entry was left behind by a page that is gone for good: a brand-new
@@ -314,11 +314,7 @@ fn insert(ctx: &mut Ctx, meta: &mut PageMeta, html: &str) -> OpResult<()> {
         let _ = vault::delete_page_files(&store.vault, meta);
         return Err(e);
     }
-    if let Err(e) = store.upsert(
-        meta,
-        &extract_text(html),
-        vault::page_mtime(&store.vault, meta),
-    ) {
+    if let Err(e) = store.upsert(meta, text, vault::page_mtime(&store.vault, meta)) {
         let _ = vault::delete_page_files(&store.vault, meta);
         return Err(e.to_string());
     }
@@ -336,9 +332,12 @@ pub(crate) fn create(
     fallback_title: Option<&str>,
     id_source: Option<&str>,
 ) -> OpResult<PageMeta> {
-    ensure_html(&args.html)?;
+    let analysis = analyze(&args.html);
+    if !analysis.looks_like_html {
+        return Err("not an HTML document".into());
+    }
     let folder = vault::clean_folder(args.folder.as_deref())?;
-    let source_title = extract_title(&args.html);
+    let source_title = analysis.title.clone();
     let title = args
         .title
         .map(|t| t.trim().to_string())
@@ -385,7 +384,7 @@ pub(crate) fn create(
         apply_schedule(&mut meta, minutes);
     }
 
-    insert(ctx, &mut meta, &args.html)?;
+    insert(ctx, &mut meta, &args.html, &analysis.text)?;
     Ok(meta)
 }
 
@@ -432,16 +431,14 @@ pub(crate) fn overwrite_html_by(
     base_updated_at: Option<i64>,
     caller: &str,
 ) -> OpResult<PageMeta> {
-    ensure_html(html)?;
+    let analysis = analyze(html);
+    if !analysis.looks_like_html {
+        return Err("not an HTML document".into());
+    }
     let mut meta = ctx.page(id)?;
     check_base(&ctx.store.vault, &meta, base_updated_at)?;
-    let new_source = extract_title(html);
-    if !new_source.is_empty()
-        && (meta.source_title.as_deref() == Some(meta.title.as_str()) || meta.title.is_empty())
-    {
-        meta.title = new_source.clone();
-    }
-    meta.source_title = Some(new_source);
+    meta.title = follow_document_title(&meta, &analysis.title);
+    meta.source_title = Some(analysis.title.clone());
     meta.updated_at = now_ms();
     let store = ctx.store;
     // Keep the bytes being replaced recoverable before they are overwritten.
@@ -453,11 +450,14 @@ pub(crate) fn overwrite_html_by(
     store
         .upsert(
             &meta,
-            &extract_text(html),
+            &analysis.text,
             vault::page_mtime(&store.vault, &meta),
         )
         .map_err(|e| e.to_string())?;
-    ctx.emit(events::PAGE_UPDATED, json!({ "page": meta }));
+    ctx.emit(
+        events::PAGE_UPDATED,
+        json!({ "page": meta, "htmlChanged": true }),
+    );
     Ok(meta)
 }
 
@@ -704,17 +704,18 @@ impl Extension for Pages {
                 let legacy_state = original.ext.remove(storage::EXT_KEY);
                 let store = ctx.store;
                 let html = vault::read_html(&store.vault, &original.id, original.folder.as_deref())?;
+                let analysis = analyze(&html);
                 let title = format!("{} (copy)", original.title);
                 let mut meta = PageMeta::new(vault::new_page_id(store, &title));
                 meta.title = title;
-                meta.source_title = Some(extract_title(&html));
+                meta.source_title = Some(analysis.title.clone());
                 meta.folder = original.folder;
                 meta.tags = original.tags;
                 meta.note = original.note;
                 meta.allow_cdn = original.allow_cdn;
                 meta.ext = original.ext;
                 meta.ext.remove("review");
-                insert(ctx, &mut meta, &html)?;
+                insert(ctx, &mut meta, &html, &analysis.text)?;
                 // Page state lives in its own file (or still in the original's
                 // legacy `ext`): the copy gets it under its own id.
                 storage::copy_state(&store.vault, &a.id, legacy_state.as_ref(), &meta.id)?;
