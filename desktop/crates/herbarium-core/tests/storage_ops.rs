@@ -331,3 +331,138 @@ fn storage_operations_are_ui_only() {
 
     let _ = std::fs::remove_dir_all(&vault);
 }
+
+fn state_file(vault: &Path, id: &str) -> PathBuf {
+    vault
+        .join(".herbarium")
+        .join("storage")
+        .join(format!("{id}.json"))
+}
+
+#[test]
+fn state_lives_in_its_own_file_and_never_in_the_sidecar_or_lists() {
+    let vault = temp_vault("own-file");
+    let host = open(&vault);
+    let id = uid(&create(&host, "Roomy", None));
+    write(
+        &host,
+        &id,
+        json!([{ "area": "local", "key": "k", "value": "zzzbulkyvalue" }]),
+    )
+    .unwrap();
+
+    assert!(state_file(&vault, &id).exists());
+    let sidecar = std::fs::read_to_string(vault.join(format!("{id}.json"))).unwrap();
+    assert!(!sidecar.contains("zzzbulkyvalue"), "sidecar untouched");
+
+    for (name, args) in [
+        ("pages.list", json!({})),
+        ("pages.search", json!({ "query": "" })),
+        ("pages.get", json!({ "id": id })),
+        ("today.summary", json!({})),
+    ] {
+        let out = host.call(Caller::Ui, name, args).unwrap().to_string();
+        assert!(!out.contains("zzzbulkyvalue"), "{name} carries page state");
+    }
+
+    // Clearing removes the file.
+    host.call(Caller::Ui, "storage.clear", json!({ "id": id }))
+        .unwrap();
+    assert!(!state_file(&vault, &id).exists());
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn legacy_sidecar_state_migrates_to_the_file_on_open_and_on_use() {
+    let vault = temp_vault("legacy");
+    let (a, b) = {
+        let host = open(&vault);
+        (
+            uid(&create(&host, "Old A", None)),
+            uid(&create(&host, "Old B", None)),
+        )
+    };
+    // Hand-write the pre-migration layout into both sidecars.
+    for id in [&a, &b] {
+        let path = vault.join(format!("{id}.json"));
+        let mut meta: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        meta["ext"] = json!({
+            "storage": { "local": { "legacy": "yes" } },
+            "look": { "icon": "🌿" }
+        });
+        std::fs::write(&path, serde_json::to_string_pretty(&meta).unwrap()).unwrap();
+    }
+
+    // Reopening indexes and migrates every page.
+    let host = open(&vault);
+    for id in [&a, &b] {
+        assert!(state_file(&vault, id).exists(), "{id} migrated at index");
+        let sidecar = std::fs::read_to_string(vault.join(format!("{id}.json"))).unwrap();
+        assert!(!sidecar.contains("\"storage\""), "{id} stripped");
+        assert!(sidecar.contains("🌿"), "other ext keys are kept");
+        assert_eq!(get(&host, id)["local"]["legacy"], "yes");
+    }
+    let meta = host
+        .call(Caller::Agent, "pages.get", json!({ "id": a }))
+        .unwrap();
+    assert!(meta["meta"]["ext"].get("storage").is_none());
+
+    // A legacy sidecar that appears later is migrated by the first storage op.
+    let path = vault.join(format!("{a}.json"));
+    let mut sidecar: Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    sidecar["ext"]["storage"] = json!({ "shared": { "late": "1" } });
+    std::fs::write(&path, serde_json::to_string_pretty(&sidecar).unwrap()).unwrap();
+    host.call(Caller::Agent, "vault.rescan", json!({})).unwrap();
+    let state = get(&host, &a);
+    assert_eq!(state["shared"]["late"], "1");
+    assert_eq!(state["local"]["legacy"], "yes", "file entries are kept");
+    let _ = std::fs::remove_dir_all(&vault);
+}
+
+#[test]
+fn duplicate_copies_state_and_purge_removes_it() {
+    let vault = temp_vault("dup-purge");
+    let host = open(&vault);
+    let id = uid(&create(&host, "Original", None));
+    write(
+        &host,
+        &id,
+        json!([{ "area": "personal", "key": "p", "value": "v" }]),
+    )
+    .unwrap();
+
+    let copy = uid(&host
+        .call(Caller::Agent, "pages.duplicate", json!({ "id": id }))
+        .unwrap());
+    assert_eq!(get(&host, &copy)["personal"]["p"], "v");
+    write(
+        &host,
+        &copy,
+        json!([{ "area": "personal", "key": "p", "value": "changed" }]),
+    )
+    .unwrap();
+    assert_eq!(
+        get(&host, &id)["personal"]["p"],
+        "v",
+        "copies are independent"
+    );
+
+    host.call(Caller::Agent, "pages.delete", json!({ "id": copy }))
+        .unwrap();
+    assert!(state_file(&vault, &copy).exists(), "trash keeps the state");
+    host.call(Caller::Ui, "pages.purge", json!({ "id": copy }))
+        .unwrap();
+    assert!(!state_file(&vault, &copy).exists());
+    assert!(
+        state_file(&vault, &id).exists(),
+        "other pages are untouched"
+    );
+
+    host.call(Caller::Agent, "pages.delete", json!({ "id": id }))
+        .unwrap();
+    host.call(Caller::Ui, "pages.purge", json!({})).unwrap();
+    assert!(!state_file(&vault, &id).exists());
+    let _ = std::fs::remove_dir_all(&vault);
+}

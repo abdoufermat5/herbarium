@@ -1,8 +1,9 @@
 // Page previews: a small layout digest of each page's first screen (blocks
 // with their colours, text lines, one image), measured inside the page by
 // the reader bridge and drawn by the app as a miniature. Kept in
-// `.herbarium/previews/<id>.json` with the page's `updatedAt`, so a changed
-// page gets a new one. The page reports the digest, so everything in it is
+// `.herbarium/previews/<id>.json` with a stamp of the page's HTML (size +
+// mtime, not `updatedAt`: reviews, tags and notes never touch the HTML), so a
+// page whose HTML changed gets a new one. The page reports the digest, so everything in it is
 // checked here: numbers clamped, colours only `rgb()`/`rgba()`, the image
 // only a PNG, JPEG or WebP data URL.
 
@@ -69,7 +70,8 @@ struct Digest {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Stored {
-    updated_at: i64,
+    /// `Store::html_stamp_for` when the digest was measured.
+    html_stamp: String,
     digest: Digest,
 }
 
@@ -203,7 +205,11 @@ impl Extension for Previews {
                     let vault = &ctx.store.vault;
                     std::fs::create_dir_all(dir(vault)).map_err(|e| e.to_string())?;
                     let stored = Stored {
-                        updated_at: meta.updated_at,
+                        html_stamp: ctx
+                            .store
+                            .html_stamp_for(&meta.id)
+                            .map_err(|e| e.to_string())?
+                            .unwrap_or_default(),
                         digest,
                     };
                     vault::write_atomic(
@@ -239,11 +245,12 @@ impl Extension for Previews {
                             }
                         }
                     }
+                    let stamps = ctx.store.html_stamps().map_err(|e| e.to_string())?;
                     let mut previews: BTreeMap<String, Value> = BTreeMap::new();
                     let mut missing = Vec::new();
                     for meta in ctx.store.all().map_err(|e| e.to_string())? {
                         match stored.get(&meta.id) {
-                            Some(s) if s.updated_at == meta.updated_at => {
+                            Some(s) if stamps.get(&meta.id) == Some(&s.html_stamp) => {
                                 previews.insert(
                                     meta.id,
                                     serde_json::to_value(&s.digest).unwrap_or(Value::Null),

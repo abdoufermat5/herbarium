@@ -124,7 +124,9 @@ pub fn check(ctx: &Ctx, meta: &PageMeta) -> OpResult<Vec<Issue>> {
     }
     // Broken links come from the `links` table (kept fresh by `refresh_links`),
     // so no per-link metadata lookup is needed.
-    let broken: Vec<String> = store.broken_links_from(&meta.id).map_err(|e| e.to_string())?;
+    let broken: Vec<String> = store
+        .broken_links_from(&meta.id)
+        .map_err(|e| e.to_string())?;
     if !broken.is_empty() {
         issues.push(Issue {
             kind: "broken-links",

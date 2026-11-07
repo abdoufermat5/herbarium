@@ -1,12 +1,12 @@
 // SQLite index for pages. Rebuildable at any time from the vault files
 // (see `crate::vault::index_vault`). Not the source of truth, only an index.
 
-use std::collections::{BTreeMap, HashSet};
-use std::path::PathBuf;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, Params, Row, params};
 
-use crate::models::{PageMeta, SCHEMA_VERSION, SearchHit, TagCount};
+use crate::models::{PageMeta, PageSource, SCHEMA_VERSION, SearchHit, TagCount};
 use crate::time::now_secs;
 
 const COLUMNS: &str = "id,title,tags,folder,note,created_at,updated_at,interval_minutes,next_review,last_review,allow_cdn,ext,source_title";
@@ -28,11 +28,14 @@ CREATE TABLE IF NOT EXISTS pages (
   mtime         INTEGER NOT NULL DEFAULT 0,
   ext           TEXT NOT NULL DEFAULT '{}',
   source_title  TEXT,
+  source_url    TEXT,
+  search_note   TEXT NOT NULL DEFAULT '',
   fingerprint   TEXT NOT NULL DEFAULT '',
   html_fingerprint TEXT NOT NULL DEFAULT ''
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS pages_fts USING fts5(
-  id UNINDEXED, title, tags, folder, note, text, tokenize='porter'
+  id UNINDEXED, title, tags, folder, search_note, text_content,
+  content='pages', tokenize='porter'
 );
 CREATE TABLE IF NOT EXISTS links (
   src TEXT NOT NULL,
@@ -43,6 +46,10 @@ CREATE INDEX IF NOT EXISTS links_dst ON links(dst);
 CREATE TABLE IF NOT EXISTS link_scans (
   src         TEXT PRIMARY KEY,
   fingerprint TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sync (
+  n  INTEGER PRIMARY KEY,
+  at INTEGER NOT NULL
 );
 ";
 
@@ -58,6 +65,16 @@ pub(crate) struct IndexRow {
     pub source_title: Option<String>,
     pub mtime: i64,
     pub fingerprint: String,
+}
+
+/// A page ready to be written by [`upsert_on`]: the fingerprints come from
+/// stats the caller already collected, so the store never stats a file.
+pub(crate) struct IndexedPage<'a> {
+    pub meta: &'a PageMeta,
+    pub text: &'a str,
+    pub mtime: i64,
+    pub fingerprint: &'a str,
+    pub html_fingerprint: &'a str,
 }
 
 fn row_to_meta(row: &Row) -> rusqlite::Result<PageMeta> {
@@ -85,9 +102,14 @@ impl Store {
         let dir = vault.join(".herbarium");
         std::fs::create_dir_all(&dir).ok();
         let conn = Connection::open(dir.join("index.sqlite"))?;
-        conn.pragma_update(None, "journal_mode", "WAL").ok();
         conn.pragma_update(None, "busy_timeout", 5000).ok();
-        conn.execute_batch(SCHEMA)?;
+        let wal: Result<String, _> = conn.query_row("PRAGMA journal_mode = WAL", [], |r| r.get(0));
+        if !matches!(wal.as_deref(), Ok("wal")) {
+            eprintln!(
+                "herbarium: journal_mode is not WAL ({wal:?}); writer contention may be higher"
+            );
+        }
+        conn.pragma_update(None, "synchronous", "NORMAL").ok();
         migrate(&conn)?;
         Ok(Store { vault, conn })
     }
@@ -98,48 +120,81 @@ impl Store {
             crate::vault::page_fingerprint(&self.vault, &meta.id, meta.folder.as_deref());
         let html_fingerprint =
             crate::vault::html_fingerprint(&self.vault, &meta.id, meta.folder.as_deref());
-        let tx = self.conn.unchecked_transaction()?;
-        upsert_row(&tx, meta, text, mtime, &fingerprint, &html_fingerprint)?;
-        tx.commit()
-    }
-
-    /// Insert or refresh many pages in one transaction. The caller supplies the
-    /// fingerprints it already computed from filesystem stats, so a whole-vault
-    /// rescan does not stat each file again inside the store.
-    pub(crate) fn upsert_many(
-        &self,
-        items: &[(PageMeta, String, i64, String, String)],
-    ) -> rusqlite::Result<()> {
-        let tx = self.conn.unchecked_transaction()?;
-        for (meta, text, mtime, fingerprint, html_fingerprint) in items {
-            upsert_row(&tx, meta, text, *mtime, fingerprint, html_fingerprint)?;
-        }
-        tx.commit()
+        self.batch(|tx| {
+            upsert_on(
+                tx,
+                &IndexedPage {
+                    meta,
+                    text,
+                    mtime,
+                    fingerprint: &fingerprint,
+                    html_fingerprint: &html_fingerprint,
+                },
+            )
+        })
     }
 
     /// One query for every page's (folder, source_title, mtime, fingerprint):
     /// the fields the rescan fast path compares before reading anything.
-    pub(crate) fn index_rows(&self) -> rusqlite::Result<BTreeMap<String, IndexRow>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, folder, source_title, mtime, fingerprint FROM pages",
-        )?;
-        let rows = stmt.query_map([], |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                IndexRow {
-                    folder: r.get(1)?,
-                    source_title: r.get(2)?,
-                    mtime: r.get(3)?,
-                    fingerprint: r.get(4)?,
-                },
-            ))
-        })?;
-        let mut out = BTreeMap::new();
-        for row in rows {
-            let (id, index_row) = row?;
-            out.insert(id, index_row);
-        }
+    pub(crate) fn index_rows(&self) -> rusqlite::Result<HashMap<String, IndexRow>> {
+        self.conn
+            .prepare("SELECT id, folder, source_title, mtime, fingerprint FROM pages")?
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    IndexRow {
+                        folder: r.get(1)?,
+                        source_title: r.get(2)?,
+                        mtime: r.get(3)?,
+                        fingerprint: r.get(4)?,
+                    },
+                ))
+            })?
+            .collect()
+    }
+
+    /// Update a page's metadata columns (and its searchable note) without
+    /// touching its indexed text. Used by metadata-only saves (`Ctx::save`):
+    /// tags, notes, review schedule, source, highlights. The FTS triggers keep
+    /// the index in step. `mtime`/`fingerprint` still change because the
+    /// sidecar was rewritten on disk.
+    pub fn update_meta(&self, meta: &PageMeta) -> rusqlite::Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        update_meta_on(&tx, &self.vault, meta)?;
+        tx.commit()
+    }
+
+    /// Run `f` inside a single transaction, committing on success. Exposed so a
+    /// caller (e.g. the rescan indexer) can batch many writes without paying
+    /// one transaction per row. Returns `f`'s result.
+    pub fn batch<F, T>(&self, f: F) -> rusqlite::Result<T>
+    where
+        F: FnOnce(&rusqlite::Transaction) -> rusqlite::Result<T>,
+    {
+        let tx = self.conn.unchecked_transaction()?;
+        let out = f(&tx)?;
+        tx.commit()?;
         Ok(out)
+    }
+
+    /// The stamp of a page's HTML alone (size + mtime), `None` for an unknown
+    /// page. Unlike `updated_at` it moves only when the HTML file changes.
+    pub fn html_stamp_for(&self, id: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT html_fingerprint FROM pages WHERE id = ?1",
+                params![id],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
+    /// [`Store::html_stamp_for`] for every page, in one query.
+    pub fn html_stamps(&self) -> rusqlite::Result<HashMap<String, String>> {
+        self.conn
+            .prepare("SELECT id, html_fingerprint FROM pages")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect()
     }
 
     pub fn fingerprint_for(&self, id: &str) -> rusqlite::Result<Option<String>> {
@@ -198,15 +253,74 @@ impl Store {
         )
     }
 
-    /// Pages whose `ext` JSON contains `needle`, ignoring ASCII case: a cheap
-    /// prefilter before looking at one `ext` field properly.
-    pub fn with_ext_containing(&self, needle: &str) -> rusqlite::Result<Vec<PageMeta>> {
+    /// Pages whose metadata still carries a legacy `ext.storage` blob.
+    pub fn with_legacy_storage(&self) -> rusqlite::Result<Vec<PageMeta>> {
+        self.query_metas(
+            &format!("SELECT {COLUMNS} FROM pages WHERE json_type(ext, '$.storage') IS NOT NULL"),
+            [],
+        )
+    }
+
+    /// List page metadata, optionally limited to a folder (including its
+    /// subfolders) or an exact tag, in the same `title COLLATE NOCASE` order
+    /// as `all`. Folder/tag/limit are pushed into SQL rather than filtering in
+    /// memory.
+    pub fn list_filtered(
+        &self,
+        folder: Option<&str>,
+        tag: Option<&str>,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<PageMeta>> {
+        let limit_param = if limit == usize::MAX {
+            i64::MAX
+        } else {
+            limit as i64
+        };
+        let mut where_sql = String::new();
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+        let mut n = 1;
+        if let Some(f) = folder {
+            where_sql.push_str(&format!(
+                "WHERE (folder = ?{n} OR folder LIKE ?{} ESCAPE '\\')",
+                n + 1
+            ));
+            args.push(Box::new(f.to_string()));
+            args.push(Box::new(format!("{}/%", like_escape(f))));
+            n += 2;
+        }
+        if let Some(t) = tag {
+            where_sql.push_str(if where_sql.is_empty() {
+                "WHERE "
+            } else {
+                " AND "
+            });
+            where_sql.push_str(&format!(
+                "EXISTS (SELECT 1 FROM json_each(tags) WHERE json_each.value = ?{n})"
+            ));
+            args.push(Box::new(t.to_string()));
+            n += 1;
+        }
+        let sql = format!(
+            "SELECT {COLUMNS} FROM pages {where_sql} ORDER BY title COLLATE NOCASE LIMIT ?{n}"
+        );
+        args.push(Box::new(limit_param));
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            row_to_meta,
+        )?;
+        rows.collect()
+    }
+
+    /// Pages whose normalized source URL equals `url` (lowercased scheme/host,
+    /// no fragment, no trailing slash), in title order.
+    pub fn find_by_url(&self, url: &str) -> rusqlite::Result<Vec<PageMeta>> {
         self.query_metas(
             &format!(
-                "SELECT {COLUMNS} FROM pages WHERE instr(lower(ext), lower(?1)) > 0
+                "SELECT {COLUMNS} FROM pages WHERE source_url = ?1
                  ORDER BY title COLLATE NOCASE"
             ),
-            params![needle],
+            params![url],
         )
     }
 
@@ -229,61 +343,102 @@ impl Store {
             })?;
             return rows.collect();
         }
-        let page_cols = COLUMNS
-            .split(',')
-            .map(|col| format!("p.{col}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let sql = format!(
-            "SELECT {page_cols}, snippet(pages_fts, 5, '[', ']', '…', 12)
-             FROM pages_fts f JOIN pages p ON p.id = f.id
-             WHERE pages_fts MATCH ?1
-             ORDER BY bm25(pages_fts, 0, 10, 4, 2, 3, 1), p.title COLLATE NOCASE
-             LIMIT ?2"
-        );
-        let fts_hits = self.conn.prepare(&sql).and_then(|mut stmt| {
-            let rows = stmt.query_map(params![expr, limit_param], |r| {
-                let meta = row_to_meta(r)?;
-                let snip: Option<String> = r.get(13)?;
-                let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
-                Ok(SearchHit { meta, snippet })
-            })?;
-            rows.collect::<rusqlite::Result<Vec<_>>>()
-        });
-        match fts_hits {
-            Ok(hits) if !hits.is_empty() => Ok(hits),
-            _ => self.like_search(query, limit),
+        match self.fts_search(&expr, None, None, limit_param) {
+            Ok(hits) => Ok(hits),
+            // The query couldn't be parsed as an FTS expression: retry it as a
+            // sanitized phrase so it still matches literally instead of erroring.
+            Err(_) => self.fts_search(&fts_phrase(query), None, None, limit_param),
         }
     }
 
-    fn like_search(&self, query: &str, limit: usize) -> rusqlite::Result<Vec<SearchHit>> {
-        let like = like_pattern(query);
+    /// Like `search`, but with a folder (incl. subfolders) and/or tag narrowed
+    /// in SQL. Used for filtered searches so the folder/tag predicates never
+    /// load and discard every page in memory.
+    pub fn search_filtered(
+        &self,
+        text: &str,
+        folder: Option<&str>,
+        tag: Option<&str>,
+        limit: usize,
+    ) -> rusqlite::Result<Vec<SearchHit>> {
         let limit_param = if limit == usize::MAX {
             i64::MAX
         } else {
             limit as i64
         };
+        let expr = fts_expr(text);
+        if expr.is_empty() {
+            let metas = self.list_filtered(folder, tag, limit)?;
+            return Ok(metas
+                .into_iter()
+                .map(|meta| SearchHit {
+                    meta,
+                    snippet: None,
+                })
+                .collect());
+        }
+        match self.fts_search(&expr, folder, tag, limit_param) {
+            Ok(hits) => Ok(hits),
+            Err(_) => self.fts_search(&fts_phrase(text), folder, tag, limit_param),
+        }
+    }
+
+    /// One FTS query, optionally narrowed to a folder (incl. subfolders) and/or
+    /// a case-insensitive tag. Returns hits in bm25 rank order, then title.
+    fn fts_search(
+        &self,
+        expr: &str,
+        folder: Option<&str>,
+        tag: Option<&str>,
+        limit_param: i64,
+    ) -> rusqlite::Result<Vec<SearchHit>> {
+        let page_cols = COLUMNS
+            .split(',')
+            .map(|col| format!("p.{col}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut where_sql = String::from("pages_fts MATCH ?");
+        let mut args: Vec<Box<dyn rusqlite::ToSql>> = vec![Box::new(expr.to_string())];
+        let mut n = 2;
+        if let Some(f) = folder {
+            where_sql.push_str(&format!(
+                " AND (p.folder = ?{n} OR p.folder LIKE ?{} ESCAPE '\\')",
+                n + 1
+            ));
+            args.push(Box::new(f.to_string()));
+            args.push(Box::new(format!("{}/%", like_escape(f))));
+            n += 2;
+        }
+        if let Some(t) = tag {
+            where_sql.push_str(&format!(
+                " AND EXISTS (SELECT 1 FROM json_each(p.tags) WHERE json_each.value = ?{n} COLLATE NOCASE)"
+            ));
+            args.push(Box::new(t.to_string()));
+            n += 1;
+        }
         let sql = format!(
-            "SELECT {COLUMNS} FROM pages
-             WHERE title LIKE ?1 ESCAPE '\\' OR tags LIKE ?1 ESCAPE '\\'
-                OR folder LIKE ?1 ESCAPE '\\' OR note LIKE ?1 ESCAPE '\\'
-                OR text_content LIKE ?1 ESCAPE '\\'
-                OR source_title LIKE ?1 ESCAPE '\\'
-             ORDER BY title COLLATE NOCASE LIMIT ?2"
+            "SELECT {page_cols}, snippet(pages_fts, 5, '[', ']', '…', 12)
+             FROM pages_fts f JOIN pages p ON p.id = f.id
+             WHERE {where_sql}
+             ORDER BY bm25(pages_fts, 0, 10, 4, 2, 3, 1), p.title COLLATE NOCASE
+             LIMIT ?{n}"
         );
+        args.push(Box::new(limit_param));
         let mut stmt = self.conn.prepare(&sql)?;
-        let rows = stmt.query_map(params![like, limit_param], |r| {
-            let meta = row_to_meta(r)?;
-            Ok(SearchHit {
-                meta,
-                snippet: None,
-            })
-        })?;
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(args.iter().map(|a| a.as_ref())),
+            |r| {
+                let meta = row_to_meta(r)?;
+                let snip: Option<String> = r.get(13)?;
+                let snippet = snip.filter(|s| s.contains('[') && s.contains(']'));
+                Ok(SearchHit { meta, snippet })
+            },
+        )?;
         rows.collect()
     }
 
-    /// Bring the link index up to date: rescan every page whose files changed
-    /// since its last scan (`html` reads a page's HTML; `None` skips it) and
+    /// Bring the link index up to date: rescan every page whose HTML changed
+    /// since its last scan (sidecar-only writes do not count) (`html` reads a page's HTML; `None` skips it) and
     /// forget pages that are gone. Cheap when nothing changed.
     pub fn refresh_links(
         &self,
@@ -380,33 +535,38 @@ impl Store {
             .collect()
     }
 
-    /// Update the `folder` column in place for a folder rename: exact matches
-    /// and nested pages (`from/...` → `to/...`). Returns the number of changed
-    /// rows. Prefixes are compared with `substr` (not `LIKE`) so folder names
-    /// containing `%`/`_` are treated literally.
+    /// Point the index at a renamed folder without rescanning: every page in
+    /// `from` or below it moves to the same place under `to`. The files were
+    /// moved (and their sidecars rewritten) by `vault::rename_folder`, so the
+    /// moved rows also take their new mtime/fingerprint from disk; the
+    /// `pages_au` trigger refreshes the FTS `folder` column. Returns the number
+    /// of rows moved. Prefixes are compared with `substr` (not `LIKE`) so folder
+    /// names containing `%`/`_` are literal.
     pub fn rename_folder(&self, from: &str, to: &str) -> rusqlite::Result<usize> {
         let prefix = format!("{from}/");
         let prefix_len = prefix.chars().count() as i64;
-        let tx = self.conn.unchecked_transaction()?;
-        let mut changed = tx.execute(
-            "UPDATE pages SET folder = ?2 WHERE folder = ?1",
-            params![from, to],
-        )?;
-        changed += tx.execute(
-            "UPDATE pages SET folder = ?2 || substr(folder, ?3)
-             WHERE substr(folder, 1, ?3) = ?1",
-            params![prefix, to, prefix_len],
-        )?;
-        // Resync the search index's folder column for the moved rows.
-        let affected: Vec<String> = tx
-            .prepare("SELECT id FROM pages WHERE folder = ?2 OR substr(folder, 1, ?3) = ?1")?
-            .query_map(params![prefix, to, prefix_len], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
-        for id in &affected {
-            resync_fts(&tx, id)?;
-        }
-        tx.commit()?;
-        Ok(changed)
+        self.batch(|tx| {
+            let moved: Vec<(String, Option<String>)> = tx
+                .prepare(
+                    "SELECT id, folder FROM pages
+                     WHERE folder = ?1 OR substr(folder, 1, ?2) = ?3",
+                )?
+                .query_map(params![from, prefix_len, prefix], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
+                .collect::<rusqlite::Result<_>>()?;
+            for (id, old) in &moved {
+                let old = old.as_deref().unwrap_or_default();
+                let new = format!("{to}{}", &old[from.len()..]);
+                let fingerprint = crate::vault::page_fingerprint(&self.vault, id, Some(&new));
+                let mtime = crate::vault::stat_mtime(&self.vault, id, Some(&new));
+                tx.execute(
+                    "UPDATE pages SET folder = ?2, fingerprint = ?3, mtime = ?4 WHERE id = ?1",
+                    params![id, new, fingerprint, mtime],
+                )?;
+            }
+            Ok(moved.len())
+        })
     }
 
     /// Count of every page due for review at or before `now_ms`, with no cap.
@@ -455,18 +615,27 @@ impl Store {
         rows.collect()
     }
 
-    /// Remove every indexed page whose id is not in `keep`.
-    pub fn remove_all_except(&self, keep: &HashSet<String>) -> rusqlite::Result<usize> {
-        let all: Vec<String> = self
-            .conn
+    /// Every indexed page id.
+    pub fn ids(&self) -> rusqlite::Result<HashSet<String>> {
+        self.conn
             .prepare("SELECT id FROM pages")?
             .query_map([], |r| r.get(0))?
-            .collect::<rusqlite::Result<_>>()?;
+            .collect()
+    }
+
+    /// Remove the pages in `indexed_before` whose id is not in `keep`. Pages
+    /// indexed after `indexed_before` was taken (by another process, while a
+    /// rescan was walking the vault) are never touched.
+    pub fn remove_missing(
+        &self,
+        indexed_before: &HashSet<String>,
+        keep: &HashSet<String>,
+    ) -> rusqlite::Result<usize> {
         let mut removed = 0;
         let tx = self.conn.unchecked_transaction()?;
-        for id in all {
-            if !keep.contains(&id) {
-                delete_row(&tx, &id)?;
+        for id in indexed_before {
+            if !keep.contains(id) {
+                delete_row(&tx, id)?;
                 removed += 1;
             }
         }
@@ -483,9 +652,6 @@ impl Store {
 
     /// Last successful rescan, for the sidebar sync note.
     pub fn set_synced_at(&self) {
-        let _ = self.conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS sync (n INTEGER PRIMARY KEY, at INTEGER NOT NULL);",
-        );
         let _ = self.conn.execute(
             "INSERT INTO sync(n, at) VALUES (1, ?1) ON CONFLICT(n) DO UPDATE SET at=?1",
             params![now_secs()],
@@ -501,79 +667,90 @@ impl Store {
     }
 }
 
-/// Remove one page from both tables. The FTS row goes first: it is found
-/// through the `pages` rowid.
+/// Remove one page from the index. The `pages_ad` trigger removes its FTS row
+/// (keyed by the shared `pages` rowid) automatically.
 fn delete_row(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-    conn.execute(
-        "DELETE FROM pages_fts WHERE rowid = (SELECT rowid FROM pages WHERE id = ?1)",
-        params![id],
-    )?;
     conn.execute("DELETE FROM pages WHERE id = ?1", params![id])?;
     Ok(())
 }
 
-/// Rebuild one page's FTS row from its current `pages` row (used after a
-/// folder rename updates the `folder` column, which the search index mirrors).
-fn resync_fts(conn: &Connection, id: &str) -> rusqlite::Result<()> {
-    let meta: PageMeta = conn.query_row(
-        &format!("SELECT {COLUMNS} FROM pages WHERE id = ?1"),
-        params![id],
-        row_to_meta,
-    )?;
-    let text: String = conn.query_row(
-        "SELECT text_content FROM pages WHERE id = ?1",
-        params![id],
-        |r| r.get(0),
-    )?;
+/// Write one page row (metadata, text, mtime and both fingerprints) on any
+/// connection or transaction. The `pages_ai`/`pages_au` triggers keep
+/// `pages_fts` (an external-content table) in step, so no FTS write is needed.
+pub(crate) fn upsert_on(conn: &Connection, page: &IndexedPage) -> rusqlite::Result<()> {
+    let meta = page.meta;
     let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
-    conn.execute(
-        "INSERT OR REPLACE INTO pages_fts (rowid, id, title, tags, folder, note, text)
-         SELECT rowid, ?1, ?2, ?3, ?4, ?5, ?6 FROM pages WHERE id = ?1",
-        params![
-            meta.id,
-            meta.title,
-            tags,
-            meta.folder.as_deref().unwrap_or_default(),
-            fts_note(&meta),
-            text,
-        ],
-    )?;
+    let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
+    let source_url = PageSource::of(meta)
+        .and_then(|s| s.url)
+        .map(|u| normalize_url(&u));
+    let search_note = fts_note(meta);
+    conn.prepare_cached(&format!(
+        "INSERT INTO pages ({COLUMNS}, text_content, mtime, source_url, search_note, fingerprint, html_fingerprint)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)
+         ON CONFLICT(id) DO UPDATE SET
+           title=excluded.title, tags=excluded.tags, folder=excluded.folder,
+           note=excluded.note, updated_at=excluded.updated_at,
+           interval_minutes=excluded.interval_minutes, next_review=excluded.next_review,
+           last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
+           ext=excluded.ext, source_title=excluded.source_title,
+           source_url=excluded.source_url, search_note=excluded.search_note,
+           text_content=excluded.text_content, mtime=excluded.mtime,
+           fingerprint=excluded.fingerprint, html_fingerprint=excluded.html_fingerprint"
+    ))?
+    .execute(params![
+        meta.id,
+        meta.title,
+        tags,
+        meta.folder,
+        meta.note,
+        meta.created_at,
+        meta.updated_at,
+        meta.interval_minutes,
+        meta.next_review,
+        meta.last_review,
+        if meta.allow_cdn { 1 } else { 0 },
+        ext,
+        meta.source_title,
+        page.text,
+        page.mtime,
+        source_url,
+        search_note,
+        page.fingerprint,
+        page.html_fingerprint,
+    ])?;
     Ok(())
 }
 
-/// Write one page row and its FTS row into `conn`. `fingerprint` and
-/// `html_fingerprint` are computed by the caller so batched upserts avoid
-/// re-statting files.
-fn upsert_row(
+/// Write `meta`'s metadata columns (not `text_content`) to the index, on any
+/// connection (or transaction). The `pages_au` trigger refreshes its FTS row.
+/// `mtime`/`fingerprint` are recomputed because the sidecar changed on disk.
+pub(crate) fn update_meta_on(
     conn: &Connection,
+    vault: &Path,
     meta: &PageMeta,
-    text: &str,
-    mtime: i64,
-    fingerprint: &str,
-    html_fingerprint: &str,
 ) -> rusqlite::Result<()> {
     let tags = serde_json::to_string(&meta.tags).unwrap_or_else(|_| "[]".into());
     let ext = serde_json::to_string(&meta.ext).unwrap_or_else(|_| "{}".into());
+    let source_url = PageSource::of(meta)
+        .and_then(|s| s.url)
+        .map(|u| normalize_url(&u));
+    let search_note = fts_note(meta);
+    let fingerprint = crate::vault::page_fingerprint(vault, &meta.id, meta.folder.as_deref());
+    let mtime = crate::vault::page_mtime(vault, meta);
     conn.execute(
-        &format!(
-            "INSERT INTO pages ({COLUMNS}, text_content, mtime, fingerprint, html_fingerprint)
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
-             ON CONFLICT(id) DO UPDATE SET
-               title=excluded.title, tags=excluded.tags, folder=excluded.folder,
-               note=excluded.note, updated_at=excluded.updated_at,
-               interval_minutes=excluded.interval_minutes, next_review=excluded.next_review,
-               last_review=excluded.last_review, allow_cdn=excluded.allow_cdn,
-               ext=excluded.ext, source_title=excluded.source_title,
-               text_content=excluded.text_content, mtime=excluded.mtime,
-               fingerprint=excluded.fingerprint, html_fingerprint=excluded.html_fingerprint"
-        ),
+        "UPDATE pages SET
+           title=?2, tags=?3, folder=?4, note=?5, updated_at=?6,
+           interval_minutes=?7, next_review=?8, last_review=?9, allow_cdn=?10,
+           ext=?11, source_title=?12, source_url=?13, search_note=?14,
+           mtime=?15, fingerprint=?16
+         WHERE id=?1",
         params![
             meta.id,
             meta.title,
             tags,
             meta.folder,
             meta.note,
-            meta.created_at,
             meta.updated_at,
             meta.interval_minutes,
             meta.next_review,
@@ -581,36 +758,48 @@ fn upsert_row(
             if meta.allow_cdn { 1 } else { 0 },
             ext,
             meta.source_title,
-            text,
+            source_url,
+            search_note,
             mtime,
             fingerprint,
-            html_fingerprint,
-        ],
-    )?;
-    // FTS rows share the `pages` rowid (stable across ON CONFLICT updates),
-    // so replacing one is an indexed lookup instead of a full FTS scan.
-    conn.execute(
-        "INSERT OR REPLACE INTO pages_fts (rowid, id, title, tags, folder, note, text)
-         SELECT rowid, ?1, ?2, ?3, ?4, ?5, ?6 FROM pages WHERE id = ?1",
-        params![
-            meta.id,
-            meta.title,
-            tags,
-            meta.folder.as_deref().unwrap_or_default(),
-            fts_note(meta),
-            text,
         ],
     )?;
     Ok(())
 }
 
-/// `PRAGMA user_version` once FTS rows are keyed by the `pages` rowid.
-/// `PRAGMA user_version` once FTS has the `note` column and rowid mapping.
-const FTS_ROWID_VERSION: i64 = 2;
+/// `PRAGMA user_version` once FTS rows are keyed by the `pages` rowid and the
+/// FTS table is an external-content table maintained by triggers.
+const FTS_ROWID_VERSION: i64 = 3;
+
+/// Bring the schema up to date. All steps run in one `BEGIN IMMEDIATE`
+/// transaction: a second process opening the same index waits (busy_timeout)
+/// for the first to finish, then finds every step already applied instead of
+/// racing it into "duplicate column". Append new idempotent steps to
+/// `migrate_steps`.
+fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    in_immediate_tx(conn, |conn| {
+        conn.execute_batch(SCHEMA)?;
+        migrate_steps(conn)
+    })
+}
+
+fn in_immediate_tx(
+    conn: &Connection,
+    steps: impl FnOnce(&Connection) -> rusqlite::Result<()>,
+) -> rusqlite::Result<()> {
+    conn.execute_batch("BEGIN IMMEDIATE")?;
+    match steps(conn) {
+        Ok(()) => conn.execute_batch("COMMIT"),
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK");
+            Err(e)
+        }
+    }
+}
 
 /// Bring an index created by an older build up to the current columns.
 /// The index is rebuildable, so adding columns with defaults is enough.
-fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+fn migrate_steps(conn: &Connection) -> rusqlite::Result<()> {
     let has_ext = conn
         .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'ext'")?
         .exists([])?;
@@ -639,12 +828,16 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_fingerprint {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN fingerprint TEXT NOT NULL DEFAULT '';")?;
     }
+    // `html_fingerprint` covers the HTML file only: link staleness must not
+    // react to sidecar-only writes. Existing rows start from their combined
+    // fingerprint, which is what `link_scans` recorded.
     let has_html_fingerprint = conn
         .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'html_fingerprint'")?
         .exists([])?;
     if !has_html_fingerprint {
         conn.execute_batch(
-            "ALTER TABLE pages ADD COLUMN html_fingerprint TEXT NOT NULL DEFAULT '';",
+            "ALTER TABLE pages ADD COLUMN html_fingerprint TEXT NOT NULL DEFAULT '';
+             UPDATE pages SET html_fingerprint = fingerprint;",
         )?;
     }
     let has_note = conn
@@ -653,18 +846,85 @@ fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     if !has_note {
         conn.execute_batch("ALTER TABLE pages ADD COLUMN note TEXT NOT NULL DEFAULT '';")?;
     }
+    // `source_url` is the normalized page URL (lowercased scheme/host, no
+    // fragment, no trailing slash), used for exact `find_by_url` lookups.
+    let has_source_url = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'source_url'")?
+        .exists([])?;
+    if !has_source_url {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN source_url TEXT;")?;
+    }
+    // `search_note` is the denormalized note indexed by FTS (note + source
+    // tool/prompt + highlight quotes/notes). External-content FTS maps its
+    // columns to `pages` columns by name, so the indexed note lives here.
+    let has_search_note = conn
+        .prepare("SELECT 1 FROM pragma_table_info('pages') WHERE name = 'search_note'")?
+        .exists([])?;
+    if !has_search_note {
+        conn.execute_batch("ALTER TABLE pages ADD COLUMN search_note TEXT NOT NULL DEFAULT '';")?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS pages_folder ON pages(folder);
+         CREATE INDEX IF NOT EXISTS pages_next_review ON pages(next_review);
+         CREATE INDEX IF NOT EXISTS pages_created_at ON pages(created_at);
+         CREATE INDEX IF NOT EXISTS pages_source_url ON pages(source_url);",
+    )?;
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0))?;
     if version < FTS_ROWID_VERSION {
+        // Backfill the two derived columns before the FTS rebuild reads them.
+        // `index_vault` skips unchanged pages, so this must not wait for the
+        // next rescan.
+        let rows: Vec<(String, String, String)> = conn
+            .prepare("SELECT id, note, ext FROM pages")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (id, note, ext) in rows {
+            let mut meta = PageMeta::new(id.clone());
+            meta.note = note;
+            meta.ext = serde_json::from_str(&ext).unwrap_or_default();
+            let source_url = PageSource::of(&meta)
+                .and_then(|s| s.url)
+                .map(|u| normalize_url(&u));
+            let search_note = fts_note(&meta);
+            conn.execute(
+                "UPDATE pages SET source_url = ?1, search_note = ?2 WHERE id = ?3",
+                params![source_url, search_note, id],
+            )?;
+        }
         conn.execute_batch(&format!(
-            "BEGIN;
+            "DROP TRIGGER IF EXISTS pages_ai;
+             DROP TRIGGER IF EXISTS pages_ad;
+             DROP TRIGGER IF EXISTS pages_au;
              DROP TABLE IF EXISTS pages_fts;
              CREATE VIRTUAL TABLE pages_fts USING fts5(
-               id UNINDEXED, title, tags, folder, note, text, tokenize='porter'
+               id UNINDEXED, title, tags, folder, search_note, text_content,
+               content='pages', tokenize='porter'
              );
-             INSERT INTO pages_fts (rowid, id, title, tags, folder, note, text)
-               SELECT rowid, id, title, tags, COALESCE(folder, ''), note, text_content FROM pages;
-             PRAGMA user_version = {FTS_ROWID_VERSION};
-             COMMIT;"
+             CREATE TRIGGER pages_ai AFTER INSERT ON pages BEGIN
+               INSERT INTO pages_fts(rowid, id, title, tags, folder, search_note, text_content)
+               VALUES (new.rowid, new.id, new.title, new.tags,
+                       COALESCE(new.folder, ''), new.search_note, new.text_content);
+             END;
+             CREATE TRIGGER pages_ad AFTER DELETE ON pages BEGIN
+               INSERT INTO pages_fts(pages_fts, rowid, id, title, tags, folder, search_note, text_content)
+               VALUES ('delete', old.rowid, old.id, old.title, old.tags,
+                       COALESCE(old.folder, ''), old.search_note, old.text_content);
+             END;
+             CREATE TRIGGER pages_au AFTER UPDATE ON pages
+             WHEN old.title IS NOT new.title OR old.tags IS NOT new.tags
+               OR old.folder IS NOT new.folder OR old.search_note IS NOT new.search_note
+               OR old.text_content IS NOT new.text_content
+             BEGIN
+               INSERT INTO pages_fts(pages_fts, rowid, id, title, tags, folder, search_note, text_content)
+               VALUES ('delete', old.rowid, old.id, old.title, old.tags,
+                       COALESCE(old.folder, ''), old.search_note, old.text_content);
+               INSERT INTO pages_fts(rowid, id, title, tags, folder, search_note, text_content)
+               VALUES (new.rowid, new.id, new.title, new.tags,
+                       COALESCE(new.folder, ''), new.search_note, new.text_content);
+             END;
+             INSERT INTO pages_fts (rowid, id, title, tags, folder, search_note, text_content)
+               SELECT rowid, id, title, tags, COALESCE(folder, ''), search_note, text_content FROM pages;
+             PRAGMA user_version = {FTS_ROWID_VERSION};"
         ))?;
     }
     Ok(())
@@ -682,15 +942,40 @@ fn fts_expr(query: &str) -> String {
         .join(" ")
 }
 
-fn like_pattern(query: &str) -> String {
-    let esc: String = query
-        .chars()
-        .map(|c| match c {
-            '%' | '_' | '\\' => format!("\\{c}"),
-            _ => c.to_string(),
-        })
-        .collect();
-    format!("%{esc}%")
+/// A sanitized FTS5 phrase query: the raw query treated as one literal phrase
+/// (quotes escaped), used when the prefix expression fails to parse.
+fn fts_phrase(query: &str) -> String {
+    format!("\"{}\"", query.replace('"', "\"\""))
+}
+
+/// Escape LIKE metacharacters so a value is matched literally with `ESCAPE '\\'`.
+fn like_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        if matches!(c, '%' | '_' | '\\') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// A URL reduced to what identifies a page: scheme and host lowercased, no
+/// fragment, no trailing slash. Used for the `source_url` column and
+/// `pages.find_by_url`.
+pub fn normalize_url(url: &str) -> String {
+    let url = url.trim();
+    let url = url.split('#').next().unwrap_or(url);
+    let (scheme_host, rest) = match url.find("://") {
+        Some(i) => {
+            let after = &url[i + 3..];
+            let end = after.find(['/', '?']).map_or(url.len(), |j| i + 3 + j);
+            (url[..end].to_ascii_lowercase(), &url[end..])
+        }
+        None => (url.to_string(), ""),
+    };
+    let rest = rest.strip_suffix('/').unwrap_or(rest);
+    format!("{scheme_host}{rest}")
 }
 
 /// The note as indexed for search: the page's source tool and prompt, and its
@@ -715,6 +1000,35 @@ fn fts_note(meta: &PageMeta) -> String {
     out
 }
 
+/// The few fields a resource listing needs for one page.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListingRow {
+    pub id: String,
+    pub title: String,
+    pub tags: Vec<String>,
+    pub folder: Option<String>,
+}
+
+impl Store {
+    /// One window of the library in title order (ties by id, so a window is
+    /// stable) without loading the pages' metadata: `limit` rows from `offset`.
+    pub fn listing_window(&self, offset: usize, limit: usize) -> rusqlite::Result<Vec<ListingRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,title,tags,folder FROM pages
+             ORDER BY title COLLATE NOCASE, id LIMIT ?1 OFFSET ?2",
+        )?;
+        stmt.query_map(params![limit as i64, offset as i64], |r| {
+            Ok(ListingRow {
+                id: r.get(0)?,
+                title: r.get(1)?,
+                tags: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(),
+                folder: r.get(3)?,
+            })
+        })?
+        .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -722,6 +1036,7 @@ mod tests {
     fn memory_store() -> Store {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(SCHEMA).unwrap();
+        migrate(&conn).unwrap();
         Store {
             vault: PathBuf::new(),
             conn,
@@ -781,7 +1096,8 @@ mod tests {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch(&format!(
             "CREATE TABLE pages (id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '[]',
-               folder TEXT, text_content TEXT NOT NULL DEFAULT '', interval_days INTEGER);
+               folder TEXT, text_content TEXT NOT NULL DEFAULT '', interval_days INTEGER,
+               created_at INTEGER, next_review INTEGER);
              INSERT INTO pages (id, interval_days) VALUES ('a', 3), ('b', NULL);
              {SCHEMA}"
         ))
@@ -843,25 +1159,30 @@ mod tests {
     }
 
     #[test]
-    fn search_fallback_treats_like_wildcards_as_literal_text() {
+    fn search_matches_by_prefix() {
         let store = memory_store();
-        for (id, title) in [
-            ("literal", "100%_ready\\today"),
-            ("decoy", "100XXready\\today"),
-        ] {
-            let mut meta = PageMeta::new(id.into());
-            meta.title = title.into();
-            store.upsert(&meta, "", 0).unwrap();
-        }
-        store.conn.execute_batch("DROP TABLE pages_fts").unwrap();
+        let mut hit = PageMeta::new("rustacean".into());
+        hit.title = "Rustacean Guide".into();
+        store.upsert(&hit, "the rustacean body text", 0).unwrap();
+        let mut other = PageMeta::new("other".into());
+        other.title = "Unrelated".into();
+        store.upsert(&other, "nothing here", 0).unwrap();
 
+        // A prefix of a token matches, and the full token matches too.
         let ids: Vec<_> = store
-            .search("%_ready\\", 50)
+            .search("rusta", 50)
             .unwrap()
             .into_iter()
             .map(|hit| hit.meta.id)
             .collect();
-        assert_eq!(ids, vec!["literal"]);
+        assert_eq!(ids, vec!["rustacean"]);
+        let ids: Vec<_> = store
+            .search("rustacean", 50)
+            .unwrap()
+            .into_iter()
+            .map(|hit| hit.meta.id)
+            .collect();
+        assert_eq!(ids, vec!["rustacean"]);
     }
 
     #[test]
@@ -918,5 +1239,126 @@ mod tests {
         assert!(text_hit.snippet.is_some(), "snippet present for text match");
         let snip = text_hit.snippet.as_ref().unwrap();
         assert!(snip.contains('[') && snip.contains(']'));
+    }
+
+    #[test]
+    fn find_by_url_matches_normalized_source_url() {
+        let store = memory_store();
+        let mut meta = PageMeta::new("p1".into());
+        meta.title = "Example".into();
+        PageSource::set(
+            &mut meta,
+            Some(PageSource {
+                url: Some("https://Example.com/foo/bar#frag".into()),
+                ..Default::default()
+            }),
+        );
+        store.upsert(&meta, "", 0).unwrap();
+
+        // The stored URL is normalized (lowercased host, no fragment) and
+        // matched exactly on lookup, without scanning `ext` JSON. The caller
+        // (pages.find_by_url) normalizes the query before handing it here.
+        let found = store.find_by_url("https://example.com/foo/bar").unwrap();
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].id, "p1");
+
+        assert!(
+            store
+                .find_by_url("https://example.com/other")
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            store
+                .find_by_url("https://example.com/foo")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn list_filtered_pushes_folder_tag_and_limit_into_sql() {
+        let store = memory_store();
+        for (id, folder, tags) in [
+            ("alpha", None, vec!["rust"]),
+            ("beta", Some("lang"), vec!["web"]),
+            ("gamma", Some("lang"), Vec::<&str>::new()),
+            ("delta", Some("lang/rust"), vec!["rust", "web"]),
+            ("epsilon", Some("lang/rust"), vec!["web"]),
+        ] {
+            let mut m = PageMeta::new(id.into());
+            m.title = id.to_string();
+            m.folder = folder.map(str::to_string);
+            m.tags = tags.into_iter().map(str::to_string).collect();
+            store.upsert(&m, "", 0).unwrap();
+        }
+
+        // A folder includes its subfolders, in `title COLLATE NOCASE` order.
+        let ids: Vec<String> = store
+            .list_filtered(Some("lang"), None, usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec!["beta", "delta", "epsilon", "gamma"]);
+
+        // A tag filters across folders (exact, case-sensitive).
+        let ids: Vec<String> = store
+            .list_filtered(None, Some("web"), usize::MAX)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec!["beta", "delta", "epsilon"]);
+
+        // Folder + tag + limit.
+        let ids: Vec<String> = store
+            .list_filtered(Some("lang"), Some("web"), 2)
+            .unwrap()
+            .into_iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(ids, vec!["beta", "delta"]);
+    }
+
+    #[test]
+    fn batch_updates_meta_atomically() {
+        let store = memory_store();
+        for id in ["a", "b"] {
+            let mut m = PageMeta::new(id.into());
+            m.tags = vec!["old".into()];
+            store.upsert(&m, "", 0).unwrap();
+        }
+
+        store
+            .batch(|tx| {
+                for id in ["a", "b"] {
+                    let mut m = store.get_meta(id).unwrap().unwrap();
+                    m.tags = vec!["new".into()];
+                    m.updated_at = 1;
+                    update_meta_on(tx, &store.vault, &m)?;
+                }
+                Ok::<_, rusqlite::Error>(())
+            })
+            .unwrap();
+        for id in ["a", "b"] {
+            assert_eq!(
+                store.get_meta(id).unwrap().unwrap().tags,
+                vec!["new".to_string()]
+            );
+        }
+
+        // A failing batch rolls every write back.
+        let err: rusqlite::Result<()> = store.batch(|tx| {
+            let mut m = store.get_meta("a").unwrap().unwrap();
+            m.tags = vec!["rolled".into()];
+            update_meta_on(tx, &store.vault, &m)?;
+            Err(rusqlite::Error::InvalidQuery)
+        });
+        assert!(err.is_err());
+        assert_eq!(
+            store.get_meta("a").unwrap().unwrap().tags,
+            vec!["new".to_string()]
+        );
     }
 }

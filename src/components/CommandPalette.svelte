@@ -25,6 +25,7 @@
     openAi,
     switchVault,
   } from "../lib/state.svelte";
+  import { topN } from "../lib/collate";
   import { t, otherLocale, toggleLocale, LOCALES } from "../lib/i18n.svelte";
   import { api } from "../lib/api";
   import { confirmAction } from "../lib/confirm.svelte";
@@ -444,9 +445,7 @@
       ? results.query === query
         ? results.hits
         : []
-      : [...app.library]
-          .sort((a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt))
-          .slice(0, 8);
+      : topN(app.library, 8, (a, b) => (b.updatedAt || b.createdAt) - (a.updatedAt || a.createdAt));
     return source.map((p) => ({
       key: `page-${p.id}`,
       group: t("palette.pages"),

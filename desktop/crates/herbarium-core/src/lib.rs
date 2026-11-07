@@ -8,6 +8,7 @@ pub mod content;
 pub mod extension;
 mod host;
 pub mod importer;
+pub mod lock;
 pub mod models;
 pub mod query;
 pub mod rewrite;
@@ -15,6 +16,6 @@ pub mod store;
 pub mod time;
 pub mod vault;
 
-pub use builtin::{SCRIPT_HOSTS, STYLE_HOSTS, import_key};
+pub use builtin::{SCRIPT_HOSTS, STYLE_HOSTS, import_key, page_storage_value};
 pub use extension::{Caller, Ctx, Event, Extension, OpResult, Operation, Registry, events};
 pub use host::Host;

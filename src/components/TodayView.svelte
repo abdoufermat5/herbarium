@@ -15,10 +15,11 @@
   } from "../lib/state.svelte";
   import { dateFormat, fmtDate, plural, timeAgo } from "../lib/format";
   import { i18n, t, LOCALES, type MessageKey } from "../lib/i18n.svelte";
-  import type { PageMeta, ReviewStats, TodaySummary } from "../lib/types";
+  import type { PageMeta, TodaySummary } from "../lib/types";
   import { vitality, type VitalityLevel } from "../lib/vitality";
   import { pathGrowth, wasCelebrated, markCelebrated } from "../lib/grove";
   import { celebrate } from "../lib/celebrate";
+  import { isTypingTarget } from "../lib/typing";
   import { treeStage, type TreeStage } from "../lib/tree";
   import { reveal } from "../lib/reveal";
   import Icon from "../lib/Icon.svelte";
@@ -28,7 +29,8 @@
   import VitalityLeaf from "./VitalityLeaf.svelte";
 
   let summary = $state<TodaySummary | null>(null);
-  let stats = $state<ReviewStats | null>(null);
+  /** The shared statistics, kept current by the app's refreshes and pushed page events. */
+  const stats = $derived(app.reviewStats);
   let error = $state<string | null>(null);
 
   const now = new Date();
@@ -42,9 +44,7 @@
 
   async function load() {
     try {
-      const [nextSummary, nextStats] = await Promise.all([api.today(), api.reviewStats()]);
-      summary = nextSummary;
-      stats = nextStats;
+      summary = await api.today();
       error = null;
     } catch (e) {
       error = errorMessage(e);
@@ -353,12 +353,6 @@
   }
 
   /* -------------------------------------------------------------- keyboard */
-
-  function isTypingTarget(target: EventTarget | null): boolean {
-    const el = target as HTMLElement | null;
-    if (!el) return false;
-    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
-  }
 
   function onKeydown(e: KeyboardEvent) {
     if (e.key.toLowerCase() !== "r" || e.repeat) return;
