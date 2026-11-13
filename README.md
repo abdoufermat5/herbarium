@@ -170,3 +170,7 @@ Optional channels — Windows code signing, WinGet, Snap and Flatpak — and the
 ## License
 
 [MIT](LICENSE)
+
+## Author
+
+[Abdou Yaya Sadiakhou](https://abdoufermat.dev)
