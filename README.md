@@ -16,6 +16,8 @@ A quiet home for everything AI explains to you. Save the HTML explainers, cheat 
 
 Your pages stay plain `.html` files in a folder you own.
 
+Website: [herbarium.abdoufermat.dev](https://herbarium.abdoufermat.dev)
+
 AI gives you a beautiful explainer for exactly the thing you were trying to understand — then the conversation scrolls away. Herbarium is where those pages live afterwards: a private local library that opens them with their interactivity intact and keeps the ones that matter in your memory.
 
 ![Herbarium: grow a reading-path tree, filter the library, highlight a passage, remix a page with AI, quiz yourself, explore the graph, then finish a review session](docs/demo.gif)

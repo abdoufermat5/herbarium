@@ -33,7 +33,8 @@
 
   <launchable type="desktop-id">io.github.abdoufermat5.Herbarium.desktop</launchable>
 
-  <url type="homepage">https://github.com/abdoufermat5/herbarium</url>
+  <url type="homepage">https://herbarium.abdoufermat.dev</url>
+  <url type="vcs-browser">https://github.com/abdoufermat5/herbarium</url>
   <url type="bugtracker">https://github.com/abdoufermat5/herbarium/issues</url>
 
   <!-- The icon's two backgrounds (docs/brand/icon-*.svg). -->

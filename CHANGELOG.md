@@ -5,6 +5,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Added
+- Project website at [herbarium.abdoufermat.dev](https://herbarium.abdoufermat.dev), linked from the README and set as the homepage in the Flatpak metainfo, the Snap Store listing and the browser extension.
+
 ## [0.7.0] - 2026-11-07
 
 ### Added
